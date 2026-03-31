@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -11,7 +10,6 @@ import { Input, Select } from '@/components/ui/Input';
 import { formatDate } from '@/lib/utils';
 import { Search, Save, Trash2 } from 'lucide-react';
 import type { Profile, UserRole } from '@/lib/types/database';
-
 export default function AdminMembersPage() {
   const supabase = createClient();
   const [members, setMembers] = useState<Profile[]>([]);
@@ -20,7 +18,6 @@ export default function AdminMembersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRoles, setEditRoles] = useState<{ [key: string]: UserRole }>({});
-
   useEffect(() => {
     const loadMembers = async () => {
       try {
@@ -28,7 +25,6 @@ export default function AdminMembersPage() {
           .from('profiles')
           .select('*')
           .order('created_at', { ascending: false });
-
         if (data) {
           setMembers(data);
           setFilteredMembers(data);
@@ -39,10 +35,8 @@ export default function AdminMembersPage() {
         setLoading(false);
       }
     };
-
     loadMembers();
   }, [supabase]);
-
   useEffect(() => {
     const filtered = members.filter((m) =>
       m.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -50,25 +44,21 @@ export default function AdminMembersPage() {
     );
     setFilteredMembers(filtered);
   }, [searchTerm, members]);
-
   const handleRoleChange = (id: string, role: UserRole) => {
     setEditRoles((prev) => ({
       ...prev,
       [id]: role,
     }));
   };
-
   const handleSaveRole = async (id: string) => {
     const newRole = editRoles[id];
     if (!newRole) return;
-
     try {
       // Supabase type system requires using a workaround for the role field
       // In production, this would use a stored procedure or custom endpoint
       const db = supabase.from('profiles');
       // Perform update on the database
       await db.update({ role: newRole } as any).eq('id', id);
-
       setMembers(
         members.map((m) =>
           m.id === id ? { ...m, role: newRole } : m
@@ -84,10 +74,8 @@ export default function AdminMembersPage() {
       console.error('Failed to update role:', err);
     }
   };
-
   const handleDelete = async (id: string) => {
     if (!window.confirm('Are you sure you want to remove this member?')) return;
-
     try {
       await supabase.from('profiles').delete().eq('id', id);
       setMembers(members.filter((m) => m.id !== id));
@@ -95,7 +83,6 @@ export default function AdminMembersPage() {
       console.error('Failed to delete member:', err);
     }
   };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -103,7 +90,6 @@ export default function AdminMembersPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -113,7 +99,6 @@ export default function AdminMembersPage() {
           Total members: <strong>{members.length}</strong>
         </p>
       </div>
-
       {/* Search */}
       <Card>
         <CardContent className="pt-6">
@@ -129,7 +114,6 @@ export default function AdminMembersPage() {
           </div>
         </CardContent>
       </Card>
-
       {/* Members Table */}
       {filteredMembers.length > 0 ? (
         <Card>

@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -10,7 +9,6 @@ import { formatCurrency } from '@/lib/utils';
 import { Upload, Check, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Trip } from '@/lib/types/database';
-
 interface PaymentData {
   user_id: string;
   description: string;
@@ -18,7 +16,6 @@ interface PaymentData {
   due_date?: string;
   status: 'pending' | 'paid' | 'overdue' | 'waived';
 }
-
 export default function AdminPaymentsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -29,7 +26,6 @@ export default function AdminPaymentsPage() {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-
   useEffect(() => {
     const loadTrips = async () => {
       try {
@@ -37,7 +33,6 @@ export default function AdminPaymentsPage() {
           .from('trips')
           .select('*')
           .order('start_date', { ascending: false });
-
         if (tripsData) {
           setTrips(tripsData);
         }
@@ -47,26 +42,21 @@ export default function AdminPaymentsPage() {
         setLoading(false);
       }
     };
-
     loadTrips();
   }, [supabase]);
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
-
     setFile(selectedFile);
     setData([]);
     setError('');
     setMessage('');
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const workbook = XLSX.read(event.target?.result, { type: 'binary' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rawData = XLSX.utils.sheet_to_json(worksheet);
-
         const parsedData = rawData.map((row: any) => ({
           user_id: row.user_id || row.userId || '',
           description: row.description || row.Description || '',
@@ -78,7 +68,6 @@ export default function AdminPaymentsPage() {
             | 'overdue'
             | 'waived',
         }));
-
         setData(parsedData);
         setMessage(`Loaded ${parsedData.length} payment records`);
       } catch (err) {
@@ -87,17 +76,14 @@ export default function AdminPaymentsPage() {
     };
     reader.readAsBinaryString(selectedFile);
   };
-
   const handleUpload = async () => {
     if (!selectedTripId || data.length === 0) {
       setError('Please select a trip and upload a file');
       return;
     }
-
     setUploading(true);
     setError('');
     setMessage('');
-
     try {
       const paymentsToInsert = data.map((item) => ({
         trip_id: selectedTripId,
@@ -108,18 +94,14 @@ export default function AdminPaymentsPage() {
         status: item.status,
         paid_date: item.status === 'paid' ? new Date().toISOString() : null,
       }));
-
       const { error: insertError } = await supabase
         .from('payments')
         .insert(paymentsToInsert);
-
       if (insertError) throw insertError;
-
       setMessage(`Successfully imported ${paymentsToInsert.length} payments`);
       setFile(null);
       setData([]);
       setSelectedTripId('');
-
       // Reset file input
       const input = document.querySelector(
         'input[type="file"]'
@@ -131,7 +113,6 @@ export default function AdminPaymentsPage() {
       setUploading(false);
     }
   };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -139,7 +120,6 @@ export default function AdminPaymentsPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -147,7 +127,6 @@ export default function AdminPaymentsPage() {
         <h1 className="text-3xl font-bold text-brand-cream mb-2">Payment Upload</h1>
         <p className="text-brand-cream/70">Import payment data from Excel spreadsheet</p>
       </div>
-
       {/* Upload Form */}
       <Card>
         <CardHeader>
@@ -175,7 +154,6 @@ export default function AdminPaymentsPage() {
               All payments will be assigned to this trip
             </p>
           </div>
-
           {/* File Upload */}
           <div>
             <label className="block text-sm font-medium text-brand-cream mb-2">
@@ -205,7 +183,6 @@ export default function AdminPaymentsPage() {
               </label>
             </div>
           </div>
-
           {/* Messages */}
           {error && (
             <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-red-100 text-sm flex items-start gap-3">
@@ -213,14 +190,12 @@ export default function AdminPaymentsPage() {
               <div>{error}</div>
             </div>
           )}
-
           {message && (
             <div className="p-4 bg-green-900/20 border border-green-500/30 rounded-lg text-green-100 text-sm flex items-start gap-3">
               <Check className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>{message}</div>
             </div>
           )}
-
           {/* Upload Button */}
           <div className="flex gap-4 pt-4">
             <Button
@@ -235,7 +210,6 @@ export default function AdminPaymentsPage() {
           </div>
         </CardContent>
       </Card>
-
       {/* Preview */}
       {data.length > 0 && (
         <Card>
@@ -281,7 +255,6 @@ export default function AdminPaymentsPage() {
           </CardContent>
         </Card>
       )}
-
       {/* Instructions */}
       <Card>
         <CardHeader>

@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -7,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import { BarChart3, Users, Bike, DollarSign } from 'lucide-react';
-
 export default function AdminDashboardPage() {
   const supabase = createClient();
   const [stats, setStats] = useState({
@@ -17,7 +15,6 @@ export default function AdminDashboardPage() {
     upcomingTrips: 0,
   });
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -25,24 +22,20 @@ export default function AdminDashboardPage() {
         const { count: tripCount } = await supabase
           .from('trips')
           .select('*', { count: 'exact', head: true });
-
         // Get member count
         const { count: memberCount } = await supabase
           .from('profiles')
           .select('*', { count: 'exact', head: true });
-
         // Get pending payments count
         const { count: pendingCount } = await supabase
           .from('payments')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'pending');
-
         // Get upcoming trips count
         const { count: upcomingCount } = await supabase
           .from('trips')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'upcoming');
-
         setStats({
           totalTrips: tripCount || 0,
           totalMembers: memberCount || 0,
@@ -55,10 +48,8 @@ export default function AdminDashboardPage() {
         setLoading(false);
       }
     };
-
     loadStats();
   }, [supabase]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -66,7 +57,6 @@ export default function AdminDashboardPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -74,7 +64,6 @@ export default function AdminDashboardPage() {
         <h1 className="text-4xl font-bold text-brand-cream mb-2">Admin Dashboard</h1>
         <p className="text-brand-cream/70">Manage Whiskey Riders</p>
       </div>
-
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -90,7 +79,6 @@ export default function AdminDashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -104,7 +92,6 @@ export default function AdminDashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -118,7 +105,6 @@ export default function AdminDashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -133,7 +119,6 @@ export default function AdminDashboardPage() {
           </CardContent>
         </Card>
       </div>
-
       {/* Quick Actions */}
       <div>
         <h2 className="text-2xl font-bold text-brand-cream mb-4">Quick Actions</h2>
@@ -160,7 +145,6 @@ export default function AdminDashboardPage() {
           </Link>
         </div>
       </div>
-
       {/* Recent Activity */}
       <Card>
         <CardHeader>

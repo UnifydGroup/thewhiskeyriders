@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -10,12 +9,10 @@ import { formatDate, formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 import { Edit2, Trash2, Plus } from 'lucide-react';
 import type { Trip } from '@/lib/types/database';
-
 export default function AdminTripsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadTrips = async () => {
       try {
@@ -23,7 +20,6 @@ export default function AdminTripsPage() {
           .from('trips')
           .select('*')
           .order('start_date', { ascending: false });
-
         if (data) {
           setTrips(data);
         }
@@ -33,13 +29,10 @@ export default function AdminTripsPage() {
         setLoading(false);
       }
     };
-
     loadTrips();
   }, [supabase]);
-
   const handleDelete = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this trip?')) return;
-
     try {
       await supabase.from('trips').delete().eq('id', id);
       setTrips(trips.filter((t) => t.id !== id));
@@ -47,7 +40,6 @@ export default function AdminTripsPage() {
       console.error('Failed to delete trip:', err);
     }
   };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -55,7 +47,6 @@ export default function AdminTripsPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -71,7 +62,6 @@ export default function AdminTripsPage() {
           </Button>
         </Link>
       </div>
-
       {/* Trips Table */}
       {trips.length > 0 ? (
         <Card>

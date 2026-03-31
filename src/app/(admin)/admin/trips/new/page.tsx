@@ -1,5 +1,4 @@
 'use client';
-
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -8,11 +7,9 @@ import { Button } from '@/components/ui/Button';
 import { Input, TextArea, Select } from '@/components/ui/Input';
 import { slugify } from '@/lib/utils';
 import Link from 'next/link';
-
 export default function NewTripPage() {
   const router = useRouter();
   const supabase = createClient();
-
   const [formData, setFormData] = useState({
     name: '',
     destination: '',
@@ -25,7 +22,6 @@ export default function NewTripPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-
   const handleChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
@@ -37,18 +33,14 @@ export default function NewTripPage() {
       [name]: value,
     }));
   };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-
       const slug = slugify(formData.name);
-
       const { error: insertError } = await supabase
         .from('trips')
         .insert({
@@ -63,9 +55,7 @@ export default function NewTripPage() {
           max_members: formData.max_members ? parseInt(formData.max_members) : null,
           created_by: user.id,
         });
-
       if (insertError) throw insertError;
-
       router.push('/admin/trips');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create trip');
@@ -73,7 +63,6 @@ export default function NewTripPage() {
       setIsLoading(false);
     }
   };
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -84,7 +73,6 @@ export default function NewTripPage() {
         <h1 className="text-3xl font-bold text-brand-cream mb-2">Create New Trip</h1>
         <p className="text-brand-cream/70">Add a new motorcycle adventure</p>
       </div>
-
       {/* Form */}
       <Card>
         <CardHeader>
@@ -97,7 +85,6 @@ export default function NewTripPage() {
                 {error}
               </div>
             )}
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
@@ -113,7 +100,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Country *
@@ -128,7 +114,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Destination *
@@ -143,7 +128,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Max Members
@@ -157,7 +141,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Start Date *
@@ -171,7 +154,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   End Date *
@@ -185,7 +167,6 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Status
@@ -203,7 +184,6 @@ export default function NewTripPage() {
                 </Select>
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-brand-cream mb-2">
                 Description
@@ -217,7 +197,6 @@ export default function NewTripPage() {
                 disabled={isLoading}
               />
             </div>
-
             {/* Actions */}
             <div className="flex gap-4 pt-4 border-t border-brand-brown/20">
               <Button

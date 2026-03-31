@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -8,41 +7,34 @@ import { Spinner } from '@/components/ui/Spinner';
 import { formatDate, formatDateShort } from '@/lib/utils';
 import { Users, MapPin, Camera, Trophy } from 'lucide-react';
 import type { Profile, Trip, TripMember } from '@/lib/types/database';
-
 export default function DashboardPage() {
   const supabase = createClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [tripMembers, setTripMembers] = useState<TripMember[]>([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadData = async () => {
       try {
         // Get current user
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-
         // Get profile
         const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
           .single();
-
         if (profileData) {
           setProfile(profileData);
         }
-
         // Get trips user is part of
         const { data: membersData } = await supabase
           .from('trip_members')
           .select('*')
           .eq('user_id', user.id);
-
         if (membersData) {
           setTripMembers(membersData);
-
           // Get trip details
           const tripIds = membersData.map((m) => m.trip_id);
           if (tripIds.length > 0) {
@@ -51,7 +43,6 @@ export default function DashboardPage() {
               .select('*')
               .in('id', tripIds)
               .order('start_date', { ascending: false });
-
             if (tripsData) {
               setTrips(tripsData);
             }
@@ -63,10 +54,8 @@ export default function DashboardPage() {
         setLoading(false);
       }
     };
-
     loadData();
   }, [supabase]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -74,10 +63,8 @@ export default function DashboardPage() {
       </div>
     );
   }
-
   const upcomingTrips = trips.filter((t) => t.status === 'upcoming').slice(0, 1);
   const completedTrips = trips.filter((t) => t.status === 'completed').length;
-
   return (
     <div className="space-y-8">
       {/* Welcome */}
@@ -91,7 +78,6 @@ export default function DashboardPage() {
             : 'Your adventure dashboard'}
         </p>
       </div>
-
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -107,7 +93,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -121,7 +106,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -135,7 +119,6 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
@@ -150,7 +133,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
       {/* Upcoming Trip */}
       {upcomingTrips.length > 0 && (
         <Card hoverable>
@@ -180,7 +162,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
-
       {/* Your Trips */}
       {trips.length > 0 && (
         <div>
@@ -207,7 +188,6 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-
       {/* Empty state */}
       {trips.length === 0 && (
         <Card>

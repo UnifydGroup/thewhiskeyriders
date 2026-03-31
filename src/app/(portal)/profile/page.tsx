@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -9,24 +8,20 @@ import { Avatar } from '@/components/ui/Avatar';
 import { formatDate } from '@/lib/utils';
 import { Mail, Phone, AlertCircle } from 'lucide-react';
 import type { Profile } from '@/lib/types/database';
-
 export default function ProfilePage() {
   const supabase = createClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadProfile = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-
         const { data } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
           .single();
-
         if (data) {
           setProfile(data);
         }
@@ -36,10 +31,8 @@ export default function ProfilePage() {
         setLoading(false);
       }
     };
-
     loadProfile();
   }, [supabase]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -47,7 +40,6 @@ export default function ProfilePage() {
       </div>
     );
   }
-
   if (!profile) {
     return (
       <div className="space-y-4">
@@ -60,13 +52,11 @@ export default function ProfilePage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Profile Header */}
       <div className="space-y-4">
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream">My Profile</h1>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row gap-6">
@@ -105,7 +95,6 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
       </div>
-
       {/* Contact Info */}
       <div>
         <h2 className="text-2xl font-bold text-brand-cream mb-4">Contact Information</h2>
@@ -118,7 +107,6 @@ export default function ProfilePage() {
               <p className="text-brand-cream/70">{profile.email}</p>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Phone</CardTitle>
@@ -129,7 +117,6 @@ export default function ProfilePage() {
               </p>
             </CardContent>
           </Card>
-
           {profile.emergency_contact && (
             <Card>
               <CardHeader>
@@ -145,7 +132,6 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
-
       {/* Badges Section */}
       <div>
         <h2 className="text-2xl font-bold text-brand-cream mb-4">Achievements</h2>

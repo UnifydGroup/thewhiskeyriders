@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -9,12 +8,10 @@ import { formatDate, formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 import { MapPin, Users } from 'lucide-react';
 import type { Trip } from '@/lib/types/database';
-
 export default function TripsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadTrips = async () => {
       try {
@@ -22,7 +19,6 @@ export default function TripsPage() {
           .from('trips')
           .select('*')
           .order('start_date', { ascending: false });
-
         if (data) {
           setTrips(data);
         }
@@ -32,10 +28,8 @@ export default function TripsPage() {
         setLoading(false);
       }
     };
-
     loadTrips();
   }, [supabase]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -43,11 +37,9 @@ export default function TripsPage() {
       </div>
     );
   }
-
   const upcomingTrips = trips.filter((t) => t.status === 'upcoming');
   const activeTrips = trips.filter((t) => t.status === 'active');
   const completedTrips = trips.filter((t) => t.status === 'completed');
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -55,7 +47,6 @@ export default function TripsPage() {
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Adventures</h1>
         <p className="text-brand-cream/70">Explore upcoming motorcycle adventures</p>
       </div>
-
       {/* Upcoming Trips */}
       {upcomingTrips.length > 0 && (
         <div>
@@ -67,7 +58,6 @@ export default function TripsPage() {
           </div>
         </div>
       )}
-
       {/* Active Trips */}
       {activeTrips.length > 0 && (
         <div>
@@ -79,7 +69,6 @@ export default function TripsPage() {
           </div>
         </div>
       )}
-
       {/* Completed Trips */}
       {completedTrips.length > 0 && (
         <div>
@@ -91,7 +80,6 @@ export default function TripsPage() {
           </div>
         </div>
       )}
-
       {/* Empty state */}
       {trips.length === 0 && (
         <Card>
@@ -106,7 +94,6 @@ export default function TripsPage() {
     </div>
   );
 }
-
 function TripCard({ trip }: { trip: Trip }) {
   return (
     <Link href={`/trips/${trip.slug}`}>
@@ -125,7 +112,6 @@ function TripCard({ trip }: { trip: Trip }) {
             <Badge variant="primary">{trip.status}</Badge>
           </div>
         </div>
-
         <CardHeader className="pt-4">
           <CardTitle className="line-clamp-2">{trip.name}</CardTitle>
           <CardDescription className="flex items-center gap-1 mt-1">
@@ -133,7 +119,6 @@ function TripCard({ trip }: { trip: Trip }) {
             {trip.destination}, {trip.country}
           </CardDescription>
         </CardHeader>
-
         <CardContent className="flex-1">
           <p className="text-sm text-brand-cream/70 mb-3">
             {formatDateShort(trip.start_date)} - {formatDateShort(trip.end_date)}
@@ -144,7 +129,6 @@ function TripCard({ trip }: { trip: Trip }) {
             </p>
           )}
         </CardContent>
-
         {trip.max_members && (
           <div className="px-6 pb-4 flex items-center gap-2 text-sm text-brand-cream/70">
             <Users className="w-4 h-4" />

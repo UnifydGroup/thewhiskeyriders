@@ -1,17 +1,14 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import type { Trip } from '@/lib/types/database';
-
 export default function GalleryPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadTrips = async () => {
       try {
@@ -19,7 +16,6 @@ export default function GalleryPage() {
           .from('trips')
           .select('*')
           .order('start_date', { ascending: false });
-
         if (data) {
           setTrips(data);
         }
@@ -29,10 +25,8 @@ export default function GalleryPage() {
         setLoading(false);
       }
     };
-
     loadTrips();
   }, [supabase]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -40,7 +34,6 @@ export default function GalleryPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -48,7 +41,6 @@ export default function GalleryPage() {
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Gallery</h1>
         <p className="text-brand-cream/70">Memories from our adventures</p>
       </div>
-
       {/* Trip Galleries */}
       {trips.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -68,12 +60,10 @@ export default function GalleryPage() {
                   )}
                   <div className="absolute inset-0 bg-brand-black/40" />
                 </div>
-
                 <CardHeader className="pt-4">
                   <CardTitle className="line-clamp-1">{trip.name}</CardTitle>
                   <CardDescription>{trip.destination}</CardDescription>
                 </CardHeader>
-
                 <CardContent>
                   <p className="text-sm text-brand-cream/60">
                     Photos from this adventure
