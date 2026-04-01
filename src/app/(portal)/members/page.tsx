@@ -79,6 +79,15 @@ type MemberSummary = {
   adventureScore: number;
 };
 
+const SORT_OPTIONS = [
+  { value: 'adventure-score', label: 'Adventure score' },
+  { value: 'name', label: 'Name' },
+  { value: 'trip-count', label: 'Number of trips' },
+] as const;
+
+type MemberSort = (typeof SORT_OPTIONS)[number]['value'];
+type SortDirection = 'asc' | 'desc';
+
 function buildFullName(profile: MemberProfile): string {
   const assembled = [profile.first_name, profile.middle_name, profile.surname]
     .filter(Boolean)
@@ -107,6 +116,8 @@ export default function MembersPage() {
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<MemberSort>('adventure-score');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   useEffect(() => {
     const loadMembers = async () => {
@@ -205,6 +216,7 @@ export default function MembersPage() {
 
   const filteredMembers = useMemo(() => {
     const searchText = search.trim().toLowerCase();
+    const directionFactor = sortDirection === 'asc' ? 1 : -1;
 
     return members
       .filter((member) => {
@@ -223,11 +235,22 @@ export default function MembersPage() {
         return searchable.includes(searchText);
       })
       .sort((a, b) => {
+        let primaryComparison = 0;
+
+        if (sortBy === 'name') {
+          primaryComparison = buildFullName(a.profile).localeCompare(buildFullName(b.profile)) * directionFactor;
+        } else if (sortBy === 'trip-count') {
+          primaryComparison = (a.trips.length - b.trips.length) * directionFactor;
+        } else {
+          primaryComparison = (a.adventureScore - b.adventureScore) * directionFactor;
+        }
+
+        if (primaryComparison !== 0) return primaryComparison;
+
         if (b.adventureScore !== a.adventureScore) return b.adventureScore - a.adventureScore;
-        if (b.badges.length !== a.badges.length) return b.badges.length - a.badges.length;
         return a.displayName.localeCompare(b.displayName);
       });
-  }, [members, search]);
+  }, [members, search, sortBy, sortDirection]);
 
   const stats = useMemo(() => {
     const memberCount = members.length;
@@ -303,6 +326,39 @@ export default function MembersPage() {
               placeholder="Search riders, trips, countries, badges..."
               className="w-full rounded-lg border border-brand-brown/25 bg-brand-black/45 py-2.5 pl-10 pr-4 text-sm text-brand-cream placeholder:text-brand-cream/45 focus:border-brand-brown focus:outline-none focus:ring-2 focus:ring-brand-brown/20"
             />
+          </div>
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto">
+            <div>
+              <label htmlFor="members-sort" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                Sort by
+              </label>
+              <select
+                id="members-sort"
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value as MemberSort)}
+                className="w-full rounded-lg border border-brand-brown/25 bg-brand-black/45 px-3 py-2.5 text-sm text-brand-cream focus:border-brand-brown focus:outline-none focus:ring-2 focus:ring-brand-brown/20"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} className="bg-brand-dark-grey text-brand-cream">
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="members-sort-direction" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                Order
+              </label>
+              <select
+                id="members-sort-direction"
+                value={sortDirection}
+                onChange={(event) => setSortDirection(event.target.value as SortDirection)}
+                className="w-full rounded-lg border border-brand-brown/25 bg-brand-black/45 px-3 py-2.5 text-sm text-brand-cream focus:border-brand-brown focus:outline-none focus:ring-2 focus:ring-brand-brown/20"
+              >
+                <option value="asc" className="bg-brand-dark-grey text-brand-cream">Ascending</option>
+                <option value="desc" className="bg-brand-dark-grey text-brand-cream">Descending</option>
+              </select>
+            </div>
           </div>
         </div>
 

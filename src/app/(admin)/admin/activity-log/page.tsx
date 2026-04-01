@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/admin/DataTable';
 import { Activity, Download, Search, Clock } from 'lucide-react';
@@ -80,6 +79,18 @@ function getString(change: Record<string, unknown> | null, key: string): string 
   return typeof value === 'string' ? value : null;
 }
 
+function toUniqueSorted(values: Array<string | null | undefined>, limit = 12): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => (value || '').trim())
+        .filter((value) => value.length > 0)
+    )
+  )
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, limit);
+}
+
 export default function ActivityLogPage() {
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -142,6 +153,42 @@ export default function ActivityLogPage() {
 
   const actionOptions = useMemo(() => {
     return Array.from(new Set(activities.map((activity) => activity.action))).sort();
+  }, [activities]);
+
+  const quickPeople = useMemo(() => {
+    return toUniqueSorted(
+      activities.flatMap((activity) => [activity.user?.full_name, activity.user?.email]),
+      10
+    );
+  }, [activities]);
+
+  const quickEntities = useMemo(() => {
+    return toUniqueSorted(
+      activities.flatMap((activity) => [activity.entity_name, activity.entity_type, activity.entity_id]),
+      12
+    );
+  }, [activities]);
+
+  const quickIps = useMemo(() => {
+    return toUniqueSorted(activities.map((activity) => activity.ip_address), 8);
+  }, [activities]);
+
+  const searchSuggestions = useMemo(() => {
+    return toUniqueSorted(
+      activities.flatMap((activity) => [
+        activity.user?.full_name,
+        activity.user?.email,
+        activity.user_id,
+        activity.entity_type,
+        activity.entity_name,
+        activity.entity_id,
+        activity.ip_address,
+        activity.action,
+        getString(activity.changes, 'path'),
+        getString(activity.changes, 'href'),
+      ]),
+      200
+    );
   }, [activities]);
 
   const filteredActivities = useMemo(() => {
@@ -334,13 +381,19 @@ export default function ActivityLogPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="relative md:col-span-2">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-cream/50" />
-            <Input
+            <input
               type="text"
-              placeholder="Search users, entities, IP, or metadata..."
+              list="activity-search-suggestions"
+              placeholder="Search users, entities, IP, action, path..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="pl-10"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 pl-10 text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
+            <datalist id="activity-search-suggestions">
+              {searchSuggestions.map((suggestion) => (
+                <option key={suggestion} value={suggestion} />
+              ))}
+            </datalist>
           </div>
           <select
             value={actionFilter}
@@ -365,6 +418,70 @@ export default function ActivityLogPage() {
             <option value="month">This Month</option>
           </select>
         </div>
+
+        {(quickPeople.length > 0 || quickEntities.length > 0 || quickIps.length > 0) && (
+          <div className="mt-4 space-y-3">
+            {quickPeople.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                  People
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {quickPeople.map((person) => (
+                    <button
+                      key={`person-${person}`}
+                      type="button"
+                      onClick={() => setSearchQuery(person)}
+                      className="rounded border border-brand-brown/30 bg-brand-brown/10 px-2 py-1 text-xs text-brand-cream/90 transition-colors hover:bg-brand-brown/20"
+                    >
+                      {person}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {quickEntities.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                  Entities
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {quickEntities.map((entity) => (
+                    <button
+                      key={`entity-${entity}`}
+                      type="button"
+                      onClick={() => setSearchQuery(entity)}
+                      className="rounded border border-indigo-400/30 bg-indigo-900/20 px-2 py-1 text-xs text-indigo-100 transition-colors hover:bg-indigo-900/35"
+                    >
+                      {entity}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {quickIps.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                  IP Addresses
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {quickIps.map((ip) => (
+                    <button
+                      key={`ip-${ip}`}
+                      type="button"
+                      onClick={() => setSearchQuery(ip)}
+                      className="rounded border border-cyan-400/30 bg-cyan-900/20 px-2 py-1 font-mono text-xs text-cyan-100 transition-colors hover:bg-cyan-900/35"
+                    >
+                      {ip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card>
