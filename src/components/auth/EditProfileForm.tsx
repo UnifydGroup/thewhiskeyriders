@@ -615,4 +615,6 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
         </form>
 
         {/* Crop Image Modal */}
-        {cropModalOpen && imageToCrop && (
+      </div>
+    );
+  }
