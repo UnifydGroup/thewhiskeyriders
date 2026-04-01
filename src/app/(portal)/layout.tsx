@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { TopBar } from '@/components/layout/TopBar';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Footer } from '@/components/layout/Footer';
+import { trackClientActivity } from '@/lib/activity/client';
 import { useEffect } from 'react';
 
 export default function PortalLayout({
@@ -36,9 +37,20 @@ export default function PortalLayout({
       }
     };
     checkAuth();
-  }, [router, supabase.auth]);
+  }, [router, supabase]);
 
   const handleLogout = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    await trackClientActivity({
+      action: 'logout',
+      entityType: 'auth',
+      entityId: 'session',
+      entityName: 'Signed out from member portal',
+      changes: {
+        path: window.location.pathname,
+      },
+      accessToken: sessionData.session?.access_token,
+    });
     await supabase.auth.signOut();
     router.push('/');
   };

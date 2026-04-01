@@ -120,6 +120,7 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.start_date !== undefined) updateData.start_date = body.start_date;
     if (body.end_date !== undefined) updateData.end_date = body.end_date;
     if (body.description !== undefined) updateData.description = body.description;
+    if (body.itinerary !== undefined) updateData.itinerary = body.itinerary || null;
     if (body.cover_image_url !== undefined) updateData.cover_image_url = body.cover_image_url;
     if (body.status !== undefined) updateData.status = body.status;
     if (body.max_members !== undefined) updateData.max_members = body.max_members;

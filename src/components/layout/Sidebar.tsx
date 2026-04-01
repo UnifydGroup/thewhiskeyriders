@@ -26,6 +26,7 @@ interface SidebarProps {
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/trips', label: 'Trips', icon: Bike },
+  { href: '/members', label: 'Members', icon: Users },
   { href: '/profile', label: 'Profile', icon: User },
   { href: '/gallery', label: 'Gallery', icon: Image },
 ];

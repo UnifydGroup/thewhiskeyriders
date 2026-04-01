@@ -260,6 +260,18 @@ export default function TripDetailPage() {
       {/* Overview Tab */}
       {tab === 'overview' && (
         <div className="space-y-8">
+          {/* Schedule / Itinerary */}
+          {trip.itinerary && (
+            <div>
+              <h2 className="text-2xl font-bold text-brand-cream mb-4">Schedule & Itinerary</h2>
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-brand-cream/80 whitespace-pre-wrap">{trip.itinerary}</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {/* Key Dates */}
           {keyDates.length > 0 && (
             <div>

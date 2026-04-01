@@ -382,18 +382,19 @@ export type SupabaseDatabase = {
         ];
       };
       trips: {
-        Row: { country: string; cover_image_url: string | null; created_at: string | null; created_by: string | null; description: string | null; destination: string; end_date: string; id: string; max_members: number | null; name: string; slug: string; start_date: string; status: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at: string | null };
-        Insert: { country: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination: string; end_date: string; id?: string; max_members?: number | null; name: string; slug: string; start_date: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
-        Update: { country?: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination?: string; end_date?: string; id?: string; max_members?: number | null; name?: string; slug?: string; start_date?: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
+        Row: { country: string; cover_image_url: string | null; created_at: string | null; created_by: string | null; description: string | null; destination: string; end_date: string; id: string; itinerary: string | null; max_members: number | null; name: string; slug: string; start_date: string; status: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at: string | null };
+        Insert: { country: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination: string; end_date: string; id?: string; itinerary?: string | null; max_members?: number | null; name: string; slug: string; start_date: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
+        Update: { country?: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination?: string; end_date?: string; id?: string; itinerary?: string | null; max_members?: number | null; name?: string; slug?: string; start_date?: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
         Relationships: [{ foreignKeyName: 'trips_created_by_fkey'; columns: ['created_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }];
       };
       user_badges: {
-        Row: { awarded_at: string | null; awarded_by: string | null; badge_id: string; id: string; user_id: string };
-        Insert: { awarded_at?: string | null; awarded_by?: string | null; badge_id: string; id?: string; user_id: string };
-        Update: { awarded_at?: string | null; awarded_by?: string | null; badge_id?: string; id?: string; user_id?: string };
+        Row: { awarded_at: string | null; awarded_by: string | null; badge_id: string; id: string; trip_id: string; user_id: string };
+        Insert: { awarded_at?: string | null; awarded_by?: string | null; badge_id: string; id?: string; trip_id: string; user_id: string };
+        Update: { awarded_at?: string | null; awarded_by?: string | null; badge_id?: string; id?: string; trip_id?: string; user_id?: string };
         Relationships: [
           { foreignKeyName: 'user_badges_awarded_by_fkey'; columns: ['awarded_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
           { foreignKeyName: 'user_badges_badge_id_fkey'; columns: ['badge_id']; isOneToOne: false; referencedRelation: 'badges'; referencedColumns: ['id'] },
+          { foreignKeyName: 'user_badges_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] },
           { foreignKeyName: 'user_badges_user_id_fkey'; columns: ['user_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }
         ];
       };
@@ -408,9 +409,39 @@ export type SupabaseDatabase = {
         ];
       };
       site_settings: {
-        Row: { id: string; logo_url: string; background_image_url: string; updated_by: string; updated_at: string };
-        Insert: { id?: string; logo_url: string; background_image_url: string; updated_by: string; updated_at?: string };
-        Update: { id?: string; logo_url?: string; background_image_url?: string; updated_by?: string; updated_at?: string };
+        Row: {
+          id: string;
+          logo_url: string;
+          background_image_url: string;
+          background_position_x: number;
+          background_position_y: number;
+          background_zoom: number;
+          background_opacity: number;
+          updated_by: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          logo_url: string;
+          background_image_url: string;
+          background_position_x?: number;
+          background_position_y?: number;
+          background_zoom?: number;
+          background_opacity?: number;
+          updated_by: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          logo_url?: string;
+          background_image_url?: string;
+          background_position_x?: number;
+          background_position_y?: number;
+          background_zoom?: number;
+          background_opacity?: number;
+          updated_by?: string;
+          updated_at?: string;
+        };
         Relationships: [];
       };
       activity_logs: {

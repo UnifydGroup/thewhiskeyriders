@@ -113,6 +113,7 @@ export async function POST(request: NextRequest) {
       start_date: body.start_date,
       end_date: body.end_date,
       description: body.description || null,
+      itinerary: body.itinerary || null,
       cover_image_url: body.cover_image_url || null,
       status: body.status || 'upcoming',
       max_members: body.max_members || null,

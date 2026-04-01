@@ -42,7 +42,7 @@ A private members portal for the Whiskey Riders motorcycle adventure group, buil
 - `src/app/(auth)/layout.tsx` - Auth pages layout
 - `src/app/(auth)/login/page.tsx` - Login page
 - `src/app/(auth)/auth/callback/route.ts` - OAuth callback handler
-- `src/components/auth/LoginForm.tsx` - Login form (magic link + password)
+- `src/components/auth/LoginForm.tsx` - Login form (email + password)
 
 ### Member Portal
 - `src/app/(portal)/layout.tsx` - Portal layout with sidebar and topbar
@@ -150,7 +150,7 @@ All tables are fully typed in `src/lib/types/database.ts`:
 - Client-side auth check in portal layout
 - Protected routes via middleware
 - Role-based access control for admin
-- Password-based and magic link auth options
+- Email/password authentication
 - No sensitive data in URLs
 
 ## Production Ready

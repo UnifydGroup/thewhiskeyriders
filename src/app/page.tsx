@@ -1,24 +1,36 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
 async function getSiteSettings() {
   try {
     const supabase = await createClient();
     
     const { data } = await supabase
       .from('site_settings')
-      .select('*')
+      .select(
+        'logo_url, background_image_url, background_position_x, background_position_y, background_zoom, background_opacity'
+      )
       .single();
     
     return {
       logoUrl: data?.logo_url || '/3.png',
       backgroundImageUrl: data?.background_image_url || '/swirl-bg.svg',
+      backgroundPositionX: clamp(data?.background_position_x ?? 50, 0, 100),
+      backgroundPositionY: clamp(data?.background_position_y ?? 50, 0, 100),
+      backgroundZoom: clamp(data?.background_zoom ?? 100, 25, 300),
+      backgroundOpacity: clamp(data?.background_opacity ?? 40, 0, 100),
     };
   } catch (err) {
     console.error('Failed to load site settings:', err);
     return {
       logoUrl: '/3.png',
       backgroundImageUrl: '/swirl-bg.svg',
+      backgroundPositionX: 50,
+      backgroundPositionY: 50,
+      backgroundZoom: 100,
+      backgroundOpacity: 40,
     };
   }
 }
@@ -41,7 +53,14 @@ async function getTrips() {
 }
 
 export default async function Home() {
-  const { logoUrl, backgroundImageUrl } = await getSiteSettings();
+  const {
+    logoUrl,
+    backgroundImageUrl,
+    backgroundPositionX,
+    backgroundPositionY,
+    backgroundZoom,
+    backgroundOpacity,
+  } = await getSiteSettings();
   const trips = await getTrips();
 
   return (
@@ -64,12 +83,14 @@ export default async function Home() {
       <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-20 relative overflow-hidden">
         {/* Background Image */}
         <div
-          className="absolute inset-0 z-0 opacity-40"
+          className="absolute inset-0 z-0"
           style={{
             backgroundImage: `url('${backgroundImageUrl}')`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
+            backgroundSize: `${backgroundZoom}%`,
+            backgroundPosition: `${backgroundPositionX}% ${backgroundPositionY}%`,
+            backgroundRepeat: 'no-repeat',
             backgroundAttachment: 'fixed',
+            opacity: backgroundOpacity / 100,
           }}
         />
 

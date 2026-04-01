@@ -14,6 +14,14 @@ Visit `http://localhost:3000`
 ### 2. Environment Variables
 Already configured in `.env.local` with Supabase credentials.
 
+To auto-apply safe SQL migrations on `npm run dev` / `npm run build`, also set:
+
+```bash
+SUPABASE_ACCESS_TOKEN=your_supabase_personal_access_token
+```
+
+Only migration files that include `-- @auto-migrate` are applied automatically.
+
 ### 3. Build for Production
 ```bash
 npm run build
@@ -44,7 +52,7 @@ npm start
 - `/` - Landing page with hero and CTA
 
 ### Authentication
-- `/login` - Sign in with magic link or password
+- `/login` - Sign in with email and password
 
 ### Member Portal (requires login)
 - `/dashboard` - Overview with stats and upcoming trips
@@ -199,7 +207,6 @@ A: Use `logActivity()` helper
 ## Key Features
 
 ### Authentication
-- **Magic Link**: Email-based passwordless login
 - **Password**: Traditional email/password sign in
 - **Role-Based Access**: super_admin, admin, trip_admin, member
 

@@ -11,6 +11,26 @@ import { Settings, Mail, Bell, Shield, Eye, Lock, Save, Upload } from 'lucide-re
 const DEFAULT_LOGO_URL = '/3.png';
 const DEFAULT_BACKGROUND_URL = '/swirl-bg.svg';
 const MAX_BACKGROUND_SIZE_BYTES = 10 * 1024 * 1024;
+const SITE_SETTINGS_MISSING_TABLE_TEXT = "Could not find the table 'public.site_settings'";
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const parseBoundedInt = (value: string, fallback: number, min: number, max: number) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return clamp(parsed, min, max);
+};
+
+const toFriendlyErrorMessage = (err: unknown, action: 'load' | 'save' | 'upload') => {
+  const rawMessage = err instanceof Error ? err.message : 'Unknown error';
+  if (rawMessage.includes(SITE_SETTINGS_MISSING_TABLE_TEXT)) {
+    return 'Site settings are not initialized yet. Run migration `migrations/create_site_settings_and_landing_background_controls.sql`, then try again.';
+  }
+
+  if (action === 'load') return `Failed to load settings. ${rawMessage}`;
+  if (action === 'save') return `Failed to save settings. ${rawMessage}`;
+  return `Failed to upload image. ${rawMessage}`;
+};
 
 interface PortalSettings {
   portal_name: string;
@@ -40,6 +60,10 @@ interface PortalSettings {
   enable_member_profiles: boolean;
   logo_url: string;
   background_image_url: string;
+  background_position_x: number;
+  background_position_y: number;
+  background_zoom: number;
+  background_opacity: number;
 }
 
 const DEFAULT_SETTINGS: PortalSettings = {
@@ -81,6 +105,10 @@ const DEFAULT_SETTINGS: PortalSettings = {
   // Site branding used by landing page
   logo_url: DEFAULT_LOGO_URL,
   background_image_url: DEFAULT_BACKGROUND_URL,
+  background_position_x: 50,
+  background_position_y: 50,
+  background_zoom: 100,
+  background_opacity: 40,
 };
 
 export default function SettingsPage() {
@@ -107,7 +135,9 @@ export default function SettingsPage() {
     try {
       const { data, error } = await supabase
         .from('site_settings')
-        .select('id, logo_url, background_image_url')
+        .select(
+          'id, logo_url, background_image_url, background_position_x, background_position_y, background_zoom, background_opacity'
+        )
         .maybeSingle();
 
       if (error) {
@@ -118,6 +148,10 @@ export default function SettingsPage() {
         ...DEFAULT_SETTINGS,
         logo_url: data?.logo_url || DEFAULT_LOGO_URL,
         background_image_url: data?.background_image_url || DEFAULT_BACKGROUND_URL,
+        background_position_x: clamp(data?.background_position_x ?? 50, 0, 100),
+        background_position_y: clamp(data?.background_position_y ?? 50, 0, 100),
+        background_zoom: clamp(data?.background_zoom ?? 100, 25, 300),
+        background_opacity: clamp(data?.background_opacity ?? 40, 0, 100),
       };
 
       setSiteSettingsId(data?.id ?? null);
@@ -125,7 +159,7 @@ export default function SettingsPage() {
       setOriginal(loaded);
     } catch (err) {
       console.error('Error:', err);
-      setErrorMessage('Failed to load settings from database.');
+      setErrorMessage(toFriendlyErrorMessage(err, 'load'));
     } finally {
       setIsLoading(false);
     }
@@ -148,15 +182,30 @@ export default function SettingsPage() {
       if (userError) {
         throw userError;
       }
+      if (!userResult.user?.id) {
+        throw new Error('You must be logged in to save settings.');
+      }
 
       const payload = {
         logo_url: settings.logo_url || DEFAULT_LOGO_URL,
         background_image_url: settings.background_image_url || DEFAULT_BACKGROUND_URL,
-        updated_by: userResult.user?.id || 'system',
+        background_position_x: clamp(settings.background_position_x, 0, 100),
+        background_position_y: clamp(settings.background_position_y, 0, 100),
+        background_zoom: clamp(settings.background_zoom, 25, 300),
+        background_opacity: clamp(settings.background_opacity, 0, 100),
+        updated_by: userResult.user.id,
       };
 
       let persisted:
-        | { id: string; logo_url: string; background_image_url: string }
+        | {
+          id: string;
+          logo_url: string;
+          background_image_url: string;
+          background_position_x: number;
+          background_position_y: number;
+          background_zoom: number;
+          background_opacity: number;
+        }
         | null
         = null;
 
@@ -165,7 +214,9 @@ export default function SettingsPage() {
           .from('site_settings')
           .update(payload)
           .eq('id', siteSettingsId)
-          .select('id, logo_url, background_image_url')
+          .select(
+            'id, logo_url, background_image_url, background_position_x, background_position_y, background_zoom, background_opacity'
+          )
           .single();
 
         if (error) {
@@ -176,7 +227,9 @@ export default function SettingsPage() {
         const { data, error } = await supabase
           .from('site_settings')
           .insert(payload)
-          .select('id, logo_url, background_image_url')
+          .select(
+            'id, logo_url, background_image_url, background_position_x, background_position_y, background_zoom, background_opacity'
+          )
           .single();
 
         if (error) {
@@ -189,6 +242,10 @@ export default function SettingsPage() {
         ...settings,
         logo_url: persisted?.logo_url || payload.logo_url,
         background_image_url: persisted?.background_image_url || payload.background_image_url,
+        background_position_x: persisted?.background_position_x ?? payload.background_position_x,
+        background_position_y: persisted?.background_position_y ?? payload.background_position_y,
+        background_zoom: persisted?.background_zoom ?? payload.background_zoom,
+        background_opacity: persisted?.background_opacity ?? payload.background_opacity,
       };
 
       setSiteSettingsId(persisted?.id || siteSettingsId);
@@ -198,7 +255,7 @@ export default function SettingsPage() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       console.error('Error:', err);
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to save settings.');
+      setErrorMessage(toFriendlyErrorMessage(err, 'save'));
     } finally {
       setIsSaving(false);
     }
@@ -246,7 +303,7 @@ export default function SettingsPage() {
       setUploadMessage('Background uploaded. Click "Save Settings" to publish it on the landing page.');
     } catch (err) {
       console.error('Background upload error:', err);
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to upload background image.');
+      setErrorMessage(toFriendlyErrorMessage(err, 'upload'));
     } finally {
       setIsUploadingBackground(false);
       event.target.value = '';
@@ -583,19 +640,88 @@ export default function SettingsPage() {
               />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Horizontal Position ({settings.background_position_x}%)
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.background_position_x}
+                  onChange={(e) =>
+                    handleChange('background_position_x', parseBoundedInt(e.target.value, 50, 0, 100))
+                  }
+                  className="w-full accent-brand-brown"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Vertical Position ({settings.background_position_y}%)
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.background_position_y}
+                  onChange={(e) =>
+                    handleChange('background_position_y', parseBoundedInt(e.target.value, 50, 0, 100))
+                  }
+                  className="w-full accent-brand-brown"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Zoom ({settings.background_zoom}%)
+                </label>
+                <input
+                  type="range"
+                  min={25}
+                  max={300}
+                  value={settings.background_zoom}
+                  onChange={(e) =>
+                    handleChange('background_zoom', parseBoundedInt(e.target.value, 100, 25, 300))
+                  }
+                  className="w-full accent-brand-brown"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Transparency ({settings.background_opacity}% visible)
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.background_opacity}
+                  onChange={(e) =>
+                    handleChange('background_opacity', parseBoundedInt(e.target.value, 40, 0, 100))
+                  }
+                  className="w-full accent-brand-brown"
+                />
+              </div>
+            </div>
+
             {uploadMessage && <p className="text-sm text-brand-tan">{uploadMessage}</p>}
 
             <div>
               <p className="text-sm font-medium mb-2">Preview</p>
-              <div className="h-48 w-full rounded border border-gray-700 overflow-hidden bg-black/40">
-                <img
-                  src={settings.background_image_url || DEFAULT_BACKGROUND_URL}
-                  alt="Landing background preview"
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.src = DEFAULT_BACKGROUND_URL;
+              <div className="relative h-52 w-full rounded border border-gray-700 overflow-hidden bg-black">
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    backgroundImage: `url('${settings.background_image_url || DEFAULT_BACKGROUND_URL}')`,
+                    backgroundSize: `${settings.background_zoom}%`,
+                    backgroundPosition: `${settings.background_position_x}% ${settings.background_position_y}%`,
+                    backgroundRepeat: 'no-repeat',
+                    opacity: clamp(settings.background_opacity, 0, 100) / 100,
                   }}
                 />
+                <div className="absolute inset-0 bg-black/35" />
+                <div className="absolute bottom-3 left-3 text-xs text-brand-cream/80">
+                  Live style preview
+                </div>
               </div>
             </div>
           </div>

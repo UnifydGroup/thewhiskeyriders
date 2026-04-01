@@ -18,6 +18,7 @@ export default function NewTripPage() {
     start_date: '',
     end_date: '',
     description: '',
+    itinerary: '',
     status: 'upcoming' as 'upcoming' | 'active' | 'completed' | 'cancelled',
     max_members: '',
   });
@@ -52,6 +53,7 @@ export default function NewTripPage() {
           start_date: formData.start_date,
           end_date: formData.end_date,
           description: formData.description || null,
+          itinerary: formData.itinerary || null,
           status: formData.status,
           max_members: formData.max_members ? parseInt(formData.max_members) : null,
           created_by: user.id,
@@ -195,6 +197,19 @@ export default function NewTripPage() {
                 onChange={handleChange}
                 placeholder="Describe this adventure..."
                 rows={4}
+                disabled={isLoading}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-brand-cream mb-2">
+                Schedule / Itinerary
+              </label>
+              <TextArea
+                name="itinerary"
+                value={formData.itinerary}
+                onChange={handleChange}
+                placeholder={`Day 1 - Arrival and welcome ride\nDay 2 - Mountain pass loop\nDay 3 - Desert crossing`}
+                rows={6}
                 disabled={isLoading}
               />
             </div>

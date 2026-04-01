@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "migrations:apply": "node scripts/apply-supabase-migrations.mjs",
+    "predev": "npm run migrations:apply",
     "dev": "next dev -p 4000",
+    "prebuild": "npm run migrations:apply",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

@@ -10,8 +10,9 @@ import {
   LogOut,
   Settings,
   Image,
-  Award,
   ChevronDown,
+  Activity,
+  type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -24,7 +25,19 @@ interface AdminSidebarProps {
   onLogout: () => void;
 }
 
-const adminNavItems = [
+interface AdminSubNavItem {
+  href: string;
+  label: string;
+}
+
+interface AdminNavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  submenu?: AdminSubNavItem[];
+}
+
+const adminNavItems: AdminNavItem[] = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/trips', label: 'Trips', icon: Bike },
   { href: '/admin/galleries', label: 'Galleries', icon: Image },
@@ -43,6 +56,7 @@ const adminNavItems = [
     label: 'Payments',
     icon: DollarSign,
   },
+  { href: '/admin/activity-log', label: 'Activity Log', icon: Activity },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -93,7 +107,7 @@ export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
 
           {/* Navigation items */}
           <nav className="flex-1 space-y-2">
-            {adminNavItems.map((item: any) => {
+            {adminNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || pathname.startsWith(item.href);
               const hasSubmenu = item.submenu && item.submenu.length > 0;
@@ -131,7 +145,7 @@ export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
                   {/* Submenu */}
                   {hasSubmenu && isExpanded && (
                     <div className="ml-4 space-y-1 mt-1">
-                      {item.submenu.map((subitem: any) => {
+                      {item.submenu.map((subitem) => {
                         const isSubActive = pathname === subitem.href;
                         return (
                           <Link

@@ -49,6 +49,7 @@ export interface Trip {
   start_date: string;
   end_date: string;
   description: string | null;
+  itinerary: string | null;
   cover_image_url: string | null;
   status: TripStatus;
   max_members: number | null;
@@ -183,6 +184,7 @@ export interface UserBadge {
   id: string;
   user_id: string;
   badge_id: string;
+  trip_id: string;
   awarded_at: string;
   awarded_by: string | null;
 }
@@ -191,6 +193,10 @@ export interface SiteSettings {
   id: string;
   logo_url: string;
   background_image_url: string;
+  background_position_x: number;
+  background_position_y: number;
+  background_zoom: number;
+  background_opacity: number;
   updated_by: string;
   updated_at: string;
 }
@@ -198,7 +204,8 @@ export interface SiteSettings {
 export type ActivityAction = 
   | 'create' | 'update' | 'delete' | 'view' 
   | 'upload' | 'download' | 'login' | 'logout'
-  | 'vote' | 'comment' | 'like' | 'bulkupload';
+  | 'vote' | 'comment' | 'like' | 'bulkupload'
+  | 'interact';
 
 export interface ActivityLog {
   id: string;

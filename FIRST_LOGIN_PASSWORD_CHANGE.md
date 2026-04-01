@@ -55,7 +55,7 @@ Or use the migration file: [add_password_changed_column.sql](add_password_change
 
 ## How It Works
 
-1. **User logs in** via magic link or password authentication
+1. **User logs in** via email/password authentication
 2. **Auth callback** redirects to `/dashboard`
 3. **Dashboard page mounts** and fetches user profile
 4. **First login detection**: If `profile.password_changed === false`, modal appears

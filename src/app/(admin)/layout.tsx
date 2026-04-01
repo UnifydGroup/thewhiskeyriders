@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import { TopBar } from '@/components/layout/TopBar';
 import { AdminSidebar } from '@/components/layout/AdminSidebar';
 import { Footer } from '@/components/layout/Footer';
+import { AdminActivityTracker } from '@/components/admin/AdminActivityTracker';
+import { trackClientActivity } from '@/lib/activity/client';
 import { useEffect } from 'react';
 
 export default function AdminLayout({
@@ -28,9 +30,20 @@ export default function AdminLayout({
       }
     };
     checkAuth();
-  }, [router, supabase.auth]);
+  }, [router, supabase]);
 
   const handleLogout = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    await trackClientActivity({
+      action: 'logout',
+      entityType: 'auth',
+      entityId: 'session',
+      entityName: 'Signed out from admin portal',
+      changes: {
+        path: window.location.pathname,
+      },
+      accessToken: sessionData.session?.access_token,
+    });
     await supabase.auth.signOut();
     router.push('/');
   };
@@ -54,6 +67,7 @@ export default function AdminLayout({
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto">
+          <AdminActivityTracker />
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {children}
           </div>

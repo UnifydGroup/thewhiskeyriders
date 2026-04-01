@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -10,30 +10,76 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Award, Plus, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 
+type BadgeRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  badge_type: string;
+  icon: string;
+  trip_id: string | null;
+};
+
+type MemberRecord = {
+  id: string;
+  full_name: string | null;
+  email?: string | null;
+  nickname?: string | null;
+  first_name?: string | null;
+  surname?: string | null;
+};
+
+type TripRecord = {
+  id: string;
+  name: string;
+  start_date: string | null;
+};
+
+type UserBadgeRecord = {
+  id: string;
+  user_id: string;
+  badge_id: string;
+  trip_id: string;
+};
+
+type FlashMessage = {
+  type: 'success' | 'error';
+  text: string;
+};
+
 export default function BadgeManagementPage() {
-  const supabase = createClient();
-  const [badges, setBadges] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
-  const [userBadges, setUserBadges] = useState<any[]>([]);
+  const supabase = useMemo(() => createClient(), []);
+  const [badges, setBadges] = useState<BadgeRecord[]>([]);
+  const [members, setMembers] = useState<MemberRecord[]>([]);
+  const [trips, setTrips] = useState<TripRecord[]>([]);
+  const [userBadges, setUserBadges] = useState<UserBadgeRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newBadge, setNewBadge] = useState({ name: '', description: '', badge_type: 'achievement', icon: '🏅' });
-  const [message, setMessage] = useState<any>(null);
-  const [selectedBadge, setSelectedBadge] = useState<any>(null);
+  const [newBadge, setNewBadge] = useState({
+    name: '',
+    description: '',
+    badge_type: 'achievement',
+    icon: '🏅',
+    trip_id: '',
+  });
+  const [message, setMessage] = useState<FlashMessage | null>(null);
+  const [selectedBadge, setSelectedBadge] = useState<BadgeRecord | null>(null);
   const [selectedMemberForBadge, setSelectedMemberForBadge] = useState('');
+  const [selectedTripForAssignment, setSelectedTripForAssignment] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const { data: badgesData } = await supabase.from('badges').select('*');
       setBadges(badgesData || []);
 
+      const { data: tripsData } = await supabase
+        .from('trips')
+        .select('id, name, start_date')
+        .order('start_date', { ascending: false });
+      setTrips(tripsData || []);
+
       const { data: membersData } = await supabase
         .from('profiles')
-        .select('id, full_name')
-        .eq('role', 'member');
+        .select('id, full_name, nickname, first_name, surname, email')
+        .order('full_name', { ascending: true });
       setMembers(membersData || []);
 
       const { data: userBadgesData } = await supabase.from('user_badges').select('*');
@@ -44,7 +90,11 @@ export default function BadgeManagementPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const handleCreateBadge = async () => {
     if (!newBadge.name) {
@@ -52,8 +102,21 @@ export default function BadgeManagementPage() {
       return;
     }
 
+    if ((newBadge.badge_type === 'trip' || newBadge.badge_type === 'role') && !newBadge.trip_id) {
+      setMessage({ type: 'error', text: 'Please select a trip for trip/role badges' });
+      return;
+    }
+
     try {
-      const { error } = await supabase.from('badges').insert([newBadge]);
+      const payload = {
+        name: newBadge.name,
+        description: newBadge.description || null,
+        badge_type: newBadge.badge_type,
+        icon: newBadge.icon || '🏅',
+        trip_id: newBadge.trip_id || null,
+      };
+
+      const { error } = await supabase.from('badges').insert([payload]);
 
       if (error) {
         setMessage({ type: 'error', text: error.message });
@@ -61,10 +124,10 @@ export default function BadgeManagementPage() {
       }
 
       setMessage({ type: 'success', text: 'Badge created successfully' });
-      setNewBadge({ name: '', description: '', badge_type: 'achievement', icon: '🏅' });
+      setNewBadge({ name: '', description: '', badge_type: 'achievement', icon: '🏅', trip_id: '' });
       loadData();
       setTimeout(() => setMessage(null), 3000);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Creation failed' });
     }
   };
@@ -84,21 +147,59 @@ export default function BadgeManagementPage() {
       setMessage({ type: 'success', text: 'Badge deleted' });
       loadData();
       setTimeout(() => setMessage(null), 3000);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Delete failed' });
     }
   };
 
   const handleAssignBadge = async () => {
-    if (!selectedBadge || !selectedMemberForBadge) {
-      setMessage({ type: 'error', text: 'Select badge and member' });
+    if (!selectedBadge || !selectedMemberForBadge || !selectedTripForAssignment) {
+      setMessage({ type: 'error', text: 'Select trip, badge and member' });
       return;
     }
 
     try {
+      let badgeIdToAssign = selectedBadge.id;
+
+      if (selectedBadge.trip_id !== selectedTripForAssignment) {
+        const existingTripBadge = badges.find(
+          (badge) =>
+            badge.trip_id === selectedTripForAssignment &&
+            badge.name === selectedBadge.name &&
+            badge.badge_type === selectedBadge.badge_type
+        );
+
+        if (existingTripBadge) {
+          badgeIdToAssign = existingTripBadge.id;
+        } else {
+          const { data: createdBadge, error: createBadgeError } = await supabase
+            .from('badges')
+            .insert({
+              name: selectedBadge.name,
+              description: selectedBadge.description,
+              icon: selectedBadge.icon,
+              badge_type: selectedBadge.badge_type,
+              trip_id: selectedTripForAssignment,
+            })
+            .select()
+            .single();
+
+          if (createBadgeError || !createdBadge) {
+            setMessage({
+              type: 'error',
+              text: createBadgeError?.message || 'Failed to attach badge to trip',
+            });
+            return;
+          }
+
+          badgeIdToAssign = createdBadge.id;
+        }
+      }
+
       const { error } = await supabase.from('user_badges').insert({
         user_id: selectedMemberForBadge,
-        badge_id: selectedBadge.id,
+        badge_id: badgeIdToAssign,
+        trip_id: selectedTripForAssignment,
       });
 
       if (error) {
@@ -112,19 +213,30 @@ export default function BadgeManagementPage() {
 
       setMessage({ type: 'success', text: 'Badge assigned' });
       setSelectedMemberForBadge('');
+      setSelectedBadge(null);
       loadData();
       setTimeout(() => setMessage(null), 3000);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Assign failed' });
     }
   };
 
-  const handleRemoveBadge = async (userId: string, badgeId: string) => {
+  const getTripName = (tripId: string | null) => {
+    if (!tripId) return 'Global';
+    const trip = trips.find((t) => t.id === tripId);
+    return trip ? trip.name : 'Unknown Trip';
+  };
+
+  const assignableBadges = selectedTripForAssignment
+    ? badges.filter((badge) => !badge.trip_id || badge.trip_id === selectedTripForAssignment)
+    : [];
+
+  const handleRemoveBadge = async (userBadgeId: string) => {
     try {
       const { error } = await supabase
         .from('user_badges')
         .delete()
-        .match({ user_id: userId, badge_id: badgeId });
+        .eq('id', userBadgeId);
 
       if (error) {
         setMessage({ type: 'error', text: error.message });
@@ -134,7 +246,7 @@ export default function BadgeManagementPage() {
       setMessage({ type: 'success', text: 'Badge removed' });
       loadData();
       setTimeout(() => setMessage(null), 3000);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Remove failed' });
     }
   };
@@ -224,6 +336,22 @@ export default function BadgeManagementPage() {
               </select>
             </div>
 
+            <div>
+              <label className="block text-brand-cream/70 text-sm font-medium mb-1">Trip</label>
+              <select
+                value={newBadge.trip_id}
+                onChange={(e) => setNewBadge({ ...newBadge, trip_id: e.target.value })}
+                className="w-full bg-brand-black/50 border border-brand-brown/20 rounded px-3 py-2 text-brand-cream text-sm"
+              >
+                <option value="">Global / Not trip-specific</option>
+                {trips.map((trip) => (
+                  <option key={trip.id} value={trip.id}>
+                    {trip.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <Button
               onClick={handleCreateBadge}
               className="w-full bg-brand-brown hover:bg-brand-brown/80 text-brand-black font-semibold"
@@ -240,19 +368,41 @@ export default function BadgeManagementPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
+              <label className="block text-brand-cream/70 text-sm font-medium mb-1">Select Trip</label>
+              <select
+                value={selectedTripForAssignment}
+                onChange={(e) => {
+                  setSelectedTripForAssignment(e.target.value);
+                  setSelectedBadge(null);
+                }}
+                className="w-full bg-brand-black/50 border border-brand-brown/20 rounded px-3 py-2 text-brand-cream text-sm"
+              >
+                <option value="">Choose a trip...</option>
+                {trips.map((trip) => (
+                  <option key={trip.id} value={trip.id}>
+                    {trip.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-brand-cream/70 text-sm font-medium mb-1">Select Badge</label>
               <select
                 value={selectedBadge?.id || ''}
                 onChange={(e) => {
-                  const badge = badges.find((b) => b.id === e.target.value);
+                  const badge = assignableBadges.find((b) => b.id === e.target.value);
                   setSelectedBadge(badge);
                 }}
                 className="w-full bg-brand-black/50 border border-brand-brown/20 rounded px-3 py-2 text-brand-cream text-sm"
+                disabled={!selectedTripForAssignment}
               >
-                <option value="">Choose a badge...</option>
-                {badges.map((badge) => (
+                <option value="">
+                  {selectedTripForAssignment ? 'Choose a badge...' : 'Select a trip first'}
+                </option>
+                {assignableBadges.map((badge) => (
                   <option key={badge.id} value={badge.id}>
-                    {badge.name}
+                    {badge.name} {badge.trip_id ? `(for ${getTripName(badge.trip_id)})` : '(global)'}
                   </option>
                 ))}
               </select>
@@ -305,6 +455,9 @@ export default function BadgeManagementPage() {
                             <span className="text-xs bg-brand-brown/20 px-2 py-1 rounded text-brand-cream/70">
                               {badge.badge_type}
                             </span>
+                            <span className="text-xs bg-blue-900/30 px-2 py-1 rounded text-blue-300">
+                              {getTripName(badge.trip_id)}
+                            </span>
                             <span className="text-xs bg-brand-black/50 px-2 py-1 rounded text-brand-cream/70">
                               {memberCount} member{memberCount !== 1 ? 's' : ''}
                             </span>
@@ -329,12 +482,13 @@ export default function BadgeManagementPage() {
                                 const member = members.find((m) => m.id === ub.user_id);
                                 return (
                                   <span
-                                    key={ub.user_id}
+                                    key={ub.id}
                                     className="text-xs bg-brand-brown/30 px-2 py-1 rounded text-brand-cream flex items-center gap-1 group"
                                   >
                                     {getMemberDisplayName(member)}
+                                    <span className="text-brand-cream/60">· {getTripName(ub.trip_id)}</span>
                                     <button
-                                      onClick={() => handleRemoveBadge(ub.user_id, badge.id)}
+                                      onClick={() => handleRemoveBadge(ub.id)}
                                       className="opacity-0 group-hover:opacity-100 ml-1"
                                     >
                                       ✕

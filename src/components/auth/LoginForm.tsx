@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/Input';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, CheckCircle } from 'lucide-react';
+import { trackClientActivity } from '@/lib/activity/client';
 
-type View = 'magic' | 'password' | 'forgot';
+type View = 'password' | 'forgot';
 
 export function LoginForm() {
   const router = useRouter();
@@ -21,32 +22,24 @@ export function LoginForm() {
 
   const clearMessages = () => { setError(''); setMessage(''); };
 
-  const handleMagicLinkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    clearMessages();
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setMessage('Check your email for a magic link to sign in!');
-      setEmail('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     clearMessages();
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      await trackClientActivity({
+        action: 'login',
+        entityType: 'auth',
+        entityId: 'session',
+        entityName: 'Signed in from login form',
+        changes: {
+          source: 'login_form',
+          redirect: '/dashboard',
+        },
+        accessToken: data.session?.access_token,
+      });
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid email or password');
@@ -89,7 +82,7 @@ export function LoginForm() {
 
           <h3 className="text-lg font-semibold text-brand-cream mb-1">Reset your password</h3>
           <p className="text-brand-cream/60 text-sm mb-5">
-            Enter your email and we'll send you a link to set a new password.
+            Enter your email and we&apos;ll send you a link to set a new password.
           </p>
 
           {message ? (
@@ -133,127 +126,60 @@ export function LoginForm() {
         </div>
       )}
 
-      {/* ── Sign-In tabs (magic / password) ── */}
+      {/* ── Password Sign-In view ── */}
       {view !== 'forgot' && (
-        <>
-          <div className="flex gap-4 mb-6 border-b border-brand-brown/20">
-            <button
-              onClick={() => { setView('magic'); clearMessages(); }}
-              className={`pb-3 px-2 font-semibold transition-colors ${
-                view === 'magic'
-                  ? 'text-brand-brown border-b-2 border-brand-brown'
-                  : 'text-brand-cream/60 hover:text-brand-cream'
-              }`}
-            >
-              Magic Link
-            </button>
-            <button
-              onClick={() => { setView('password'); clearMessages(); }}
-              className={`pb-3 px-2 font-semibold transition-colors ${
-                view === 'password'
-                  ? 'text-brand-brown border-b-2 border-brand-brown'
-                  : 'text-brand-cream/60 hover:text-brand-cream'
-              }`}
-            >
-              Email & Password
-            </button>
+        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-brand-cream mb-2">
+              Email Address
+            </label>
+            <Input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              disabled={isLoading}
+            />
           </div>
 
-          {/* Magic Link Tab */}
-          {view === 'magic' && (
-            <form onSubmit={handleMagicLinkSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-brand-cream mb-2">
-                  Email Address
-                </label>
-                <Input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-brand-cream">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => { setView('forgot'); clearMessages(); }}
+                className="text-xs text-brand-brown hover:text-brand-brown/80 transition-colors"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={isLoading}
+            />
+          </div>
 
-              {message && (
-                <div className="p-4 bg-green-900/20 border border-green-500/30 rounded-lg text-green-100 text-sm">
-                  {message}
-                </div>
-              )}
-
-              {error && (
-                <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-red-100 text-sm">
-                  {error}
-                </div>
-              )}
-
-              <Button type="submit" variant="primary" size="md" className="w-full" isLoading={isLoading}>
-                Send Magic Link
-              </Button>
-
-              <p className="text-xs text-brand-cream/60 text-center">
-                We'll send you a link to sign in with no password needed.
-              </p>
-            </form>
+          {error && (
+            <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-red-100 text-sm">
+              {error}
+            </div>
           )}
 
-          {/* Password Tab */}
-          {view === 'password' && (
-            <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-brand-cream mb-2">
-                  Email Address
-                </label>
-                <Input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
+          <Button type="submit" variant="primary" size="md" className="w-full" isLoading={isLoading}>
+            Sign In
+          </Button>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-brand-cream">
-                    Password
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => { setView('forgot'); clearMessages(); }}
-                    className="text-xs text-brand-brown hover:text-brand-brown/80 transition-colors"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-                <Input
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-red-100 text-sm">
-                  {error}
-                </div>
-              )}
-
-              <Button type="submit" variant="primary" size="md" className="w-full" isLoading={isLoading}>
-                Sign In
-              </Button>
-
-              <p className="text-xs text-brand-cream/60 text-center">
-                Don't have an account? Contact an admin to create one.
-              </p>
-            </form>
-          )}
-        </>
+          <p className="text-xs text-brand-cream/60 text-center">
+            Don&apos;t have an account? Contact an admin to create one.
+          </p>
+        </form>
       )}
     </div>
   );

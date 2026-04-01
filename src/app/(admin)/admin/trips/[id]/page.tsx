@@ -29,6 +29,7 @@ export default function TripEditorPage() {
     start_date: '',
     end_date: '',
     description: '',
+    itinerary: '',
     cover_image_url: '',
     status: 'upcoming',
     max_members: '',
@@ -76,6 +77,7 @@ export default function TripEditorPage() {
         start_date: tripData.start_date.split('T')[0],
         end_date: tripData.end_date.split('T')[0],
         description: tripData.description || '',
+        itinerary: tripData.itinerary || '',
         cover_image_url: tripData.cover_image_url || '',
         status: tripData.status,
         max_members: tripData.max_members ? String(tripData.max_members) : '',
@@ -334,8 +336,19 @@ export default function TripEditorPage() {
             name="description"
             value={formData.description}
             onChange={handleChange}
-            placeholder="Trip details and itinerary..."
+            placeholder="Trip overview and context..."
             rows={6}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2">Schedule / Itinerary</label>
+          <TextArea
+            name="itinerary"
+            value={formData.itinerary}
+            onChange={handleChange}
+            placeholder={`Day 1 - Arrive in Marrakech\nDay 2 - Atlas Mountains\nDay 3 - Desert camp`}
+            rows={8}
           />
         </div>
 
