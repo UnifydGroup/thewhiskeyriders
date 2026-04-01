@@ -59,7 +59,7 @@ export default function AdminPaymentsPage() {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rawData = XLSX.utils.sheet_to_json(worksheet);
         const parsedData = rawData.map((row: any) => ({
-          user_id: row.user_id || row.userId || '',
+          user_id: String(row.user_id || row.userId || '').trim(),
           description: row.description || row.Description || '',
           amount: parseFloat(row.amount || row.Amount || 0),
           due_date: row.due_date || row.dueDate || undefined,
@@ -86,15 +86,51 @@ export default function AdminPaymentsPage() {
     setError('');
     setMessage('');
     try {
-      const paymentsToInsert = data.map((item) => ({
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, user_id');
+
+      if (profileError) {
+        throw new Error(`Failed to load members: ${profileError.message}`);
+      }
+
+      const userIdLookup = new Map<string, string>();
+      for (const profile of profiles || []) {
+        if (profile.id) {
+          userIdLookup.set(profile.id.toLowerCase(), profile.id);
+        }
+        if (profile.user_id) {
+          userIdLookup.set(profile.user_id.toLowerCase(), profile.id);
+        }
+      }
+
+      const unresolvedIds = new Set<string>();
+
+      const paymentsToInsert = data.map((item) => {
+        const inputUserId = (item.user_id || '').trim();
+        const resolvedUserId = userIdLookup.get(inputUserId.toLowerCase());
+
+        if (!resolvedUserId) {
+          unresolvedIds.add(inputUserId || '(blank)');
+        }
+
+        return {
         trip_id: selectedTripId,
-        user_id: item.user_id,
+        user_id: resolvedUserId || inputUserId,
         description: item.description,
         amount: item.amount,
         due_date: item.due_date || null,
         status: item.status,
         paid_date: item.status === 'paid' ? new Date().toISOString() : null,
-      }));
+        };
+      });
+
+      if (unresolvedIds.size > 0) {
+        throw new Error(
+          `Unknown user_id values: ${Array.from(unresolvedIds).slice(0, 10).join(', ')}`
+        );
+      }
+
       const { error: insertError } = await supabase
         .from('payments')
         .insert(paymentsToInsert);
@@ -177,7 +213,7 @@ export default function AdminPaymentsPage() {
                       {file ? file.name : 'Click to upload or drag and drop'}
                     </p>
                     <p className="text-xs text-brand-cream/60 mt-1">
-                      Excel files with columns: user_id, description, amount, due_date, status
+                      Excel columns: user_id (WR000001 or UUID), description, amount, due_date, status
                     </p>
                   </div>
                 </div>
@@ -266,6 +302,7 @@ export default function AdminPaymentsPage() {
             <li>Prepare an Excel file with the following columns:</li>
             <ul className="list-disc list-inside ml-4 text-brand-cream/70 space-y-1">
               <li><code className="bg-brand-dark-grey px-2 py-1 rounded">user_id</code> - The user's unique ID</li>
+              <li>Use the profile <code className="bg-brand-dark-grey px-2 py-1 rounded">User ID</code> (example: WR000001) or a UUID</li>
               <li><code className="bg-brand-dark-grey px-2 py-1 rounded">description</code> - Payment description</li>
               <li><code className="bg-brand-dark-grey px-2 py-1 rounded">amount</code> - Payment amount</li>
               <li><code className="bg-brand-dark-grey px-2 py-1 rounded">due_date</code> - Due date (optional)</li>

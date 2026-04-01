@@ -134,9 +134,9 @@ export default function AdminDashboardPage() {
               Manage Members
             </Button>
           </Link>
-          <Link href="/admin/payments">
+          <Link href="/admin/payments/manage">
             <Button variant="outline" size="md" className="w-full">
-              Upload Payments
+              Payments
             </Button>
           </Link>
           <Link href="/admin/trips">
