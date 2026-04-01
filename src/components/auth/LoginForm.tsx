@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 export function LoginForm() {
   const router = useRouter();
   const supabase = createClient();
-  const [tab, setTab] = useState<'magic' | 'password'>('magic');
+  const [tab, setTab] = useState<'magic' | 'password'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);

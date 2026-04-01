@@ -8,15 +8,36 @@ export type TagType = 'trip' | 'year' | 'location' | 'person';
 
 export interface Profile {
   id: string;
+  user_id: string;
   email: string;
   full_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  surname: string | null;
   avatar_url: string | null;
   bio: string | null;
   role: UserRole;
   phone: string | null;
+  phone_country_code: string | null;
   emergency_contact: string | null;
-  created_at: string;
-  updated_at: string;
+  emergency_contact_number: string | null;
+  password_changed: boolean | null;
+  date_of_birth: string | null;
+  address: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
+  passport_number: string | null;
+  passport_expiry: string | null;
+  shirt_size: string | null;
+  shorts_size: string | null;
+  nickname: string | null;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface Trip {
@@ -31,9 +52,9 @@ export interface Trip {
   cover_image_url: string | null;
   status: TripStatus;
   max_members: number | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface TripMember {
@@ -41,7 +62,7 @@ export interface TripMember {
   trip_id: string;
   user_id: string;
   trip_role: TripRole;
-  joined_at: string;
+  joined_at: string | null;
 }
 
 export interface TripUpdate {
@@ -49,9 +70,9 @@ export interface TripUpdate {
   trip_id: string;
   title: string;
   content: string;
-  author_id: string;
-  published_at: string;
-  created_at: string;
+  author_id: string | null;
+  published_at: string | null;
+  created_at: string | null;
 }
 
 export interface TripKeyDate {
@@ -105,9 +126,20 @@ export interface Vote {
   created_at: string;
 }
 
+export interface Gallery {
+  id: string;
+  trip_id: string;
+  name: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface Photo {
   id: string;
   trip_id: string;
+  gallery_id: string | null;
   uploaded_by: string;
   storage_path: string;
   caption: string | null;
@@ -155,12 +187,80 @@ export interface UserBadge {
   awarded_by: string | null;
 }
 
+export interface SiteSettings {
+  id: string;
+  logo_url: string;
+  background_image_url: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+export type ActivityAction = 
+  | 'create' | 'update' | 'delete' | 'view' 
+  | 'upload' | 'download' | 'login' | 'logout'
+  | 'vote' | 'comment' | 'like' | 'bulkupload';
+
+export interface ActivityLog {
+  id: string;
+  user_id: string;
+  action: ActivityAction;
+  entity_type: string; // 'trip', 'payment', 'award', 'member', etc
+  entity_id: string;
+  entity_name: string | null;
+  changes: Record<string, any> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  slug: string; // 'welcome', 'payment_reminder', 'trip_update', etc
+  subject: string;
+  body: string;
+  variables: string[]; // ['name', 'tripName', 'amount', etc]
+  is_default: boolean;
+  updated_by: string;
+  updated_at: string;
+}
+
+export type NotificationChannel = 'email' | 'in_app' | 'both';
+
+export interface NotificationPreference {
+  id: string;
+  user_id: string;
+  trip_updates: NotificationChannel;
+  payment_reminders: NotificationChannel;
+  award_voting: NotificationChannel;
+  new_gallery_photos: NotificationChannel;
+  new_comments: NotificationChannel;
+  system_announcements: NotificationChannel;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  type: 'trip_update' | 'payment' | 'award' | 'gallery' | 'comment' | 'system';
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
+  read_at: string | null;
+}
+
 export interface Database {
+  // Required by @supabase/supabase-js >=2.48 for correct type inference.
+  // Without this, all table .insert()/.update() argument types resolve to `never`.
+  __InternalSupabase: {
+    PostgrestVersion: '14.4';
+  };
   public: {
     Tables: {
       profiles: {
         Row: Profile;
-        Insert: Omit<Profile, 'created_at' | 'updated_at'>;
+        Insert: Omit<Profile, 'created_at' | 'updated_at' | 'id' | 'user_id'> &
+          Partial<Pick<Profile, 'id' | 'user_id'>>;
         Update: Partial<Omit<Profile, 'id' | 'created_at'>>;
       };
       trips: {
@@ -188,6 +288,11 @@ export interface Database {
         Insert: Omit<TripDocument, 'id' | 'created_at'>;
         Update: Partial<Omit<TripDocument, 'id' | 'created_at'>>;
       };
+      galleries: {
+        Row: Gallery;
+        Insert: Omit<Gallery, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Gallery, 'id' | 'created_at' | 'created_by'>>;
+      };
       payments: {
         Row: Payment;
         Insert: Omit<Payment, 'id' | 'created_at'>;
@@ -197,6 +302,11 @@ export interface Database {
         Row: Award;
         Insert: Omit<Award, 'id'>;
         Update: Partial<Omit<Award, 'id'>>;
+      };
+      site_settings: {
+        Row: SiteSettings;
+        Insert: Omit<SiteSettings, 'id' | 'updated_at'>;
+        Update: Partial<Omit<SiteSettings, 'id'>>;
       };
       votes: {
         Row: Vote;
@@ -232,6 +342,26 @@ export interface Database {
         Row: UserBadge;
         Insert: Omit<UserBadge, 'id'>;
         Update: Partial<Omit<UserBadge, 'id'>>;
+      };
+      activity_logs: {
+        Row: ActivityLog;
+        Insert: Omit<ActivityLog, 'id' | 'created_at'>;
+        Update: never;
+      };
+      email_templates: {
+        Row: EmailTemplate;
+        Insert: Omit<EmailTemplate, 'id' | 'updated_at'>;
+        Update: Partial<Omit<EmailTemplate, 'id'>>;
+      };
+      notification_preferences: {
+        Row: NotificationPreference;
+        Insert: Omit<NotificationPreference, 'id'>;
+        Update: Partial<Omit<NotificationPreference, 'id' | 'user_id'>>;
+      };
+      notifications: {
+        Row: Notification;
+        Insert: Omit<Notification, 'id' | 'created_at' | 'read_at' | 'is_read'>;
+        Update: Partial<Omit<Notification, 'id' | 'created_at' | 'user_id'>>;
       };
     };
     Views: {};

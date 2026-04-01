@@ -9,6 +9,9 @@ import {
   X,
   LogOut,
   Settings,
+  Image,
+  Award,
+  ChevronDown,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -24,12 +27,34 @@ interface AdminSidebarProps {
 const adminNavItems = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/trips', label: 'Trips', icon: Bike },
-  { href: '/admin/members', label: 'Members', icon: Users },
-  { href: '/admin/payments', label: 'Payments', icon: DollarSign },
+  { href: '/admin/galleries', label: 'Galleries', icon: Image },
+  {
+    href: '/admin/members',
+    label: 'Members',
+    icon: Users,
+    submenu: [
+      { href: '/admin/members', label: 'All Members' },
+      { href: '/admin/members/trips', label: 'Trip Attendance' },
+      { href: '/admin/members/badges', label: 'Badges' },
+    ],
+  },
+  {
+    href: '/admin/payments/manage',
+    label: 'Payments',
+    icon: DollarSign,
+  },
+  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 
 export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
   const pathname = usePathname();
+  const [expandedItems, setExpandedItems] = React.useState<string[]>([]);
+
+  const toggleExpand = (href: string) => {
+    setExpandedItems((prev) =>
+      prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href]
+    );
+  };
 
   return (
     <>
@@ -68,25 +93,65 @@ export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
 
           {/* Navigation items */}
           <nav className="flex-1 space-y-2">
-            {adminNavItems.map((item) => {
+            {adminNavItems.map((item: any) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || pathname.startsWith(item.href);
+              const hasSubmenu = item.submenu && item.submenu.length > 0;
+              const isExpanded = expandedItems.includes(item.href);
 
               return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
-                    isActive
-                      ? 'bg-brand-brown text-brand-black font-semibold'
-                      : 'text-brand-cream hover:bg-brand-dark-grey/50'
+                <div key={item.href}>
+                  <div className="flex items-center">
+                    <Link
+                      href={item.href}
+                      onClick={onClose}
+                      className={cn(
+                        'flex-1 flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                        isActive
+                          ? 'bg-brand-brown text-brand-black font-semibold'
+                          : 'text-brand-cream hover:bg-brand-dark-grey/50'
+                      )}
+                    >
+                      <Icon className="w-5 h-5" />
+                      <span>{item.label}</span>
+                    </Link>
+                    {hasSubmenu && (
+                      <button
+                        onClick={() => toggleExpand(item.href)}
+                        className={cn(
+                          'px-2 py-3 text-brand-cream/60 transition-transform',
+                          isExpanded && 'rotate-180'
+                        )}
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Submenu */}
+                  {hasSubmenu && isExpanded && (
+                    <div className="ml-4 space-y-1 mt-1">
+                      {item.submenu.map((subitem: any) => {
+                        const isSubActive = pathname === subitem.href;
+                        return (
+                          <Link
+                            key={subitem.href}
+                            href={subitem.href}
+                            onClick={onClose}
+                            className={cn(
+                              'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
+                              isSubActive
+                                ? 'bg-brand-brown/30 text-brand-brown font-semibold'
+                                : 'text-brand-cream/70 hover:bg-brand-dark-grey/50'
+                            )}
+                          >
+                            <span>{subitem.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
                   )}
-                >
-                  <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
-                </Link>
+                </div>
               );
             })}
           </nav>

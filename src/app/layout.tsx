@@ -2,8 +2,11 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Whiskey Riders',
+  title: 'THE WHISKEY RIDERS',
   description: 'Private members portal for Whiskey Riders motorcycle adventures',
+  icons: {
+    icon: '/6.png',
+  },
 };
 
 export default function RootLayout({
@@ -13,7 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="h-full bg-black text-brand-cream">
+      <body className="h-full bg-brand-dark-grey text-brand-cream">
         {children}
       </body>
     </html>

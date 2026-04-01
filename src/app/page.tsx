@@ -1,43 +1,91 @@
 import Link from 'next/link';
-import { Bike } from 'lucide-react';
+import { createClient } from '@/lib/supabase/server';
 
-export default function Home() {
+async function getSiteSettings() {
+  try {
+    const supabase = await createClient();
+    
+    const { data } = await supabase
+      .from('site_settings')
+      .select('*')
+      .single();
+    
+    return {
+      logoUrl: data?.logo_url || '/3.png',
+      backgroundImageUrl: data?.background_image_url || '/swirl-bg.svg',
+    };
+  } catch (err) {
+    console.error('Failed to load site settings:', err);
+    return {
+      logoUrl: '/3.png',
+      backgroundImageUrl: '/swirl-bg.svg',
+    };
+  }
+}
+
+async function getTrips() {
+  try {
+    const supabase = await createClient();
+    
+    const { data } = await supabase
+      .from('trips')
+      .select('id, slug, name, destination, cover_image_url')
+      .order('start_date', { ascending: false })
+      .limit(12);
+    
+    return data || [];
+  } catch (err) {
+    console.error('Failed to load trips:', err);
+    return [];
+  }
+}
+
+export default async function Home() {
+  const { logoUrl, backgroundImageUrl } = await getSiteSettings();
+  const trips = await getTrips();
+
   return (
     <div className="min-h-screen bg-brand-black text-brand-cream flex flex-col">
       {/* Navigation */}
       <nav className="border-b border-brand-brown/20 bg-brand-black/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bike className="w-8 h-8 text-brand-brown" />
-            <span className="text-xl font-bold text-brand-cream">Whiskey Riders</span>
+          <div className="flex items-center gap-3">
+            <img
+              src={logoUrl}
+              alt="Whiskey Riders Logo"
+              className="h-10 w-10 object-contain"
+            />
+            <span className="text-xl font-bold text-brand-cream">THE WHISKEY RIDERS</span>
           </div>
-          <Link
-            href="/login"
-            className="px-6 py-2 bg-brand-brown hover:bg-brand-brown/90 text-brand-black font-semibold rounded-lg transition-colors"
-          >
-            Sign In
-          </Link>
         </div>
       </nav>
 
       {/* Hero */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-20">
-        <div className="text-center max-w-3xl mx-auto space-y-8">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-20 relative overflow-hidden">
+        {/* Background Image */}
+        <div
+          className="absolute inset-0 z-0 opacity-40"
+          style={{
+            backgroundImage: `url('${backgroundImageUrl}')`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundAttachment: 'fixed',
+          }}
+        />
+
+        <div className="relative z-10 text-center max-w-3xl mx-auto space-y-8">
           <div className="space-y-4">
-            <div className="inline-block">
-              <div className="text-6xl sm:text-7xl font-bold mb-4">🏍️</div>
+            <div className="flex justify-center mb-8">
+              <img
+                src={logoUrl}
+                alt="Whiskey Riders Logo"
+                className="h-96 w-96 object-contain"
+              />
             </div>
-            <h1 className="text-5xl sm:text-6xl font-bold tracking-tight">
-              Whiskey Riders
-            </h1>
             <p className="text-3xl sm:text-4xl text-brand-tan font-semibold">
-              Ride. Bond. Remember.
+              Until We Ride
             </p>
           </div>
-
-          <p className="text-lg sm:text-xl text-brand-cream/80 leading-relaxed">
-            The private members portal for epic motorcycle adventures around the world. Connect with fellow riders, track journeys, and create unforgettable memories.
-          </p>
 
           <div className="pt-8">
             <Link
@@ -47,32 +95,79 @@ export default function Home() {
               Enter Portal
             </Link>
           </div>
+        </div>
+      </main>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 pt-12">
-            <div className="surface-dark rounded-lg p-6 border border-brand-brown/20">
-              <div className="text-3xl mb-3">🗺️</div>
-              <h3 className="text-lg font-semibold mb-2">Epic Destinations</h3>
-              <p className="text-brand-cream/70">
-                Explore curated motorcycle routes across continents
-              </p>
+      {/* Trips Grid */}
+      {trips.length > 0 && (
+        <section className="py-20 px-4 sm:px-6 lg:px-8 bg-brand-black border-t border-brand-brown/20">
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-4xl font-bold text-center mb-12">Our Adventures</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {trips.map((trip) => (
+                <Link
+                  key={trip.id}
+                  href={`/gallery/${trip.slug}`}
+                  className="group relative overflow-hidden rounded-lg border border-brand-brown/20 hover:border-brand-brown/60 transition-all duration-300"
+                >
+                  {/* Trip Image */}
+                  <div className="relative h-64 bg-brand-black/50 overflow-hidden">
+                    {trip.cover_image_url && (
+                      <img
+                        src={trip.cover_image_url}
+                        alt={trip.name}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-brand-black via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity duration-300" />
+                  </div>
+
+                  {/* Trip Info */}
+                  <div className="absolute inset-0 flex flex-col justify-end p-6">
+                    <h3 className="text-2xl font-bold text-brand-cream mb-1 group-hover:text-brand-tan transition-colors">
+                      {trip.name}
+                    </h3>
+                    <p className="text-brand-cream/70 text-sm group-hover:text-brand-cream transition-colors">
+                      {trip.destination}
+                    </p>
+                  </div>
+                </Link>
+              ))}
             </div>
-            <div className="surface-dark rounded-lg p-6 border border-brand-brown/20">
-              <div className="text-3xl mb-3">🤝</div>
-              <h3 className="text-lg font-semibold mb-2">Connected Riders</h3>
-              <p className="text-brand-cream/70">
-                Bond with fellow enthusiasts who share your passion
-              </p>
-            </div>
-            <div className="surface-dark rounded-lg p-6 border border-brand-brown/20">
-              <div className="text-3xl mb-3">📸</div>
-              <h3 className="text-lg font-semibold mb-2">Shared Memories</h3>
-              <p className="text-brand-cream/70">
-                Capture and cherish moments from every adventure
-              </p>
+          </div>
+        </section>
+      )}
+
+      {/* Instagram Feed */}
+      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-brand-black/50 border-t border-brand-brown/20">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-4xl font-bold text-center mb-12">Follow Our Journey</h2>
+          <div className="bg-brand-black/80 rounded-lg border border-brand-brown/20 p-8 text-center">
+            <p className="text-brand-cream/70 mb-6">
+              Follow us on Instagram for the latest stories from the road
+            </p>
+            <a
+              href="https://www.instagram.com/thewhiskeyriders/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-8 py-3 bg-brand-brown hover:bg-brand-brown/90 text-brand-black font-bold rounded-lg transition-colors"
+            >
+              @thewhiskeyriders on Instagram
+            </a>
+            {/* Instagram Embed */}
+            <div className="mt-8 max-h-96 overflow-y-auto rounded-lg">
+              <iframe
+                src="https://www.instagram.com/thewhiskeyriders/embed"
+                width="100%"
+                height="600"
+                frameBorder="0"
+                scrolling="auto"
+                className="rounded-lg"
+              />
             </div>
           </div>
         </div>
-      </main>
+      </section>
 
       {/* Footer */}
       <footer className="border-t border-brand-brown/20 bg-brand-black/50 py-8">

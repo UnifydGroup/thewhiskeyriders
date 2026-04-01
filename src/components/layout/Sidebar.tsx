@@ -9,6 +9,7 @@ import {
   User,
   X,
   LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -19,6 +20,7 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   onLogout: () => void;
+  userRole?: string;
 }
 
 const navItems = [
@@ -28,7 +30,8 @@ const navItems = [
   { href: '/gallery', label: 'Gallery', icon: Image },
 ];
 
-export function Sidebar({ isOpen, onClose, onLogout }: SidebarProps) {
+export function Sidebar({ isOpen, onClose, onLogout, userRole }: SidebarProps) {
+  const isAdmin = userRole === 'super_admin' || userRole === 'admin' || userRole === 'trip_admin';
   const pathname = usePathname();
 
   return (
@@ -84,6 +87,26 @@ export function Sidebar({ isOpen, onClose, onLogout }: SidebarProps) {
                 </Link>
               );
             })}
+
+            {/* Admin link — only visible to admins */}
+            {isAdmin && (
+              <>
+                <div className="border-t border-brand-brown/20 my-2" />
+                <Link
+                  href="/admin"
+                  onClick={onClose}
+                  className={cn(
+                    'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                    pathname.startsWith('/admin')
+                      ? 'bg-brand-brown text-brand-black font-semibold'
+                      : 'text-brand-brown hover:bg-brand-dark-grey/50'
+                  )}
+                >
+                  <ShieldCheck className="w-5 h-5" />
+                  <span>Admin Panel</span>
+                </Link>
+              </>
+            )}
           </nav>
 
           {/* Logout button */}

@@ -17,6 +17,7 @@ export default function PortalLayout({
   const supabase = createClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('');
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -25,6 +26,13 @@ export default function PortalLayout({
         router.push('/login');
       } else {
         setUserEmail(data.session.user.email || '');
+        // Fetch user role from profiles table
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.session.user.id)
+          .single();
+        if (profile) setUserRole(profile.role);
       }
     };
     checkAuth();
@@ -50,6 +58,7 @@ export default function PortalLayout({
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onLogout={handleLogout}
+          userRole={userRole}
         />
 
         {/* Main content */}

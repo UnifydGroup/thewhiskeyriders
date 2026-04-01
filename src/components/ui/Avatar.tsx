@@ -22,7 +22,7 @@ export function Avatar({ src, alt, size = 'md', className, ...props }: AvatarPro
   return (
     <div
       className={cn(
-        'rounded-full flex items-center justify-center font-semibold overflow-hidden bg-brand-brown/20 border border-brand-brown/40 flex-shrink-0',
+        'rounded-full flex items-center justify-center font-semibold overflow-hidden bg-brand-brown/20 border border-brand-brown/40 flex-shrink-0 relative',
         sizeStyles[size],
         className
       )}
@@ -33,6 +33,7 @@ export function Avatar({ src, alt, size = 'md', className, ...props }: AvatarPro
           src={src}
           alt={alt}
           fill
+          unoptimized
           className="object-cover"
         />
       ) : (

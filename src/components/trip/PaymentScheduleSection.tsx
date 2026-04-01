@@ -13,11 +13,13 @@ interface PaymentMilestone {
 
 interface PaymentScheduleSectionProps {
   tripId: string;
+  tripName?: string;
   showPaymentInfo?: boolean;
 }
 
 export default function PaymentScheduleSection({
   tripId,
+  tripName,
   showPaymentInfo = true,
 }: PaymentScheduleSectionProps) {
   const [schedule, setSchedule] = useState<PaymentMilestone[]>([]);
@@ -69,7 +71,10 @@ export default function PaymentScheduleSection({
     return null;
   }
 
-  const totalPaymentRequired = schedule[schedule.length - 1]?.accumulated_amount || 5000;
+  const scheduleTargetAmount = schedule[schedule.length - 1]?.accumulated_amount || 5000;
+  const isMorocco2027 = (tripName || '').toLowerCase().includes('morocco 2027');
+  const flightsCost = isMorocco2027 ? 2500 : 0;
+  const totalTripCost = scheduleTargetAmount + flightsCost;
 
   return (
     <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg overflow-hidden">
@@ -80,8 +85,17 @@ export default function PaymentScheduleSection({
           <h3 className="text-xl font-bold text-brand-cream">Payment Schedule</h3>
         </div>
         <p className="text-sm text-brand-cream/70">
-          Total trip cost: <span className="font-semibold text-brand-tan">${totalPaymentRequired.toFixed(2)}</span>
+          Total trip cost:{' '}
+          <span className="font-semibold text-brand-tan">${totalTripCost.toFixed(2)}</span>
         </p>
+        {flightsCost > 0 && (
+          <p className="text-sm text-brand-cream/70 mt-1">
+            Payment schedule target (member deposits):{' '}
+            <span className="font-semibold text-brand-tan">${scheduleTargetAmount.toFixed(2)}</span>
+            {' '}+ Flights:{' '}
+            <span className="font-semibold text-brand-tan">${flightsCost.toFixed(2)}</span>
+          </p>
+        )}
       </div>
 
       <div className="p-6 space-y-6">

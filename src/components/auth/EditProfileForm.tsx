@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Notification } from '@/components/ui/Notification';
 import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
-import CropImageModal from './CropImageModal';
 import { AlertCircle, Upload, Trash2 } from 'lucide-react';
 import { APPAREL_SIZES } from '@/lib/profile-options';
 
@@ -617,17 +616,3 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
 
         {/* Crop Image Modal */}
         {cropModalOpen && imageToCrop && (
-          <CropImageModal
-            imageSrc={imageToCrop}
-            onCropComplete={handleCropComplete}
-            onCancel={() => {
-              setCropModalOpen(false);
-              setImageToCrop(null);
-            }}
-            aspectRatio={1}
-          />
-        )}
-      </CardContent>
-    </Card>
-  );
-}

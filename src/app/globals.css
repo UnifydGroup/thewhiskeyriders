@@ -19,7 +19,7 @@
   --color-brand-cream: #f5f0e8;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --color-background: #0d0d0d;
+  --color-background: #1a1a1a;
   --color-foreground: #f5f0e8;
 }
 
@@ -28,7 +28,7 @@ html {
 }
 
 body {
-  @apply bg-black text-brand-cream font-sans;
+  @apply bg-brand-dark-grey text-brand-cream font-sans;
 }
 
 /* Scrollbar styling */
@@ -46,7 +46,7 @@ body {
 
 /* Focus rings */
 :focus-visible {
-  @apply outline-none ring-2 ring-brand-brown ring-offset-2 ring-offset-black;
+  @apply outline-none ring-2 ring-brand-brown ring-offset-2 ring-offset-brand-dark-grey;
 }
 
 /* Utility classes */

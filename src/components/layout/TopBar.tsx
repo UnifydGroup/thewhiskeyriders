@@ -1,5 +1,6 @@
-import { Bike, Menu, LogOut } from 'lucide-react';
+import { Menu, LogOut } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
 
 interface TopBarProps {
@@ -20,7 +21,7 @@ export function TopBar({ onMenuClick, userEmail, onLogout }: TopBarProps) {
             <Menu className="w-6 h-6" />
           </button>
           <Link href="/dashboard" className="flex items-center gap-2">
-            <Bike className="w-6 h-6 text-brand-brown" />
+            <Image src="/5.png" alt="Whiskey Riders Logo" width={32} height={32} />
             <span className="font-bold text-brand-cream hidden sm:inline">Whiskey Riders</span>
           </Link>
         </div>

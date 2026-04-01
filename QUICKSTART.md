@@ -1,32 +1,44 @@
 # Whiskey Riders Portal - Quick Start Guide
 
-## Installation & Setup
+## 🚀 Getting Started
 
-### 1. Install Dependencies
+### 1. Installation & Setup
+
 ```bash
 npm install
-```
-
-### 2. Environment Variables
-The `.env.local` file is already configured with:
-```
-NEXT_PUBLIC_SUPABASE_URL=https://xhapsqyyjrdwczquanxd.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-### 3. Development Server
-```bash
 npm run dev
 ```
+
 Visit `http://localhost:3000`
 
-### 4. Build for Production
+### 2. Environment Variables
+Already configured in `.env.local` with Supabase credentials.
+
+### 3. Build for Production
 ```bash
 npm run build
 npm start
 ```
 
-## Website Structure
+---
+
+## 📚 NEW! Backend & CMS Documentation
+
+### Start Here ⭐
+1. **BUILD_SUMMARY.md** - Overview of everything built (5 min read)
+2. **API_REFERENCE.md** - How to use each API endpoint (10 min read)
+3. **CMS_FEATURE_ROADMAP.md** - What to build next (prioritized list)
+4. **BACKEND_BUILD_GUIDE.md** - Deep technical reference
+
+### For Developers
+- **14 Production-Ready API Endpoints** - Full CRUD for trips, payments, awards, members, documents, updates
+- **CMS Components** - DataTable and FormComponent for building admin pages
+- **Admin Dashboard** - Statistics overview and quick actions
+- **Comprehensive Documentation** - API reference, examples, best practices
+
+---
+
+## 🌐 Website Structure
 
 ### Public Pages
 - `/` - Landing page with hero and CTA
@@ -47,6 +59,142 @@ npm start
 - `/admin/trips` - Manage trips (CRUD)
 - `/admin/members` - Manage users and roles
 - `/admin/payments` - Import payment data from Excel
+
+---
+
+## 🔧 Backend API Quick Reference
+
+### Available Endpoints (14 total)
+```
+Trips:     ✅ List, Create, Get, Update, Delete
+Members:   ✅ List, Get, Update  
+Payments:  ✅ List, Create (Update/Delete coming)
+Awards:    ✅ List, Create (Update/Delete coming)
+Votes:     ✅ Results, Cast
+Documents: ✅ List, Upload (Delete coming)
+Updates:   ✅ List, Create (Edit/Delete coming)
+```
+
+### Test an API
+```bash
+# Get all trips
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:3000/api/trips
+
+# Create a trip (admin only)
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Iceland","destination":"Reykjavik","country":"Iceland","start_date":"2027-08-01","end_date":"2027-08-10"}' \
+  http://localhost:3000/api/trips
+```
+
+See `API_REFERENCE.md` for complete endpoint documentation with examples.
+
+---
+
+## 🎯 Building New Features
+
+### Quick Pattern: API Endpoint
+```typescript
+// 1. Create file: src/app/api/new-route/route.ts
+import { verifyRole, successResponse, errorResponse, ApiErrors } from '@/lib/api/helpers';
+
+export async function GET(request: NextRequest) {
+  const { authenticated } = await verifyRole(request, ['admin']);
+  if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
+  
+  // Your logic here
+  const data = await fetchData();
+  return successResponse(data);
+}
+```
+
+### Quick Pattern: CMS Page
+```typescript
+// 2. Create file: src/app/(admin)/admin/my-page.tsx
+'use client';
+import { DataTable } from '@/components/admin/DataTable';
+
+export default function MyPage() {
+  const [items, setItems] = useState([]);
+  
+  useEffect(() => {
+    fetch('/api/my-endpoint').then(r => r.json()).then(d => setItems(d.data.items));
+  }, []);
+
+  return <DataTable columns={[{key:'name',label:'Name'}]} data={items} rowKey="id" />;
+}
+```
+
+---
+
+## 📖 Key Files Reference
+
+| File | Purpose |
+|------|---------|
+| `BUILD_SUMMARY.md` | Overview of what's been built |
+| `API_REFERENCE.md` | Complete API documentation |
+| `CMS_FEATURE_ROADMAP.md` | Next features to build (prioritized) |
+| `BACKEND_BUILD_GUIDE.md` | Technical deep dive |
+| `src/lib/api/helpers.ts` | 25+ utility functions for APIs |
+| `src/lib/types/database.ts` | TypeScript types for database |
+| `src/components/admin/DataTable.tsx` | Reusable table component |
+| `src/components/admin/FormComponent.tsx` | Reusable form builder |
+
+---
+
+## 🚦 Next Steps
+
+### This Hour
+- [ ] Read `BUILD_SUMMARY.md`
+- [ ] Read `API_REFERENCE.md` 
+- [ ] Test one API endpoint with curl
+
+### Today
+- [ ] Pick a feature from `CMS_FEATURE_ROADMAP.md`
+- [ ] Build the CMS page using DataTable/FormComponent
+- [ ] Connect it to the API
+
+### This Week
+- [ ] Complete one full feature
+- [ ] Build admin forms for core resources
+- [ ] Connect dashboard to real data
+
+---
+
+## 🆘 Common Questions
+
+**Q: How do I call an API?**
+A: See curl examples in `API_REFERENCE.md` or use browser fetch()
+
+**Q: How do I build a CMS page?**
+A: Use DataTable for lists or FormComponent for forms
+
+**Q: How do I add a new endpoint?**
+A: Copy pattern from existing endpoint in `/src/app/api/`
+
+**Q: How do I check permissions?**
+A: Use `verifyRole()` helper - see examples in BACKEND_BUILD_GUIDE.md
+
+**Q: Where are TypeScript types?**
+A: `src/lib/types/database.ts`
+
+**Q: How do I log actions?**
+A: Use `logActivity()` helper
+
+---
+
+## 📚 Learn More
+
+- **Backend Architecture**: `BACKEND_BUILD_GUIDE.md`
+- **API Usage Examples**: `API_REFERENCE.md`
+- **Feature Planning**: `CMS_FEATURE_ROADMAP.md`
+- **Code Examples**: Look at existing files in `/src/app/api/`
+
+---
+
+**Last Updated:** March 31, 2027
+**Status:** Backend Phase 1 & 2 Complete ✅ - Ready for Phase 3 Feature Build
 
 ## Key Features
 

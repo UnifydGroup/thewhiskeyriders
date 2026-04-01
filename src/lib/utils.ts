@@ -6,7 +6,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(date: string | Date, formatStr = 'MMM d, yyyy'): string {
+export function formatDate(date: string | Date | null | undefined, formatStr = 'MMM d, yyyy'): string {
+  if (!date) return '—';
   const dateObj = typeof date === 'string' ? new Date(date) : date;
   return format(dateObj, formatStr);
 }
