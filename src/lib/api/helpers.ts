@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import { UserRole, ActivityAction } from '@/lib/types/database';
 import type { SupabaseDatabase } from '@/lib/types/database.generated';
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 // Lazy singleton — not created at module load time so build succeeds without env vars
 let _supabase: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
@@ -17,6 +19,55 @@ function getSupabase() {
 const supabase = new Proxy({} as ReturnType<typeof createClient<SupabaseDatabase>>, {
   get: (_target, prop) => getSupabase()[prop as keyof ReturnType<typeof createClient<SupabaseDatabase>>],
 });
+
+// Separate auth client using anon key so user token verification does not depend on service role key.
+let _authClient: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
+function getAuthClient() {
+  if (!_authClient) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) {
+      throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    }
+    _authClient = createClient<SupabaseDatabase>(url, anonKey);
+  }
+  return _authClient;
+}
+
+async function getCurrentUserFromCookies() {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) return null;
+
+    const cookieStore = await cookies();
+    const sessionClient = createServerClient<SupabaseDatabase>(url, anonKey, {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Ignore set attempts when not allowed in this context.
+          }
+        },
+      },
+    });
+
+    const {
+      data: { user },
+      error,
+    } = await sessionClient.auth.getUser();
+    if (error || !user) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -69,20 +120,21 @@ export function successResponse<T>(data: T, status = 200): NextResponse<ApiRespo
 // Get current user from request
 export async function getCurrentUser(request: NextRequest) {
   const authHeader = request.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return null;
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    if (token) {
+      try {
+        const {
+          data: { user },
+        } = await getAuthClient().auth.getUser(token);
+        if (user) return user;
+      } catch {
+        // Fall back to cookie-based session lookup.
+      }
+    }
   }
 
-  const token = authHeader.substring(7);
-
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser(token);
-    return user;
-  } catch {
-    return null;
-  }
+  return getCurrentUserFromCookies();
 }
 
 // Get user profile with role

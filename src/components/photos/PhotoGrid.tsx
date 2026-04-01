@@ -672,7 +672,6 @@ export default function PhotoGrid({
                   fill
                   className="object-cover group-hover:scale-105 transition-transform"
                   sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                  unoptimized
                 />
 
                 {canBulkTag && editablePhotoIds.has(photo.id) && (

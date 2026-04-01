@@ -187,20 +187,28 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session?.access_token) {
-        throw new Error('Your session has expired. Please sign in again.');
+      let accessToken = session?.access_token ?? null;
+      if (!accessToken) {
+        const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+        if (!refreshError) {
+          accessToken = refreshed.session?.access_token ?? null;
+        }
       }
 
       if (!profile.id) {
         throw new Error('Profile ID is missing');
       }
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
       const response = await fetch(`/api/members/${profile.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
+        headers,
         body: JSON.stringify({
           ...formData,
           full_name: buildFullName(formData.first_name, formData.middle_name, formData.surname),
