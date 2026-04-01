@@ -7,9 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
+import { ImageCropModal } from '@/components/ui/ImageCropModal';
 import {
   Edit2, Trash2, Archive, X, Save, AlertCircle, CheckCircle,
-  Users, Search, Shield, UserCheck, Bike, Plus, Camera
+  Users, Search, Shield, UserCheck, Bike, Plus, Camera, Mail
 } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
 import { APPAREL_SIZES } from '@/lib/profile-options';
@@ -55,6 +56,10 @@ export default function MemberManagementPage() {
   const [editingMemberTripIds, setEditingMemberTripIds] = useState<string[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
+
+  // Password reset state
+  const [resetEmailLoading, setResetEmailLoading] = useState<string | null>(null); // member id being reset
+  const [resetEmailSuccess, setResetEmailSuccess] = useState<string | null>(null); // member id last succeeded
 
   // Avatar / photo upload state (scoped to the edit modal)
   const [avatarCropModalOpen, setAvatarCropModalOpen] = useState(false);
@@ -335,6 +340,32 @@ export default function MemberManagementPage() {
       });
     } finally {
       setIsSavingMember(false);
+    }
+  };
+
+  const handleSendResetEmail = async (memberId: string, email: string) => {
+    setResetEmailLoading(memberId);
+    setResetEmailSuccess(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/admin/members/reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error((json as any).error || 'Failed to send reset email');
+      }
+      setResetEmailSuccess(memberId);
+      setTimeout(() => setResetEmailSuccess(null), 4000);
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to send reset email' });
+    } finally {
+      setResetEmailLoading(null);
     }
   };
 
@@ -1049,9 +1080,22 @@ export default function MemberManagementPage() {
                             setEditingMemberTripIds(assignedTripIds);
                           }}
                           className="p-2 hover:bg-brand-brown/20 rounded transition-colors"
-                          title="Edit"
+                          title="Edit member"
                         >
                           <Edit2 className="w-4 h-4 text-brand-brown" />
+                        </button>
+                        <button
+                          onClick={() => void handleSendResetEmail(member.id, member.email)}
+                          disabled={resetEmailLoading === member.id}
+                          className="p-2 hover:bg-blue-900/20 rounded transition-colors disabled:opacity-50"
+                          title={resetEmailSuccess === member.id ? 'Reset email sent!' : 'Send password reset email'}
+                        >
+                          {resetEmailSuccess === member.id
+                            ? <CheckCircle className="w-4 h-4 text-green-500" />
+                            : resetEmailLoading === member.id
+                              ? <Spinner />
+                              : <Mail className="w-4 h-4 text-blue-400" />
+                          }
                         </button>
                         <button
                           onClick={() => handleArchiveMember(member.id)}
@@ -1394,6 +1438,312 @@ export default function MemberManagementPage() {
                   Cancel
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <ImageCropModal
+        isOpen={avatarCropModalOpen}
+        imageSrc={avatarImageToCrop}
+        title="Adjust Profile Photo"
+        onClose={() => {
+          if (uploadingAvatar) return;
+          setAvatarCropModalOpen(false);
+          setAvatarImageToCrop(null);
+        }}
+        onConfirm={handleAvatarCropComplete}
+        confirmLabel="Upload Photo"
+        processingLabel="Uploading..."
+        cropShape="round"
+      />
+
+      {/* ── Create Member Modal ─────────────────────────────────── */}
+      {isCreatingMember && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-brand-dark-grey">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 border-b border-brand-brown/20">
+              <CardTitle className="text-brand-cream">Add New Member</CardTitle>
+              <button
+                onClick={() => { setIsCreatingMember(false); setMessage(null); }}
+                className="text-brand-cream/60 hover:text-brand-cream transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-6">
+
+              {/* Personal Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Personal Information</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">First Name</label>
+                    <Input
+                      value={newMember.first_name}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, first_name: e.target.value }))}
+                      placeholder="First name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Middle Name</label>
+                    <Input
+                      value={newMember.middle_name}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, middle_name: e.target.value }))}
+                      placeholder="Middle name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Surname *</label>
+                    <Input
+                      value={newMember.surname}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, surname: e.target.value }))}
+                      placeholder="Surname"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Nickname</label>
+                    <Input
+                      value={newMember.nickname}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, nickname: e.target.value }))}
+                      placeholder="Nickname"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Date of Birth</label>
+                    <Input
+                      type="date"
+                      value={newMember.date_of_birth}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, date_of_birth: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Contact Information</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-xs text-brand-cream/60 mb-1">Email Address *</label>
+                    <Input
+                      type="email"
+                      value={newMember.email}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, email: e.target.value }))}
+                      placeholder="email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Phone Country Code</label>
+                    <Input
+                      value={newMember.phone_country_code}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, phone_country_code: e.target.value }))}
+                      placeholder="+61"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Phone Number</label>
+                    <Input
+                      value={newMember.phone}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, phone: e.target.value }))}
+                      placeholder="04xx xxx xxx"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Emergency Contact</label>
+                    <Input
+                      value={newMember.emergency_contact}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, emergency_contact: e.target.value }))}
+                      placeholder="Contact name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Emergency Contact Number</label>
+                    <Input
+                      value={newMember.emergency_contact_number}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, emergency_contact_number: e.target.value }))}
+                      placeholder="Phone number"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Address */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Address</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-xs text-brand-cream/60 mb-1">Address Line 1</label>
+                    <Input
+                      value={newMember.address_line1}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_line1: e.target.value }))}
+                      placeholder="Street address"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-brand-cream/60 mb-1">Address Line 2</label>
+                    <Input
+                      value={newMember.address_line2}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_line2: e.target.value }))}
+                      placeholder="Apt, suite, etc."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">City</label>
+                    <Input
+                      value={newMember.address_city}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_city: e.target.value }))}
+                      placeholder="City"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">State / Region</label>
+                    <Input
+                      value={newMember.address_state}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_state: e.target.value }))}
+                      placeholder="State"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Postcode</label>
+                    <Input
+                      value={newMember.address_postcode}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_postcode: e.target.value }))}
+                      placeholder="Postcode"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Country</label>
+                    <Input
+                      value={newMember.address_country}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, address_country: e.target.value }))}
+                      placeholder="Country"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Travel Documentation */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Travel Documentation</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Passport Number</label>
+                    <Input
+                      value={newMember.passport_number}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, passport_number: e.target.value }))}
+                      placeholder="Passport number"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Passport Expiry</label>
+                    <Input
+                      type="date"
+                      value={newMember.passport_expiry}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, passport_expiry: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Travel Gear */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Travel Gear</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Shirt Size</label>
+                    <select
+                      value={newMember.shirt_size}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, shirt_size: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black/50 border border-brand-brown/30 rounded text-brand-cream text-sm focus:outline-none focus:border-brand-brown"
+                    >
+                      <option value="">Select size</option>
+                      {APPAREL_SIZES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Shorts Size</label>
+                    <select
+                      value={newMember.shorts_size}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, shorts_size: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black/50 border border-brand-brown/30 rounded text-brand-cream text-sm focus:outline-none focus:border-brand-brown"
+                    >
+                      <option value="">Select size</option>
+                      {APPAREL_SIZES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Admin Settings */}
+              <div>
+                <h3 className="text-sm font-semibold text-brand-brown uppercase tracking-wider mb-3">Admin Settings</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Role</label>
+                    <select
+                      value={newMember.role}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, role: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black/50 border border-brand-brown/30 rounded text-brand-cream text-sm focus:outline-none focus:border-brand-brown"
+                    >
+                      <option value="member">Member</option>
+                      <option value="admin">Admin</option>
+                      <option value="super_admin">Super Admin</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-brand-cream/60 mb-1">Status</label>
+                    <select
+                      value={newMember.status}
+                      onChange={(e) => setNewMember((p: any) => ({ ...p, status: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black/50 border border-brand-brown/30 rounded text-brand-cream text-sm focus:outline-none focus:border-brand-brown"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error / Success */}
+              {message && (
+                <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+                  message.type === 'error'
+                    ? 'bg-red-900/20 border border-red-500/30 text-red-200'
+                    : 'bg-green-900/20 border border-green-500/30 text-green-200'
+                }`}>
+                  {message.type === 'error'
+                    ? <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    : <CheckCircle className="w-4 h-4 flex-shrink-0" />}
+                  {message.text}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2 border-t border-brand-brown/20">
+                <Button
+                  onClick={() => void handleCreateMember()}
+                  isLoading={isSavingMember}
+                  disabled={isSavingMember}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  {isSavingMember ? 'Creating…' : 'Create Member'}
+                </Button>
+                <Button
+                  onClick={() => { setIsCreatingMember(false); setMessage(null); }}
+                  disabled={isSavingMember}
+                  className="px-6 bg-brand-black/50 hover:bg-brand-black/70 text-brand-cream"
+                >
+                  Cancel
+                </Button>
+              </div>
+
             </CardContent>
           </Card>
         </div>

@@ -43,7 +43,6 @@ interface PhotoGridProps {
 }
 
 interface TripMemberProfile {
-  full_name: string | null;
   nickname: string | null;
 }
 
@@ -118,7 +117,7 @@ export default function PhotoGrid({
       try {
         const { data, error } = await supabase
           .from('trip_members')
-          .select('profiles:user_id(full_name, nickname)')
+          .select('profiles:user_id(nickname)')
           .eq('trip_id', tripId);
 
         if (error || cancelled) {
@@ -140,9 +139,6 @@ export default function PhotoGrid({
             names.add(profile.nickname.trim());
           }
 
-          if (profile.full_name?.trim()) {
-            names.add(profile.full_name.trim());
-          }
         });
 
         setMemberNameSuggestions(Array.from(names).sort((a, b) => a.localeCompare(b)));

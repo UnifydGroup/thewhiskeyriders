@@ -1,24 +1,57 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createServerClient } from '@/lib/supabase/server';
+import type { SupabaseDatabase } from '@/lib/types/database.generated';
 
-const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-let _supabaseInstance: ReturnType<typeof createClient> | null = null;
-function _getSupabase() {
-  if (!_supabaseInstance) {
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
-    _supabaseInstance = createClient(_supabaseUrl, key);
+type DbClient = ReturnType<typeof createSupabaseClient<SupabaseDatabase>>;
+
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
+let serviceRoleSupabase: DbClient | null = null;
+
+function getServiceRoleClient(): DbClient | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) return null;
+
+  if (!serviceRoleSupabase) {
+    serviceRoleSupabase = createSupabaseClient<SupabaseDatabase>(supabaseUrl, key);
   }
-  return _supabaseInstance;
+
+  return serviceRoleSupabase;
 }
-const supabase = new Proxy({} as ReturnType<typeof createClient>, {
-  get: (_t, prop) => (_getSupabase() as any)[prop],
-});
+
+async function getSupabaseForRequest(): Promise<{
+  supabase: DbClient;
+  usingServiceRole: boolean;
+  currentUserId: string | null;
+}> {
+  const serviceRoleClient = getServiceRoleClient();
+  if (serviceRoleClient) {
+    return { supabase: serviceRoleClient, usingServiceRole: true, currentUserId: null };
+  }
+
+  const sessionClient = await createServerClient();
+  const {
+    data: { user },
+    error,
+  } = await sessionClient.auth.getUser();
+
+  if (error || !user) {
+    throw new Error('UNAUTHORIZED');
+  }
+
+  return {
+    supabase: sessionClient as unknown as DbClient,
+    usingServiceRole: false,
+    currentUserId: user.id,
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
+    const { supabase } = await getSupabaseForRequest();
     const body = await request.json();
     const { member_id, trip_id, payment_date, amount, payment_method, notes } = body;
 
@@ -56,6 +89,13 @@ export async function POST(request: NextRequest) {
       data: data[0],
     });
   } catch (error) {
+    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     console.error('Member payment API error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
@@ -66,6 +106,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const { supabase, usingServiceRole, currentUserId } = await getSupabaseForRequest();
     const { searchParams } = new URL(request.url);
     const tripId = searchParams.get('trip_id');
     const memberId = searchParams.get('member_id');
@@ -87,13 +128,23 @@ export async function GET(request: NextRequest) {
         amount,
         payment_method,
         notes,
-        created_at,
-        profiles!member_id(id, full_name, email)
+        created_at
       `)
       .eq('trip_id', tripId);
 
-    if (memberId) {
-      query = query.eq('member_id', memberId);
+    if (usingServiceRole) {
+      if (memberId) {
+        query = query.eq('member_id', memberId);
+      }
+    } else {
+      if (memberId && memberId !== currentUserId) {
+        return NextResponse.json(
+          { error: 'Forbidden' },
+          { status: 403 }
+        );
+      }
+
+      query = query.eq('member_id', currentUserId);
     }
 
     const { data, error } = await query.order('payment_date', { ascending: false });
@@ -110,6 +161,13 @@ export async function GET(request: NextRequest) {
       payments: data || [],
     });
   } catch (error) {
+    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     console.error('Get payments API error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },

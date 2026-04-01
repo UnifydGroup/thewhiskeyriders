@@ -51,6 +51,15 @@ function getCandidateNames(profile: Profile): string[] {
   return Array.from(new Set(candidates));
 }
 
+function getMatchedTagDisplay(profile: Profile, rawTagValue: string): string {
+  if (rawTagValue === profile.id) {
+    const preferred = profile.nickname?.trim() || profile.full_name?.trim();
+    return preferred || rawTagValue;
+  }
+
+  return rawTagValue;
+}
+
 export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
   const supabase = useMemo(() => createClient(), []);
   const [loading, setLoading] = useState(true);
@@ -65,33 +74,56 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
       setError(null);
 
       try {
-        const candidateNames = getCandidateNames(profile);
-        if (candidateNames.length === 0) {
-          setPhotos([]);
-          return;
+        const tagRows: PhotoTagRow[] = [];
+        const seenTags = new Set<string>();
+
+        const addRows = (rows: Array<{ photo_id: string; tag_value: string }> | null) => {
+          (rows || []).forEach((row) => {
+            if (!row.photo_id || !row.tag_value) {
+              return;
+            }
+
+            const key = `${row.photo_id}:${row.tag_value}`;
+            if (seenTags.has(key)) {
+              return;
+            }
+
+            seenTags.add(key);
+            tagRows.push({
+              photo_id: row.photo_id,
+              tag_value: row.tag_value,
+            });
+          });
+        };
+
+        const { data: idTags, error: idTagsError } = await supabase
+          .from('photo_tags')
+          .select('photo_id, tag_value')
+          .eq('tag_type', 'person')
+          .eq('tag_value', profile.id);
+
+        if (idTagsError) {
+          throw new Error(idTagsError.message);
         }
 
-        const tagResponses = await Promise.all(
-          candidateNames.map(async (name) =>
-            supabase
-              .from('photo_tags')
-              .select('photo_id, tag_value')
-              .eq('tag_type', 'person')
-              .ilike('tag_value', name)
-          )
-        );
+        addRows(idTags as Array<{ photo_id: string; tag_value: string }> | null);
 
-        const tagRows: PhotoTagRow[] = [];
-        tagResponses.forEach(({ data }) => {
-          (data || []).forEach((row) => {
-            if (row.photo_id && row.tag_value) {
-              tagRows.push({
-                photo_id: row.photo_id,
-                tag_value: row.tag_value,
-              });
-            }
+        const candidateNames = getCandidateNames(profile);
+        if (candidateNames.length > 0) {
+          const legacyTagResponses = await Promise.all(
+            candidateNames.map(async (name) =>
+              supabase
+                .from('photo_tags')
+                .select('photo_id, tag_value')
+                .eq('tag_type', 'person')
+                .ilike('tag_value', name)
+            )
+          );
+
+          legacyTagResponses.forEach(({ data }) => {
+            addRows(data as Array<{ photo_id: string; tag_value: string }> | null);
           });
-        });
+        }
 
         const uniquePhotoIds = Array.from(new Set(tagRows.map((tag) => tag.photo_id)));
         if (uniquePhotoIds.length === 0) {
@@ -129,7 +161,7 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
         const firstTagByPhotoId = new Map<string, string>();
         tagRows.forEach((row) => {
           if (!firstTagByPhotoId.has(row.photo_id)) {
-            firstTagByPhotoId.set(row.photo_id, row.tag_value);
+            firstTagByPhotoId.set(row.photo_id, getMatchedTagDisplay(profile, row.tag_value));
           }
         });
 

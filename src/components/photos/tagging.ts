@@ -123,7 +123,7 @@ export function getTagSuggestions(
   savedSuggestions: string[] = []
 ): string[] {
   if (type === 'person') {
-    return uniqueSuggestions([...personSuggestions, ...savedSuggestions]);
+    return uniqueSuggestions(personSuggestions);
   }
 
   return uniqueSuggestions([...STATIC_TAG_SUGGESTIONS[type], ...savedSuggestions]);
