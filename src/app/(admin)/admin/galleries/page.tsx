@@ -33,6 +33,21 @@ interface GalleryPhoto {
   url: string;
 }
 
+interface RawPhotoResponse {
+  id?: string;
+  trip_id?: string;
+  gallery_id?: string | null;
+  uploaded_by?: string;
+  storage_path?: string;
+  caption?: string | null;
+  width?: number | null;
+  height?: number | null;
+  created_at?: string;
+  uploader_name?: string;
+  profiles?: { full_name?: string | null } | Array<{ full_name?: string | null }> | null;
+  url?: string;
+}
+
 type UploadItemStatus = 'queued' | 'uploading' | 'success' | 'failed' | 'skipped';
 
 interface UploadItem {
@@ -138,6 +153,27 @@ export default function GalleriesPage() {
       .join('');
   };
 
+  const parseJsonSafely = async (response: Response): Promise<unknown> => {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  };
+
+  const extractErrorMessage = (payload: unknown, fallback: string) => {
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      'error' in payload &&
+      typeof payload.error === 'string'
+    ) {
+      return payload.error;
+    }
+
+    return fallback;
+  };
+
   const hashFile = async (file: File) => hashArrayBuffer(await file.arrayBuffer());
 
   const hashPhotoUrl = async (url: string) => {
@@ -155,13 +191,30 @@ export default function GalleriesPage() {
     const response = await fetch(`/api/trips/${tripId}/photos`, {
       credentials: 'include',
     });
-    const data = await response.json();
-    if (!response.ok || !Array.isArray(data)) {
+    const data = await parseJsonSafely(response);
+    if (!response.ok) {
+      throw new Error(
+        extractErrorMessage(
+          data,
+          `Failed to fetch trip photos for duplicate check (HTTP ${response.status})`
+        )
+      );
+    }
+
+    if (!Array.isArray(data)) {
       throw new Error('Failed to fetch trip photos for duplicate check');
     }
 
     for (const photo of data) {
-      if (!photo?.id || !photo?.url || cachedHashes[photo.id]) {
+      if (
+        !photo ||
+        typeof photo !== 'object' ||
+        !('id' in photo) ||
+        !('url' in photo) ||
+        typeof photo.id !== 'string' ||
+        typeof photo.url !== 'string' ||
+        cachedHashes[photo.id]
+      ) {
         continue;
       }
 
@@ -345,32 +398,59 @@ export default function GalleriesPage() {
           : `/api/galleries/${gallery.id}`;
 
       const response = await fetch(endpoint, { credentials: 'include' });
-      const data = await response.json();
+      const data = await parseJsonSafely(response);
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to load gallery photos');
+        throw new Error(
+          extractErrorMessage(data, `Failed to load gallery photos (HTTP ${response.status})`)
+        );
       }
 
-      const rawPhotos = gallery.source === 'trip_all' ? data : data.photos;
+      const rawPhotos =
+        gallery.source === 'trip_all'
+          ? data
+          : data && typeof data === 'object' && 'photos' in data
+            ? data.photos
+            : null;
 
       const parsedPhotos = Array.isArray(rawPhotos)
-        ? rawPhotos.map((photo: any) => ({
-            id: photo.id,
-            trip_id: photo.trip_id,
-            gallery_id: photo.gallery_id ?? null,
-            uploaded_by: photo.uploaded_by,
-            storage_path: photo.storage_path,
-            caption: photo.caption,
-            width: photo.width,
-            height: photo.height,
-            created_at: photo.created_at,
-            uploader_name:
-              photo.uploader_name ||
-              (Array.isArray(photo.profiles)
-                ? photo.profiles[0]?.full_name || 'Unknown'
-                : photo.profiles?.full_name || 'Unknown'),
-            url: photo.url,
-          }))
+        ? rawPhotos
+            .map((photo) => {
+              if (!photo || typeof photo !== 'object') {
+                return null;
+              }
+
+              const raw = photo as RawPhotoResponse;
+              if (
+                !raw.id ||
+                !raw.trip_id ||
+                !raw.uploaded_by ||
+                !raw.storage_path ||
+                !raw.created_at ||
+                !raw.url
+              ) {
+                return null;
+              }
+
+              return {
+                id: raw.id,
+                trip_id: raw.trip_id,
+                gallery_id: raw.gallery_id ?? null,
+                uploaded_by: raw.uploaded_by,
+                storage_path: raw.storage_path,
+                caption: raw.caption ?? null,
+                width: raw.width ?? null,
+                height: raw.height ?? null,
+                created_at: raw.created_at,
+                uploader_name:
+                  raw.uploader_name ||
+                  (Array.isArray(raw.profiles)
+                    ? raw.profiles[0]?.full_name || 'Unknown'
+                    : raw.profiles?.full_name || 'Unknown'),
+                url: raw.url,
+              };
+            })
+            .filter((photo): photo is NonNullable<typeof photo> => photo !== null)
         : [];
 
       setGalleryPhotos(parsedPhotos);
@@ -687,13 +767,25 @@ export default function GalleriesPage() {
           body,
         });
 
-        const data = await response.json().catch(() => ({}));
+        const data = await parseJsonSafely(response);
+        const dataRecord =
+          data && typeof data === 'object'
+            ? (data as {
+                photos?: unknown;
+                failed?: unknown;
+                photo?: unknown;
+              })
+            : null;
         if (!response.ok) {
           failedFiles.push(...batch.map((item) => item.file.name));
           setUploadItems((previous) =>
             previous.map((item) =>
               batchIds.includes(item.id)
-                ? { ...item, status: 'failed', error: data.error || 'Upload failed' }
+                ? {
+                    ...item,
+                    status: 'failed',
+                    error: extractErrorMessage(data, `Upload failed (HTTP ${response.status})`),
+                  }
                 : item
             )
           );
@@ -708,12 +800,14 @@ export default function GalleriesPage() {
           if (data.length < batch.length) {
             batchFailedNames = batch.slice(data.length).map((item) => item.file.name);
           }
-        } else if (Array.isArray(data.photos)) {
-          batchSuccessCount = data.photos.length;
-          if (Array.isArray(data.failed)) {
-            batchFailedNames = data.failed.filter((name: unknown): name is string => typeof name === 'string');
+        } else if (dataRecord && Array.isArray(dataRecord.photos)) {
+          batchSuccessCount = dataRecord.photos.length;
+          if (Array.isArray(dataRecord.failed)) {
+            batchFailedNames = dataRecord.failed.filter(
+              (name: unknown): name is string => typeof name === 'string'
+            );
           }
-        } else if (data.photo) {
+        } else if (dataRecord?.photo) {
           batchSuccessCount = 1;
         } else {
           batchSuccessCount = batch.length;
