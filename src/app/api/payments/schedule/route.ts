@@ -3,14 +3,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!supabaseKey) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
+let _supabaseInstance: ReturnType<typeof createClient> | null = null;
+function _getSupabase() {
+  if (!_supabaseInstance) {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+    _supabaseInstance = createClient(_supabaseUrl, key);
+  }
+  return _supabaseInstance;
 }
-
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = new Proxy({} as ReturnType<typeof createClient>, {
+  get: (_t, prop) => (_getSupabase() as any)[prop],
+});
 
 interface PaymentMilestone {
   id: string;

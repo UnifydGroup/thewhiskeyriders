@@ -12,15 +12,20 @@ import {
   supabase,
 } from '@/lib/api/helpers';
 
-// Create a service role client for auth admin operations
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!serviceRoleKey) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+// Create a service role client for auth admin operations (lazy — not at module level)
+const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
+let _adminInstance: ReturnType<typeof createClient> | null = null;
+function _getAdmin() {
+  if (!_adminInstance) {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+    _adminInstance = createClient(_supabaseUrl, key);
+  }
+  return _adminInstance;
 }
-
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+const supabaseAdmin = new Proxy({} as ReturnType<typeof createClient>, {
+  get: (_t, prop) => (_getAdmin() as any)[prop],
+});
 
 type CreateMemberPayload = {
   email: string;
