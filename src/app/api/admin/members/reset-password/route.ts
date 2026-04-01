@@ -8,10 +8,18 @@ import {
   getJsonBody,
 } from '@/lib/api/helpers';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-);
+const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
+let _supabaseAdmin: ReturnType<typeof createClient> | null = null;
+function getSupabaseAdmin() {
+  if (!_supabaseAdmin) {
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+    }
+    _supabaseAdmin = createClient(_supabaseUrl, serviceRoleKey);
+  }
+  return _supabaseAdmin;
+}
 
 /**
  * POST /api/admin/members/reset-password
@@ -32,6 +40,7 @@ export async function POST(request: NextRequest) {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
     const redirectTo = `${siteUrl}/auth/callback?next=/reset-password`;
 
+    const supabaseAdmin = getSupabaseAdmin();
     const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, { redirectTo });
 
     if (error) {
