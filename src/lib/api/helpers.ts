@@ -3,10 +3,20 @@ import { UserRole, ActivityAction } from '@/lib/types/database';
 import type { SupabaseDatabase } from '@/lib/types/database.generated';
 import { NextRequest, NextResponse } from 'next/server';
 
-const supabase = createClient<SupabaseDatabase>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy singleton — not created at module load time so build succeeds without env vars
+let _supabase: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient<SupabaseDatabase>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
+const supabase = new Proxy({} as ReturnType<typeof createClient<SupabaseDatabase>>, {
+  get: (_target, prop) => getSupabase()[prop as keyof ReturnType<typeof createClient<SupabaseDatabase>>],
+});
 
 export interface ApiResponse<T> {
   success: boolean;
