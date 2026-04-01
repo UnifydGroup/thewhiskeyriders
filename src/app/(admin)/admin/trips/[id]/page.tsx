@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input, Textarea } from '@/components/ui/Input';
+import { Input, TextArea } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import { ArrowLeft, SaveIcon, Trash2 } from 'lucide-react';
@@ -330,7 +330,7 @@ export default function TripEditorPage() {
         {/* Description */}
         <div>
           <label className="block text-sm font-medium mb-2">Description</label>
-          <Textarea
+          <TextArea
             name="description"
             value={formData.description}
             onChange={handleChange}
