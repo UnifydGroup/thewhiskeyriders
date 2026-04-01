@@ -1399,5 +1399,6 @@ export default function MemberManagementPage() {
         </div>
       )}
 
-      {/* Crop modal for avatar in edit modal */}
-      {avatarCropModalOpen && avatarImageToCrop && (
+    </div>
+  );
+}
