@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -8,15 +8,43 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 import { formatDate, formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
-import { MapPin, Users } from 'lucide-react';
+import { Clock3, MapPin, Users } from 'lucide-react';
 import type { Trip } from '@/lib/types/database';
 import { WorldMap } from '@/components/map/WorldMap';
+
+type NextTripTicker = {
+  trip: Trip;
+  targetDate: Date;
+};
+
+function getCountdownTargetDate(trip: Pick<Trip, 'start_date' | 'countdown_target_at'>): Date | null {
+  if (trip.countdown_target_at) {
+    const explicitDate = new Date(trip.countdown_target_at);
+    if (!Number.isNaN(explicitDate.getTime())) {
+      return explicitDate;
+    }
+  }
+
+  const fallbackDate = new Date(`${trip.start_date}T00:00:00`);
+  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+}
+
+function getCountdownParts(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { days, hours, minutes, seconds };
+}
+
 export default function TripsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [myTripIds, setMyTripIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [showAllTrips, setShowAllTrips] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const loadTripsAndMemberships = async () => {
       try {
@@ -52,6 +80,41 @@ export default function TripsPage() {
     };
     loadTripsAndMemberships();
   }, [supabase]);
+
+  const nextTripTicker = useMemo<NextTripTicker | null>(() => {
+    const candidates = trips
+      .filter((trip) => trip.countdown_enabled === true && trip.status !== 'cancelled')
+      .map((trip) => {
+        const targetDate = getCountdownTargetDate(trip);
+        if (!targetDate) return null;
+        return { trip, targetDate };
+      })
+      .filter((entry): entry is NextTripTicker => Boolean(entry))
+      .filter((entry) => entry.targetDate.getTime() > nowMs)
+      .sort((a, b) => a.targetDate.getTime() - b.targetDate.getTime());
+
+    return candidates[0] || null;
+  }, [trips, nowMs]);
+
+  useEffect(() => {
+    if (!nextTripTicker) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [nextTripTicker]);
+
+  const tickerTimeLeft = useMemo(() => {
+    if (!nextTripTicker) return null;
+    return getCountdownParts(nextTripTicker.targetDate.getTime() - nowMs);
+  }, [nextTripTicker, nowMs]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -77,6 +140,34 @@ export default function TripsPage() {
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Adventures</h1>
         <p className="text-brand-cream/70">Your motorcycle adventures</p>
       </div>
+
+      {/* Next Trip Ticker */}
+      {nextTripTicker && tickerTimeLeft && (
+        <Link href={`/trips/${nextTripTicker.trip.slug}`} className="block">
+          <div className="rounded-xl border border-brand-brown/30 bg-brand-dark-grey/60 px-3 sm:px-4 py-2.5 hover:border-brand-brown/50 transition-colors">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+              <span className="inline-flex items-center gap-1.5 text-brand-tan font-semibold uppercase tracking-wide text-xs">
+                <Clock3 className="w-3.5 h-3.5" />
+                Next Trip
+              </span>
+              <span className="text-brand-cream font-semibold">{nextTripTicker.trip.name}</span>
+              <span className="text-brand-cream/40 hidden sm:inline">•</span>
+              <span className="text-brand-cream/70 text-xs sm:text-sm">
+                {formatDate(nextTripTicker.targetDate, 'MMM d, yyyy h:mm a')}
+              </span>
+              <div className="ml-auto flex items-center gap-1.5 text-brand-cream text-xs sm:text-sm">
+                <span className="font-semibold">{tickerTimeLeft.days}d</span>
+                <span className="text-brand-cream/50">:</span>
+                <span className="font-semibold">{String(tickerTimeLeft.hours).padStart(2, '0')}h</span>
+                <span className="text-brand-cream/50">:</span>
+                <span className="font-semibold">{String(tickerTimeLeft.minutes).padStart(2, '0')}m</span>
+                <span className="text-brand-cream/50">:</span>
+                <span className="font-semibold">{String(tickerTimeLeft.seconds).padStart(2, '0')}s</span>
+              </div>
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* World Map — shows all trips */}
       <div className="rounded-2xl border border-brand-brown/20 bg-brand-dark-grey/40 p-4 sm:p-6">

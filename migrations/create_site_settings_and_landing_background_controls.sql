@@ -1,3 +1,4 @@
+-- @auto-migrate
 -- Creates site settings used by the landing page and admin branding controls.
 -- Safe to run multiple times.
 

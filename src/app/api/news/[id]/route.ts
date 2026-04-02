@@ -17,6 +17,8 @@ import {
 } from '@/lib/news/server';
 
 const NEWS_ADMIN_ROLES = ['trip_admin', 'admin', 'super_admin'] as const;
+const NEWS_STATUSES = ['draft', 'published', 'archived'] as const;
+type NewsStatus = (typeof NEWS_STATUSES)[number];
 
 function isAdminRole(role: string): boolean {
   return NEWS_ADMIN_ROLES.includes(role as (typeof NEWS_ADMIN_ROLES)[number]);
@@ -24,6 +26,43 @@ function isAdminRole(role: string): boolean {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
+}
+
+function parseRequestedStatus(value: unknown): NewsStatus | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (!NEWS_STATUSES.includes(normalized as NewsStatus)) {
+    throw new Error('status must be one of: draft, published, archived');
+  }
+  return normalized as NewsStatus;
+}
+
+function stateFromStatus(status: NewsStatus, fallbackPublishedAt?: string | null) {
+  if (status === 'draft') {
+    return {
+      is_published: false,
+      is_archived: false,
+      published_at: null as string | null,
+      archived_at: null as string | null,
+    };
+  }
+
+  if (status === 'published') {
+    return {
+      is_published: true,
+      is_archived: false,
+      published_at: fallbackPublishedAt || new Date().toISOString(),
+      archived_at: null as string | null,
+    };
+  }
+
+  return {
+    is_published: false,
+    is_archived: true,
+    published_at: fallbackPublishedAt || null,
+    archived_at: new Date().toISOString(),
+  };
 }
 
 // GET /api/news/[id] - Get a single news item
@@ -52,6 +91,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     if (!includeUnpublished) {
       query = query.eq('is_published', true);
+      query = query.eq('is_archived', false);
     }
 
     const { data, error } = await query.single();
@@ -89,7 +129,7 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
 
     const { data: existing, error: existingError } = await supabase
       .from('news_posts')
-      .select('id, title, is_published, published_at')
+      .select('id, title, is_published, is_archived, published_at, archived_at')
       .eq('id', newsId)
       .single();
 
@@ -120,11 +160,46 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
       updatePayload.content = content;
     }
 
-    if (typeof body.is_published === 'boolean') {
-      updatePayload.is_published = body.is_published;
-      updatePayload.published_at = body.is_published
-        ? existing.published_at || new Date().toISOString()
+    const nextIsGlobal =
+      typeof body.is_global === 'boolean'
+        ? body.is_global
         : null;
+    const nextTagAllMembers =
+      typeof body.tag_all_members === 'boolean'
+        ? body.tag_all_members
+        : null;
+
+    if (nextIsGlobal !== null) {
+      updatePayload.is_global = nextIsGlobal;
+    }
+
+    if (nextTagAllMembers !== null) {
+      updatePayload.tag_all_members = nextTagAllMembers;
+    }
+
+    let parsedStatus: NewsStatus | null = null;
+    try {
+      parsedStatus = parseRequestedStatus(body.status);
+    } catch (statusError: unknown) {
+      return errorResponse(
+        ApiErrors.BAD_REQUEST,
+        statusError instanceof Error ? statusError.message : 'Invalid status'
+      );
+    }
+    if (parsedStatus) {
+      const statusState = stateFromStatus(parsedStatus, existing.published_at);
+      updatePayload.is_published = statusState.is_published;
+      updatePayload.is_archived = statusState.is_archived;
+      updatePayload.published_at = statusState.published_at;
+      updatePayload.archived_at = statusState.archived_at;
+    } else if (typeof body.is_published === 'boolean') {
+      const statusState = body.is_published
+        ? stateFromStatus('published', existing.published_at)
+        : stateFromStatus('draft');
+      updatePayload.is_published = statusState.is_published;
+      updatePayload.is_archived = statusState.is_archived;
+      updatePayload.published_at = statusState.published_at;
+      updatePayload.archived_at = statusState.archived_at;
     }
 
     if (Object.keys(updatePayload).length > 0) {
@@ -138,8 +213,18 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
       }
     }
 
-    const tripIds = hasTripIds ? normalizeIdArray(body.trip_ids) : null;
-    const memberIds = hasMemberIds ? normalizeIdArray(body.member_ids) : null;
+    const requestedTripIds = hasTripIds ? normalizeIdArray(body.trip_ids) : null;
+    const requestedMemberIds = hasMemberIds ? normalizeIdArray(body.member_ids) : null;
+
+    const shouldClearTripTags = nextIsGlobal === true;
+    const shouldClearMemberTags = nextTagAllMembers === true;
+
+    const tripIds = shouldClearTripTags
+      ? []
+      : requestedTripIds;
+    const memberIds = shouldClearMemberTags
+      ? []
+      : requestedMemberIds;
 
     if (tripIds) {
       const { error: deleteTripTagsError } = await supabase

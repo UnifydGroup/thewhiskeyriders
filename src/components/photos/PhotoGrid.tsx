@@ -38,6 +38,7 @@ interface PhotoGridProps {
   tripId: string;
   isAdmin?: boolean;
   currentUserId?: string;
+  publicView?: boolean;
   onPhotoDelete?: (photoId: string) => void;
   albumThumbnailPhotoUrl?: string | null;
   settingAlbumThumbnailPhotoId?: string | null;
@@ -74,6 +75,7 @@ export default function PhotoGrid({
   tripId,
   isAdmin = false,
   currentUserId,
+  publicView = false,
   onPhotoDelete,
   albumThumbnailPhotoUrl = null,
   settingAlbumThumbnailPhotoId = null,
@@ -111,6 +113,8 @@ export default function PhotoGrid({
     [currentUserId, isAdmin, photos]
   );
   const canBulkTag = editablePhotoIds.size > 0;
+  const allowTagging = !publicView;
+  const showComments = !publicView;
 
   useEffect(() => {
     setSavedTagSuggestions(readSavedTagSuggestions());
@@ -120,6 +124,11 @@ export default function PhotoGrid({
     let cancelled = false;
 
     const fetchMemberNames = async () => {
+      if (!allowTagging) {
+        setMemberNameSuggestions([]);
+        return;
+      }
+
       try {
         const { data, error } = await supabase
           .from('trip_members')
@@ -158,12 +167,18 @@ export default function PhotoGrid({
     return () => {
       cancelled = true;
     };
-  }, [supabase, tripId]);
+  }, [allowTagging, supabase, tripId]);
 
   useEffect(() => {
     let cancelled = false;
 
     const fetchPhotoTags = async () => {
+      if (!allowTagging) {
+        setTagsByPhotoId({});
+        setTagDataLoading(false);
+        return;
+      }
+
       if (photos.length === 0) {
         setTagsByPhotoId({});
         return;
@@ -215,7 +230,7 @@ export default function PhotoGrid({
     return () => {
       cancelled = true;
     };
-  }, [photos, tripId]);
+  }, [allowTagging, photos, tripId]);
 
   useEffect(() => {
     const validPhotoIds = new Set(photos.map((photo) => photo.id));
@@ -263,12 +278,13 @@ export default function PhotoGrid({
       const matchesUploader =
         uploaderFilter === 'all' || (photo.uploader_name || 'Unknown') === uploaderFilter;
       const matchesPerson =
+        !allowTagging ||
         personFilter === 'all' ||
         photoTags.some((tag) => tag.tag_type === 'person' && tag.tag_value === personFilter);
 
       return matchesQuery && matchesUploader && matchesPerson;
     });
-  }, [photos, personFilter, searchQuery, tagsByPhotoId, uploaderFilter]);
+  }, [allowTagging, photos, personFilter, searchQuery, tagsByPhotoId, uploaderFilter]);
 
   useEffect(() => {
     if (selectedPhotoIdx !== null && selectedPhotoIdx >= filteredPhotos.length) {
@@ -470,6 +486,10 @@ export default function PhotoGrid({
     }));
   };
 
+  const searchPlaceholder = allowTagging
+    ? 'Search by caption, uploader, date, or tag'
+    : 'Search by caption, uploader, or date';
+
   if (photos.length === 0) {
     return (
       <div className="text-center py-12">
@@ -490,7 +510,7 @@ export default function PhotoGrid({
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by caption, uploader, date, or tag"
+              placeholder={searchPlaceholder}
               className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream placeholder:text-brand-cream/40 focus:outline-none focus:border-brand-brown"
             />
           </div>
@@ -514,31 +534,33 @@ export default function PhotoGrid({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="text-xs uppercase tracking-wider text-brand-cream/60 mb-1 block">
-              Tagged Person
-            </label>
-            <select
-              value={personFilter}
-              onChange={(event) => setPersonFilter(event.target.value)}
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
-            >
-              <option value="all">All people</option>
-              {personTagOptions.map((personName) => (
-                <option key={personName} value={personName}>
-                  {personName}
-                </option>
-              ))}
-            </select>
-          </div>
+          {allowTagging && (
+            <div>
+              <label className="text-xs uppercase tracking-wider text-brand-cream/60 mb-1 block">
+                Tagged Person
+              </label>
+              <select
+                value={personFilter}
+                onChange={(event) => setPersonFilter(event.target.value)}
+                className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
+              >
+                <option value="all">All people</option>
+                {personTagOptions.map((personName) => (
+                  <option key={personName} value={personName}>
+                    {personName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <p className="text-sm text-brand-cream/70 md:col-span-2">
+          <p className={`text-sm text-brand-cream/70 ${allowTagging ? 'md:col-span-2' : 'md:col-span-3'}`}>
             Showing {filteredPhotos.length} of {photos.length} item{photos.length !== 1 ? 's' : ''}
-            {tagDataLoading ? ' (loading tags...)' : ''}
+            {allowTagging && tagDataLoading ? ' (loading tags...)' : ''}
           </p>
         </div>
 
-        {(searchQuery || uploaderFilter !== 'all' || personFilter !== 'all') && (
+        {(searchQuery || uploaderFilter !== 'all' || (allowTagging && personFilter !== 'all')) && (
           <div>
             <Button
               variant="outline"
@@ -546,7 +568,9 @@ export default function PhotoGrid({
               onClick={() => {
                 setSearchQuery('');
                 setUploaderFilter('all');
-                setPersonFilter('all');
+                if (allowTagging) {
+                  setPersonFilter('all');
+                }
               }}
             >
               Clear Filters
@@ -555,7 +579,7 @@ export default function PhotoGrid({
         )}
       </div>
 
-      {canBulkTag && (
+      {allowTagging && canBulkTag && (
         <div className="mb-6 p-4 rounded-lg border border-brand-brown/25 bg-brand-brown/10 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-brand-cream/80">
@@ -786,6 +810,8 @@ export default function PhotoGrid({
           personSuggestions={memberNameSuggestions}
           savedTagSuggestions={savedTagSuggestions}
           initialTags={tagsByPhotoId[filteredPhotos[selectedPhotoIdx].id] || []}
+          allowTagging={allowTagging}
+          showComments={showComments}
           onPrev={() => setSelectedPhotoIdx(Math.max(0, selectedPhotoIdx - 1))}
           onNext={() =>
             setSelectedPhotoIdx(Math.min(filteredPhotos.length - 1, selectedPhotoIdx + 1))
@@ -809,6 +835,8 @@ interface PhotoDetailModalProps {
   personSuggestions: string[];
   savedTagSuggestions: TagSuggestionsByType;
   initialTags: PhotoTag[];
+  allowTagging: boolean;
+  showComments: boolean;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -826,6 +854,8 @@ function PhotoDetailModal({
   personSuggestions,
   savedTagSuggestions,
   initialTags,
+  allowTagging,
+  showComments,
   onPrev,
   onNext,
   onClose,
@@ -939,25 +969,27 @@ function PhotoDetailModal({
               {photo.width && photo.height && <p>{photo.width} × {photo.height} pixels</p>}
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-brand-cream">Tags</h4>
-              <PhotoTagEditor
-                photoId={photo.id}
-                tripId={tripId}
-                tags={tags}
-                personSuggestions={personSuggestions}
-                savedTagSuggestions={savedTagSuggestions}
-                canEdit={currentUserId === photo.uploaded_by || isAdmin}
-                onTagAdded={(tag) => {
-                  setTags((previous) => [...previous, tag]);
-                  onTagAdded(photo.id, tag);
-                }}
-                onTagRemoved={(tagId) => {
-                  setTags((previous) => previous.filter((tag) => tag.id !== tagId));
-                  onTagRemoved(photo.id, tagId);
-                }}
-              />
-            </div>
+            {allowTagging && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-brand-cream">Tags</h4>
+                <PhotoTagEditor
+                  photoId={photo.id}
+                  tripId={tripId}
+                  tags={tags}
+                  personSuggestions={personSuggestions}
+                  savedTagSuggestions={savedTagSuggestions}
+                  canEdit={currentUserId === photo.uploaded_by || isAdmin}
+                  onTagAdded={(tag) => {
+                    setTags((previous) => [...previous, tag]);
+                    onTagAdded(photo.id, tag);
+                  }}
+                  onTagRemoved={(tagId) => {
+                    setTags((previous) => previous.filter((tag) => tag.id !== tagId));
+                    onTagRemoved(photo.id, tagId);
+                  }}
+                />
+              </div>
+            )}
 
             <div>
               <h4 className="text-sm font-semibold text-brand-cream mb-2">Likes</h4>
@@ -968,16 +1000,18 @@ function PhotoDetailModal({
               />
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-brand-cream">Comments</h4>
-              <PhotoCommentsSection
-                photoId={photo.id}
-                tripId={tripId}
-                currentUserId={currentUserId}
-                isAdmin={isAdmin}
-                isAuthenticated={isAuthenticated}
-              />
-            </div>
+            {showComments && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-brand-cream">Comments</h4>
+                <PhotoCommentsSection
+                  photoId={photo.id}
+                  tripId={tripId}
+                  currentUserId={currentUserId}
+                  isAdmin={isAdmin}
+                  isAuthenticated={isAuthenticated}
+                />
+              </div>
+            )}
           </div>
         </div>
 

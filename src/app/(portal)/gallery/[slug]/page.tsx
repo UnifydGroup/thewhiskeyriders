@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import type { Trip } from '@/lib/types/database';
 import PhotoGrid from '@/components/photos/PhotoGrid';
-import PhotoUploadDropzone from '@/components/photos/PhotoUploadDropzone';
 
 interface Photo {
   id: string;
@@ -36,48 +35,13 @@ export default function TripGalleryPage() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState<string>();
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     loadTrip();
   }, [slug, supabase, router]);
 
-  const handleUploadComplete = (count: number) => {
-    setUploadMessage(`Successfully uploaded ${count} media file${count !== 1 ? 's' : ''}!`);
-    setUploadError(null);
-    setTimeout(() => setUploadMessage(null), 3000);
-    // Refresh photos
-    loadTrip();
-  };
-
-  const handleUploadError = (error: string) => {
-    setUploadError(error);
-    setTimeout(() => setUploadError(null), 5000);
-  };
-
   const loadTrip = async () => {
     try {
-      // Get current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (user) {
-        setCurrentUserId(user.id);
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-
-        if (profile) {
-          setIsAdmin(profile.role === 'admin' || profile.role === 'super_admin');
-        }
-      }
-
       // Get trip
       const { data: tripData } = await supabase
         .from('trips')
@@ -162,40 +126,17 @@ export default function TripGalleryPage() {
         </Link>
         <h1 className="text-4xl font-bold text-brand-cream mb-2">{trip.name} Gallery</h1>
         <p className="text-brand-cream/70">{trip.destination}, {trip.country}</p>
+        <p className="text-sm text-brand-cream/60 mt-2">
+          Public gallery view: likes are visible, while tags and comments are members-only.
+        </p>
       </div>
-
-      {/* Upload Section */}
-      <PhotoUploadDropzone
-        tripId={trip.id}
-        onUploadComplete={handleUploadComplete}
-        onError={handleUploadError}
-      />
-
-      {/* Messages */}
-      {uploadMessage && (
-        <Card className="bg-green-500/10 border-green-500/50">
-          <CardContent className="pt-4 text-green-400 text-sm">
-            {uploadMessage}
-          </CardContent>
-        </Card>
-      )}
-
-      {uploadError && (
-        <Card className="bg-red-500/10 border-red-500/50">
-          <CardContent className="pt-4 text-red-400 text-sm">
-            {uploadError}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Photos Gallery */}
       {photos.length > 0 ? (
         <PhotoGrid
           photos={photos}
           tripId={trip.id}
-          isAdmin={isAdmin}
-          currentUserId={currentUserId}
-          onPhotoDelete={(photoId) => setPhotos(photos.filter(p => p.id !== photoId))}
+          publicView
         />
       ) : (
         <Card>

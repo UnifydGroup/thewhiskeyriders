@@ -51,8 +51,9 @@ export default function PhotoLikeButton({
         });
 
         if (response.ok) {
+          const data = await response.json();
           setLiked(false);
-          setLikeCount(Math.max(0, likeCount - 1));
+          setLikeCount(typeof data?.count === 'number' ? data.count : Math.max(0, likeCount - 1));
         }
       } else {
         // Add like
@@ -61,8 +62,9 @@ export default function PhotoLikeButton({
         });
 
         if (response.ok) {
+          const data = await response.json();
           setLiked(true);
-          setLikeCount(likeCount + 1);
+          setLikeCount(typeof data?.count === 'number' ? data.count : likeCount + 1);
         }
       }
     } catch (err) {

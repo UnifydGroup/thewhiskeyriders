@@ -29,19 +29,12 @@ interface Trip {
   slug: string;
 }
 
-interface Profile {
-  id: string;
-  full_name: string;
-  email: string;
-}
-
 export default function ManagePaymentsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<string>('');
   const [schedule, setSchedule] = useState<PaymentMilestone[]>([]);
   const [memberPaymentSummary, setMemberPaymentSummary] = useState<MemberPaymentSummary[]>([]);
-  const [profiles, setProfiles] = useState<Map<string, Profile>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -79,6 +72,14 @@ export default function ManagePaymentsPage() {
     fetchTrips();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const tripFromQuery = params.get('trip_id') || params.get('tripId') || '';
+    if (!tripFromQuery) return;
+    setSelectedTrip((current) => current || tripFromQuery);
+  }, []);
+
   // Fetch payment schedule when trip is selected
   useEffect(() => {
     if (!selectedTrip) {
@@ -98,17 +99,6 @@ export default function ManagePaymentsPage() {
         const data = await res.json();
         setSchedule(data.schedule || []);
         setMemberPaymentSummary(data.memberPaymentSummary || []);
-
-        // Fetch profiles for all members
-        const { data: profilesData } = await supabase
-          .from('profiles')
-          .select('id, full_name, email');
-
-        if (profilesData) {
-          const profileMap = new Map();
-          profilesData.forEach((p) => profileMap.set(p.id, p));
-          setProfiles(profileMap);
-        }
 
         // Fetch last import log
         const logRes = await fetch(`/api/payments/import-log?trip_id=${selectedTrip}`);
@@ -203,7 +193,23 @@ export default function ManagePaymentsPage() {
         </label>
         <select
           value={selectedTrip}
-          onChange={(e) => setSelectedTrip(e.target.value)}
+          onChange={(e) => {
+            const nextTripId = e.target.value;
+            setSelectedTrip(nextTripId);
+
+            if (typeof window === 'undefined') return;
+            const params = new URLSearchParams(window.location.search);
+            params.delete('tripId');
+            if (nextTripId) {
+              params.set('trip_id', nextTripId);
+            } else {
+              params.delete('trip_id');
+            }
+
+            const query = params.toString();
+            const nextUrl = `/admin/payments/manage${query ? `?${query}` : ''}`;
+            window.history.replaceState({}, '', nextUrl);
+          }}
           className="w-full md:w-96 px-4 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
         >
           <option value="">-- Choose a trip --</option>

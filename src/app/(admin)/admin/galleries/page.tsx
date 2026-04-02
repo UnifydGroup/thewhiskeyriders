@@ -775,31 +775,28 @@ export default function GalleriesPage() {
           )
         );
 
-        const body = new FormData();
-        batch.forEach((item) => body.append('files', item.file));
-        body.append('uploadDate', new Date().toISOString().split('T')[0]);
-
         const endpoint =
           gallery.source === 'trip_all'
-            ? `/api/trips/${gallery.trip_id}/photos/upload?detailed=1`
+            ? `/api/trips/${gallery.trip_id}/photos/upload`
             : `/api/galleries/${gallery.id}`;
 
-        const response = await fetch(endpoint, {
+        const signResponse = await fetch(endpoint, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body,
+          body: JSON.stringify({
+            action: 'sign',
+            files: batch.map((item) => ({
+              name: item.file.name,
+              type: item.file.type,
+              size: item.file.size,
+              caption: null,
+            })),
+          }),
         });
 
-        const data = await parseJsonSafely(response);
-        const dataRecord =
-          data && typeof data === 'object'
-            ? (data as {
-                photos?: unknown;
-                failed?: unknown;
-                photo?: unknown;
-              })
-            : null;
-        if (!response.ok) {
+        const signPayload = await parseJsonSafely(signResponse);
+        if (!signResponse.ok) {
           failedFiles.push(...batch.map((item) => item.file.name));
           setUploadItems((previous) =>
             previous.map((item) =>
@@ -807,7 +804,10 @@ export default function GalleriesPage() {
                 ? {
                     ...item,
                     status: 'failed',
-                    error: extractErrorMessage(data, `Upload failed (HTTP ${response.status})`),
+                    error: extractErrorMessage(
+                      signPayload,
+                      `Upload failed (HTTP ${signResponse.status})`
+                    ),
                   }
                 : item
             )
@@ -815,34 +815,194 @@ export default function GalleriesPage() {
           continue;
         }
 
-        let batchFailedNames: string[] = [];
-        let batchSuccessCount = 0;
+        const signedUploadsRaw =
+          signPayload &&
+          typeof signPayload === 'object' &&
+          Array.isArray((signPayload as { uploads?: unknown }).uploads)
+            ? ((signPayload as { uploads: unknown[] }).uploads as unknown[])
+            : [];
 
-        if (Array.isArray(data)) {
-          batchSuccessCount = data.length;
-          if (data.length < batch.length) {
-            batchFailedNames = batch.slice(data.length).map((item) => item.file.name);
+        const signedUploadsByIndex = new Map<
+          number,
+          {
+            token: string;
+            filePath: string;
+            mediaType: 'image' | 'video';
+            mimeType: string | null;
           }
-        } else if (dataRecord && Array.isArray(dataRecord.photos)) {
-          batchSuccessCount = dataRecord.photos.length;
-          if (Array.isArray(dataRecord.failed)) {
-            batchFailedNames = dataRecord.failed.filter(
-              (name: unknown): name is string => typeof name === 'string'
-            );
+        >();
+
+        for (const upload of signedUploadsRaw) {
+          if (!upload || typeof upload !== 'object') {
+            continue;
           }
-        } else if (dataRecord?.photo) {
-          batchSuccessCount = 1;
-        } else {
-          batchSuccessCount = batch.length;
+
+          const inputIndex =
+            'input_index' in upload && typeof upload.input_index === 'number'
+              ? upload.input_index
+              : -1;
+          const token = 'token' in upload && typeof upload.token === 'string' ? upload.token : '';
+          const filePath =
+            'file_path' in upload && typeof upload.file_path === 'string' ? upload.file_path : '';
+          const mediaType =
+            'media_type' in upload && (upload.media_type === 'image' || upload.media_type === 'video')
+              ? upload.media_type
+              : null;
+          const mimeType =
+            'mime_type' in upload && typeof upload.mime_type === 'string' ? upload.mime_type : null;
+
+          if (
+            inputIndex < 0 ||
+            inputIndex >= batch.length ||
+            !token ||
+            !filePath ||
+            !mediaType
+          ) {
+            continue;
+          }
+
+          signedUploadsByIndex.set(inputIndex, {
+            token,
+            filePath,
+            mediaType,
+            mimeType,
+          });
         }
 
-        successCount += batchSuccessCount;
-        failedFiles.push(...batchFailedNames);
+        const batchFailures = new Map<string, string>();
+        const uploadsToFinalize: Array<{
+          itemId: string;
+          fileName: string;
+          filePath: string;
+          mediaType: 'image' | 'video';
+          mimeType: string | null;
+        }> = [];
 
-        const failedByNameCount = batchFailedNames.reduce<Record<string, number>>((acc, name) => {
-          acc[name] = (acc[name] || 0) + 1;
-          return acc;
-        }, {});
+        for (let batchFileIndex = 0; batchFileIndex < batch.length; batchFileIndex += 1) {
+          const signedUpload = signedUploadsByIndex.get(batchFileIndex);
+          const batchItem = batch[batchFileIndex];
+
+          if (!signedUpload) {
+            batchFailures.set(batchItem.id, 'Failed to prepare upload');
+            continue;
+          }
+
+          const { error: storageError } = await supabase.storage
+            .from('photos')
+            .uploadToSignedUrl(signedUpload.filePath, signedUpload.token, batchItem.file, {
+              cacheControl: '3600',
+              contentType: batchItem.file.type,
+            });
+
+          if (storageError) {
+            batchFailures.set(batchItem.id, storageError.message || 'Failed to upload to storage');
+            continue;
+          }
+
+          uploadsToFinalize.push({
+            itemId: batchItem.id,
+            fileName: batchItem.file.name,
+            filePath: signedUpload.filePath,
+            mediaType: signedUpload.mediaType,
+            mimeType: signedUpload.mimeType || batchItem.file.type || null,
+          });
+        }
+
+        if (uploadsToFinalize.length > 0) {
+          const finalizeEndpoint =
+            gallery.source === 'trip_all' ? `${endpoint}?detailed=1` : endpoint;
+
+          const finalizeResponse = await fetch(finalizeEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              action: 'finalize',
+              uploads: uploadsToFinalize.map((item) => ({
+                file_path: item.filePath,
+                caption: null,
+                media_type: item.mediaType,
+                mime_type: item.mimeType,
+              })),
+            }),
+          });
+
+          const finalizePayload = await parseJsonSafely(finalizeResponse);
+
+          if (!finalizeResponse.ok) {
+            const finalizeErrorMessage = extractErrorMessage(
+              finalizePayload,
+              `Failed to finalize upload (HTTP ${finalizeResponse.status})`
+            );
+            uploadsToFinalize.forEach((item) => {
+              if (!batchFailures.has(item.itemId)) {
+                batchFailures.set(item.itemId, finalizeErrorMessage);
+              }
+            });
+          } else {
+            const successPaths = new Set<string>();
+            const maybePayload =
+              finalizePayload && typeof finalizePayload === 'object'
+                ? (finalizePayload as {
+                    photos?: unknown;
+                    photo?: unknown;
+                    failed?: unknown;
+                  })
+                : null;
+
+            const addPathFromEntry = (entry: unknown) => {
+              if (
+                entry &&
+                typeof entry === 'object' &&
+                'storage_path' in entry &&
+                typeof entry.storage_path === 'string'
+              ) {
+                successPaths.add(entry.storage_path);
+              }
+            };
+
+            if (Array.isArray(finalizePayload)) {
+              finalizePayload.forEach((entry) => addPathFromEntry(entry));
+            } else if (maybePayload && Array.isArray(maybePayload.photos)) {
+              maybePayload.photos.forEach((entry) => addPathFromEntry(entry));
+            } else if (maybePayload?.photo) {
+              addPathFromEntry(maybePayload.photo);
+            }
+
+            const failedFinalizeEntries = new Set<string>(
+              maybePayload && Array.isArray(maybePayload.failed)
+                ? maybePayload.failed.filter(
+                    (entry: unknown): entry is string => typeof entry === 'string'
+                  )
+                : []
+            );
+
+            uploadsToFinalize.forEach((item) => {
+              if (successPaths.has(item.filePath)) {
+                return;
+              }
+
+              const didFinalizeFail =
+                failedFinalizeEntries.has(item.filePath) ||
+                failedFinalizeEntries.has(item.fileName);
+
+              if (didFinalizeFail || successPaths.size > 0) {
+                batchFailures.set(item.itemId, 'Failed to finalize upload');
+              }
+            });
+          }
+        }
+
+        const failedById = new Map<string, string>();
+        batchFailures.forEach((reason, id) => {
+          failedById.set(id, reason);
+        });
+
+        const batchSuccessItems = batch.filter((item) => !failedById.has(item.id));
+        const batchFailedItems = batch.filter((item) => failedById.has(item.id));
+
+        successCount += batchSuccessItems.length;
+        failedFiles.push(...batchFailedItems.map((item) => item.file.name));
 
         setUploadItems((previous) =>
           previous.map((item) => {
@@ -850,11 +1010,9 @@ export default function GalleriesPage() {
               return item;
             }
 
-            const matchingBatchItem = batch.find((batchItem) => batchItem.id === item.id);
-            const fileName = matchingBatchItem?.file.name || item.name;
-            if ((failedByNameCount[fileName] || 0) > 0) {
-              failedByNameCount[fileName] -= 1;
-              return { ...item, status: 'failed', error: 'Upload failed' };
+            const failureReason = failedById.get(item.id);
+            if (failureReason) {
+              return { ...item, status: 'failed', error: failureReason };
             }
 
             return { ...item, status: 'success', error: undefined };

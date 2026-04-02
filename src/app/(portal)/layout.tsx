@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { TopBar } from '@/components/layout/TopBar';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -14,13 +14,19 @@ export default function PortalLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('');
+  const isPublicGalleryRoute = pathname === '/gallery' || pathname.startsWith('/gallery/');
 
   useEffect(() => {
+    if (isPublicGalleryRoute) {
+      return;
+    }
+
     const checkAuth = async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
@@ -37,7 +43,7 @@ export default function PortalLayout({
       }
     };
     checkAuth();
-  }, [router, supabase]);
+  }, [isPublicGalleryRoute, router, supabase]);
 
   const handleLogout = async () => {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -54,6 +60,19 @@ export default function PortalLayout({
     await supabase.auth.signOut();
     router.push('/');
   };
+
+  if (isPublicGalleryRoute) {
+    return (
+      <div className="min-h-full flex flex-col bg-brand-black">
+        <main className="flex-1">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {children}
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">

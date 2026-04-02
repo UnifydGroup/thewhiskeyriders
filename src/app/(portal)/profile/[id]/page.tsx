@@ -128,7 +128,7 @@ export default function MemberProfilePage() {
         setMemberBadges(badgeRecords);
 
         if (session?.access_token) {
-          const response = await fetch(`/api/news?memberId=${memberId}&limit=20`, {
+          const response = await fetch(`/api/news?placement=rider&memberId=${memberId}&limit=20`, {
             headers: {
               Authorization: `Bearer ${session.access_token}`,
             },

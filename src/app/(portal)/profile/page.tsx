@@ -52,7 +52,7 @@ export default function ProfilePage() {
           setProfile(data);
 
           if (session?.access_token) {
-            const response = await fetch(`/api/news?memberId=${data.id}&limit=20`, {
+            const response = await fetch('/api/news?placement=rider&limit=20', {
               headers: {
                 Authorization: `Bearer ${session.access_token}`,
               },

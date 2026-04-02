@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Edit2, FileText, Trash2 } from 'lucide-react';
+import { Edit2, FileText, Trash2, Users } from 'lucide-react';
 
 interface TripsActionsProps {
   tripId: string;
@@ -9,6 +9,15 @@ interface TripsActionsProps {
 export function TripsActions({ tripId, onDelete }: TripsActionsProps) {
   return (
     <div className="flex items-center justify-end gap-2">
+      <Link href="/admin/members/trips">
+        <button
+          aria-label="Manage members"
+          title="Manage members"
+          className="p-2 hover:bg-brand-brown/20 rounded transition-colors"
+        >
+          <Users className="w-4 h-4 text-brand-brown" />
+        </button>
+      </Link>
       <Link href={`/admin/trips/${tripId}/documents`}>
         <button
           aria-label="Manage documents"

@@ -82,11 +82,25 @@ export default async function Home() {
             />
             <span className="text-xl font-bold text-brand-cream">THE WHISKEY RIDERS</span>
           </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/gallery"
+              className="px-4 py-2 rounded-lg border border-brand-brown/40 text-brand-tan hover:bg-brand-brown/15 transition-colors text-sm font-semibold"
+            >
+              Trip Galleries
+            </Link>
+            <Link
+              href="/login"
+              className="px-4 py-2 rounded-lg bg-brand-brown hover:bg-brand-brown/90 text-brand-black text-sm font-bold transition-colors"
+            >
+              Member Login
+            </Link>
+          </div>
         </div>
       </nav>
 
       {/* Hero */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-20 relative overflow-hidden">
+      <main className="flex-1 px-4 sm:px-6 lg:px-8 py-10 lg:py-12 relative overflow-hidden">
         {/* Background Media */}
         {backgroundMediaType === 'video' && backgroundVideoUrl ? (
           <video
@@ -117,27 +131,59 @@ export default async function Home() {
           />
         )}
 
-        <div className="relative z-10 text-center max-w-3xl mx-auto space-y-8">
-          <div className="space-y-4">
-            <div className="flex justify-center mb-8">
+        <div className="relative z-10 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+          <div className="text-center lg:text-left space-y-6">
+            <div className="flex justify-center lg:justify-start">
               <img
                 src={logoUrl}
                 alt="Whiskey Riders Logo"
-                className="h-96 w-96 object-contain"
+                className="h-52 w-52 sm:h-64 sm:w-64 object-contain"
               />
             </div>
             <p className="text-3xl sm:text-4xl text-brand-tan font-semibold">
               Until We Ride
             </p>
+            <p className="text-brand-cream/80 max-w-xl mx-auto lg:mx-0">
+              Public trip galleries and live social updates are available below. Member-only tools remain behind login.
+            </p>
+            <div className="flex flex-wrap justify-center lg:justify-start gap-3">
+              <Link
+                href="/gallery"
+                className="inline-block px-8 py-4 border border-brand-brown/60 hover:bg-brand-brown/15 text-brand-tan font-bold text-lg rounded-lg transition-colors"
+              >
+                View Trip Galleries
+              </Link>
+              <Link
+                href="/login"
+                className="inline-block px-8 py-4 bg-brand-brown hover:bg-brand-brown/90 text-brand-black font-bold text-lg rounded-lg transition-colors shadow-lg hover:shadow-brand-brown/50"
+              >
+                Enter Portal
+              </Link>
+            </div>
           </div>
 
-          <div className="pt-8">
-            <Link
-              href="/login"
-              className="inline-block px-8 py-4 bg-brand-brown hover:bg-brand-brown/90 text-brand-black font-bold text-lg rounded-lg transition-colors shadow-lg hover:shadow-brand-brown/50"
-            >
-              Enter Portal
-            </Link>
+          <div className="bg-brand-black/70 rounded-lg border border-brand-brown/20 p-4 sm:p-6 backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-2xl font-bold text-brand-cream">Live Social Feed</h2>
+              <a
+                href="https://www.instagram.com/thewhiskeyriders/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-semibold text-brand-tan hover:text-brand-cream transition-colors"
+              >
+                @thewhiskeyriders
+              </a>
+            </div>
+            <div className="rounded-lg overflow-hidden border border-brand-brown/20">
+              <iframe
+                src="https://www.instagram.com/thewhiskeyriders/embed"
+                width="100%"
+                height="360"
+                frameBorder="0"
+                scrolling="auto"
+                className="rounded-lg"
+              />
+            </div>
           </div>
         </div>
       </main>
@@ -181,37 +227,6 @@ export default async function Home() {
           </div>
         </section>
       )}
-
-      {/* Instagram Feed */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-brand-black/50 border-t border-brand-brown/20">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-4xl font-bold text-center mb-12">Follow Our Journey</h2>
-          <div className="bg-brand-black/80 rounded-lg border border-brand-brown/20 p-8 text-center">
-            <p className="text-brand-cream/70 mb-6">
-              Follow us on Instagram for the latest stories from the road
-            </p>
-            <a
-              href="https://www.instagram.com/thewhiskeyriders/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block px-8 py-3 bg-brand-brown hover:bg-brand-brown/90 text-brand-black font-bold rounded-lg transition-colors"
-            >
-              @thewhiskeyriders on Instagram
-            </a>
-            {/* Instagram Embed */}
-            <div className="mt-8 max-h-96 overflow-y-auto rounded-lg">
-              <iframe
-                src="https://www.instagram.com/thewhiskeyriders/embed"
-                width="100%"
-                height="600"
-                frameBorder="0"
-                scrolling="auto"
-                className="rounded-lg"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* Footer */}
       <footer className="border-t border-brand-brown/20 bg-brand-black/50 py-8">

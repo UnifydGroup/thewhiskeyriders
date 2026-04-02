@@ -93,6 +93,10 @@ export interface NewsPost {
   content: string;
   author_id: string | null;
   is_published: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
+  is_global: boolean;
+  tag_all_members: boolean;
   published_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -107,6 +111,17 @@ export interface NewsPostTripTag {
 export interface NewsPostMemberTag {
   news_post_id: string;
   member_id: string;
+  created_at: string | null;
+}
+
+export interface NewsAsset {
+  id: string;
+  name: string;
+  file_url: string;
+  storage_path: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by: string | null;
   created_at: string | null;
 }
 
@@ -337,6 +352,11 @@ export interface Database {
         Row: NewsPostMemberTag;
         Insert: Omit<NewsPostMemberTag, 'created_at'>;
         Update: Partial<Omit<NewsPostMemberTag, 'created_at'>>;
+      };
+      news_assets: {
+        Row: NewsAsset;
+        Insert: Omit<NewsAsset, 'id' | 'created_at'>;
+        Update: Partial<Omit<NewsAsset, 'id' | 'created_at'>>;
       };
       trip_key_dates: {
         Row: TripKeyDate;

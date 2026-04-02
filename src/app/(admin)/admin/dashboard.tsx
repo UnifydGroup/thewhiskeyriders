@@ -97,7 +97,7 @@ export default function AdminDashboard() {
       label: 'Pending Payments',
       value: stats?.pendingPayments || 0,
       color: 'text-red-400',
-      href: '/admin/payments/manage?status=pending',
+      href: '/admin/payments/manage',
     },
     {
       icon: Clock,

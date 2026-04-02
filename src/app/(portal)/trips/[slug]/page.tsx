@@ -15,6 +15,7 @@ import {
   MapPin,
   Users,
   Image as ImageIcon,
+  Newspaper,
   FileText,
   Download,
   Eye,
@@ -41,15 +42,6 @@ type TripDocument = {
   access_url?: string;
   file_type: string;
   created_at: string;
-};
-
-type CountdownTrip = Pick<Trip, 'id' | 'slug' | 'name' | 'start_date' | 'status'> & {
-  countdown_target_at?: string | null;
-};
-
-type NextCountdown = {
-  trip: CountdownTrip;
-  targetDate: Date;
 };
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -92,10 +84,9 @@ export default function TripDetailPage() {
   const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
   const [members, setMembers] = useState<TripMemberWithProfile[]>([]);
   const [documents, setDocuments] = useState<TripDocument[]>([]);
-  const [nextCountdown, setNextCountdown] = useState<NextCountdown | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<'overview' | 'photos' | 'documents' | 'payments' | 'votes'>('overview');
+  const [tab, setTab] = useState<'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'votes'>('overview');
   const [loading, setLoading] = useState(true);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
@@ -161,7 +152,7 @@ export default function TripDetailPage() {
         } = await supabase.auth.getSession();
 
         if (session?.access_token) {
-          const newsResponse = await fetch(`/api/news?tripId=${tripData.id}&limit=20`, {
+          const newsResponse = await fetch(`/api/news?placement=trip&tripId=${tripData.id}&limit=20`, {
             headers: {
               Authorization: `Bearer ${session.access_token}`,
             },
@@ -169,7 +160,10 @@ export default function TripDetailPage() {
 
           const newsPayload = await newsResponse.json().catch(() => ({}));
           if (newsResponse.ok && newsPayload?.success) {
-            setTaggedNews(newsPayload?.data?.news || []);
+            const items = (newsPayload?.data?.news || []) as NewsItem[];
+            setTaggedNews(
+              items.filter((item) => item.trip_tags.some((taggedTrip) => taggedTrip.id === tripData.id))
+            );
           }
         }
 
@@ -183,31 +177,6 @@ export default function TripDetailPage() {
           setMembers(membersData as TripMemberWithProfile[]);
         }
 
-        // Get next enabled countdown trip
-        const { data: countdownTripsData } = await supabase
-          .from('trips')
-          .select('id, slug, name, start_date, status, countdown_target_at')
-          .eq('countdown_enabled', true)
-          .neq('status', 'cancelled');
-
-        if (countdownTripsData) {
-          const now = Date.now();
-          const nearestCountdown = countdownTripsData
-            .map((candidate) => {
-              const targetDate = getCountdownTargetDate(candidate as CountdownTrip);
-              if (!targetDate) return null;
-              return {
-                trip: candidate as CountdownTrip,
-                targetDate,
-              };
-            })
-            .filter((entry): entry is NextCountdown => Boolean(entry))
-            .filter((entry) => entry.targetDate.getTime() > now)
-            .sort((a, b) => a.targetDate.getTime() - b.targetDate.getTime())[0];
-
-          setNextCountdown(nearestCountdown || null);
-          setNowMs(now);
-        }
       } catch (err) {
         console.error('Failed to load trip:', err);
       } finally {
@@ -272,7 +241,8 @@ export default function TripDetailPage() {
   }, [tab, trip?.id, supabase]);
 
   useEffect(() => {
-    if (!nextCountdown) {
+    const targetDate = trip ? getCountdownTargetDate(trip) : null;
+    if (!trip?.countdown_enabled || !targetDate) {
       return;
     }
 
@@ -283,7 +253,7 @@ export default function TripDetailPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [nextCountdown]);
+  }, [trip]);
 
   const getFileIcon = (fileType: string) => {
     const normalizedType = (fileType || '').toLowerCase();
@@ -296,15 +266,24 @@ export default function TripDetailPage() {
   };
 
   const countdownTimeLeft = useMemo(() => {
-    if (!nextCountdown) return null;
-    const remainingMs = Math.max(0, nextCountdown.targetDate.getTime() - nowMs);
+    if (!trip?.countdown_enabled) return null;
+    const targetDate = getCountdownTargetDate(trip);
+    if (!targetDate) return null;
+    const remainingMs = Math.max(0, targetDate.getTime() - nowMs);
     return getCountdownParts(remainingMs);
-  }, [nextCountdown, nowMs]);
+  }, [trip, nowMs]);
 
   const countdownComplete = useMemo(() => {
-    if (!nextCountdown) return false;
-    return nextCountdown.targetDate.getTime() <= nowMs;
-  }, [nextCountdown, nowMs]);
+    if (!trip?.countdown_enabled) return false;
+    const targetDate = getCountdownTargetDate(trip);
+    if (!targetDate) return false;
+    return targetDate.getTime() <= nowMs;
+  }, [trip, nowMs]);
+
+  const tripCountdownTarget = useMemo(() => {
+    if (!trip?.countdown_enabled) return null;
+    return getCountdownTargetDate(trip);
+  }, [trip]);
 
   if (loading) {
     return (
@@ -352,15 +331,15 @@ export default function TripDetailPage() {
           )}
         </div>
 
-        {nextCountdown && countdownTimeLeft && (
+        {trip?.countdown_enabled && tripCountdownTarget && countdownTimeLeft && (
           <Card className="w-full lg:max-w-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Clock3 className="w-5 h-5 text-brand-brown" />
-                Next Trip Countdown
+                Trip Countdown
               </CardTitle>
               <CardDescription className="text-brand-cream/70">
-                {nextCountdown.trip.name} · {formatDate(nextCountdown.targetDate, 'MMM d, yyyy h:mm a')}
+                {trip.name} · {formatDate(tripCountdownTarget, 'MMM d, yyyy h:mm a')}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -386,17 +365,6 @@ export default function TripDetailPage() {
                   </div>
                 </div>
               )}
-
-              {nextCountdown.trip.id !== trip.id && (
-                <div>
-                  <Link
-                    href={`/trips/${nextCountdown.trip.slug}`}
-                    className="text-sm text-brand-brown hover:text-brand-tan transition-colors"
-                  >
-                    Open next trip →
-                  </Link>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
@@ -404,7 +372,7 @@ export default function TripDetailPage() {
 
       {/* Tabs */}
       <div className="border-b border-brand-brown/20 flex gap-8 overflow-x-auto">
-        {(['overview', 'photos', 'documents', 'payments', 'votes'] as const).map((t) => (
+        {(['overview', 'news', 'photos', 'documents', 'payments', 'votes'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -414,6 +382,7 @@ export default function TripDetailPage() {
                 : 'text-brand-cream/60 hover:text-brand-cream'
             }`}
           >
+            {t === 'news' && <Newspaper className="w-4 h-4" />}
             {t === 'photos' && <ImageIcon className="w-4 h-4" />}
             {t}
           </button>
@@ -484,17 +453,6 @@ export default function TripDetailPage() {
             </div>
           )}
 
-          {taggedNews.length > 0 && (
-            <div>
-              <h2 className="text-2xl font-bold text-brand-cream mb-4">News Tagged To This Trip</h2>
-              <div className="space-y-4">
-                {taggedNews.map((item) => (
-                  <NewsCard key={item.id} item={item} compact />
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Members */}
           {members.length > 0 && (
             <div>
@@ -538,6 +496,28 @@ export default function TripDetailPage() {
           {trip && (
             <div>
               <PaymentScheduleSection tripId={trip.id} tripName={trip.name} showPaymentInfo={true} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* News Tab */}
+      {tab === 'news' && (
+        <div className="space-y-4">
+          {taggedNews.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <p className="text-brand-cream/70 mb-4">No trip news published yet</p>
+                <p className="text-sm text-brand-cream/50">
+                  Updates tagged to this trip will appear here.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {taggedNews.map((item) => (
+                <NewsCard key={item.id} item={item} compact />
+              ))}
             </div>
           )}
         </div>

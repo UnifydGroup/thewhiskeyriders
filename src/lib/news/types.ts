@@ -24,10 +24,25 @@ export interface NewsItem {
   content: string;
   author_id: string | null;
   is_published: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
+  is_global: boolean;
+  tag_all_members: boolean;
   published_at: string | null;
   created_at: string | null;
   updated_at: string | null;
   author: NewsAuthorSummary | null;
   trip_tags: NewsTripTagSummary[];
   member_tags: NewsMemberTagSummary[];
+}
+
+export interface NewsAsset {
+  id: string;
+  name: string;
+  file_url: string;
+  storage_path: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by: string | null;
+  created_at: string | null;
 }

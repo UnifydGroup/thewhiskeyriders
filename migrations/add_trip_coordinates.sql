@@ -1,3 +1,4 @@
+-- @auto-migrate
 -- Add map coordinates and country code to trips table
 -- latitude / longitude: decimal coordinates for the trip pin on the world map
 -- country_code: ISO 3166-1 alpha-3 (e.g. 'MAR' for Morocco, 'ESP' for Spain)

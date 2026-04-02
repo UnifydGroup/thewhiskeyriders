@@ -349,32 +349,44 @@ export type SupabaseDatabase = {
       };
       news_posts: {
         Row: {
+          archived_at: string | null;
           author_id: string | null;
           content: string;
           created_at: string | null;
           id: string;
+          is_archived: boolean;
+          is_global: boolean;
           is_published: boolean;
           published_at: string | null;
+          tag_all_members: boolean;
           title: string;
           updated_at: string | null;
         };
         Insert: {
+          archived_at?: string | null;
           author_id?: string | null;
           content: string;
           created_at?: string | null;
           id?: string;
+          is_archived?: boolean;
+          is_global?: boolean;
           is_published?: boolean;
           published_at?: string | null;
+          tag_all_members?: boolean;
           title: string;
           updated_at?: string | null;
         };
         Update: {
+          archived_at?: string | null;
           author_id?: string | null;
           content?: string;
           created_at?: string | null;
           id?: string;
+          is_archived?: boolean;
+          is_global?: boolean;
           is_published?: boolean;
           published_at?: string | null;
+          tag_all_members?: boolean;
           title?: string;
           updated_at?: string | null;
         };
@@ -422,6 +434,41 @@ export type SupabaseDatabase = {
         Relationships: [
           { foreignKeyName: 'news_post_members_member_id_fkey'; columns: ['member_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
           { foreignKeyName: 'news_post_members_news_post_id_fkey'; columns: ['news_post_id']; isOneToOne: false; referencedRelation: 'news_posts'; referencedColumns: ['id'] }
+        ];
+      };
+      news_assets: {
+        Row: {
+          created_at: string;
+          file_size: number;
+          file_type: string;
+          file_url: string;
+          id: string;
+          name: string;
+          storage_path: string;
+          uploaded_by: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          file_size?: number;
+          file_type: string;
+          file_url: string;
+          id?: string;
+          name: string;
+          storage_path: string;
+          uploaded_by?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          file_size?: number;
+          file_type?: string;
+          file_url?: string;
+          id?: string;
+          name?: string;
+          storage_path?: string;
+          uploaded_by?: string | null;
+        };
+        Relationships: [
+          { foreignKeyName: 'news_assets_uploaded_by_fkey'; columns: ['uploaded_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }
         ];
       };
       trip_documents: {

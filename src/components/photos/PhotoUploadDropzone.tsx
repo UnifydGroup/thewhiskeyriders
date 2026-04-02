@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Upload, CheckCircle, AlertCircle, Camera } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 interface UploadProgress {
   file: File;
@@ -28,6 +29,7 @@ export default function PhotoUploadDropzone({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const supabase = useMemo(() => createClient(), []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -98,28 +100,116 @@ export default function PhotoUploadDropzone({
         let totalUploaded = 0;
 
         for (const batch of batches) {
-          const batchFormData = new FormData();
-          batch.forEach((file) => batchFormData.append('files', file));
-          batchFormData.append('uploadDate', new Date().toISOString().split('T')[0]);
-
-          const response = await fetch(`/api/trips/${tripId}/photos/upload`, {
+          const signResponse = await fetch(`/api/trips/${tripId}/photos/upload`, {
             method: 'POST',
-            body: batchFormData,
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
+            body: JSON.stringify({
+              action: 'sign',
+              files: batch.map((file) => ({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+              })),
+            }),
           });
 
-          const uploadedPhotos = await response.json();
-
-          if (!response.ok) {
+          const signPayload = await signResponse.json();
+          if (!signResponse.ok) {
             throw new Error(
-              typeof uploadedPhotos === 'object' && uploadedPhotos.error
-                ? uploadedPhotos.error
+              typeof signPayload === 'object' && signPayload.error
+                ? signPayload.error
                 : 'Upload failed'
             );
           }
 
-          if (Array.isArray(uploadedPhotos)) {
-            totalUploaded += uploadedPhotos.length;
+          const signedUploads =
+            signPayload && typeof signPayload === 'object' && Array.isArray(signPayload.uploads)
+              ? signPayload.uploads
+              : [];
+          const uploadsToFinalize: Array<{
+            file_path: string;
+            caption: null;
+            media_type: 'image' | 'video';
+            mime_type: string | null;
+          }> = [];
+          const localFailedIndexes = new Set<number>();
+
+          for (const signedUpload of signedUploads) {
+            if (!signedUpload || typeof signedUpload !== 'object') {
+              continue;
+            }
+            const inputIndex =
+              typeof signedUpload.input_index === 'number' ? signedUpload.input_index : -1;
+            const filePath =
+              typeof signedUpload.file_path === 'string' ? signedUpload.file_path : '';
+            const token = typeof signedUpload.token === 'string' ? signedUpload.token : '';
+            const mediaType =
+              signedUpload.media_type === 'video' || signedUpload.media_type === 'image'
+                ? signedUpload.media_type
+                : null;
+            const mimeType =
+              typeof signedUpload.mime_type === 'string' ? signedUpload.mime_type : null;
+
+            if (inputIndex < 0 || inputIndex >= batch.length || !filePath || !token || !mediaType) {
+              continue;
+            }
+
+            const file = batch[inputIndex];
+            const { error: signedUploadError } = await supabase.storage
+              .from('photos')
+              .uploadToSignedUrl(filePath, token, file, {
+                cacheControl: '3600',
+                contentType: file.type,
+              });
+
+            if (signedUploadError) {
+              localFailedIndexes.add(inputIndex);
+              continue;
+            }
+
+            uploadsToFinalize.push({
+              file_path: filePath,
+              caption: null,
+              media_type: mediaType,
+              mime_type: mimeType || file.type || null,
+            });
+          }
+
+          if (uploadsToFinalize.length === 0) {
+            if (localFailedIndexes.size > 0) {
+              throw new Error('Failed to upload media to storage');
+            }
+            continue;
+          }
+
+          const finalizeResponse = await fetch(`/api/trips/${tripId}/photos/upload?detailed=1`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              action: 'finalize',
+              uploads: uploadsToFinalize,
+            }),
+          });
+          const finalizePayload = await finalizeResponse.json();
+
+          if (!finalizeResponse.ok) {
+            throw new Error(
+              typeof finalizePayload === 'object' && finalizePayload.error
+                ? finalizePayload.error
+                : 'Failed to finalize upload'
+            );
+          }
+
+          if (finalizePayload && typeof finalizePayload === 'object') {
+            if (Array.isArray(finalizePayload.photos)) {
+              totalUploaded += finalizePayload.photos.length;
+            } else if (finalizePayload.photo) {
+              totalUploaded += 1;
+            } else if (Array.isArray(finalizePayload)) {
+              totalUploaded += finalizePayload.length;
+            }
           }
         }
 
@@ -157,7 +247,7 @@ export default function PhotoUploadDropzone({
         }, 2000);
       }
     },
-    [MAX_BATCH_BYTES, MAX_FILES_PER_BATCH, tripId, onUploadComplete, onError]
+    [MAX_BATCH_BYTES, MAX_FILES_PER_BATCH, tripId, onUploadComplete, onError, supabase]
   );
 
   const handleDrop = useCallback(

@@ -7,6 +7,10 @@ export const NEWS_POST_SELECT = `
   content,
   author_id,
   is_published,
+  is_archived,
+  archived_at,
+  is_global,
+  tag_all_members,
   published_at,
   created_at,
   updated_at,
@@ -24,6 +28,10 @@ export type RawNewsPostRow = {
   content: string;
   author_id: string | null;
   is_published: boolean;
+  is_archived: boolean;
+  archived_at: string | null;
+  is_global: boolean;
+  tag_all_members: boolean;
   published_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -151,6 +159,10 @@ export async function hydrateNewsItems(rows: RawNewsPostRow[]): Promise<NewsItem
     content: row.content,
     author_id: row.author_id,
     is_published: row.is_published,
+    is_archived: row.is_archived,
+    archived_at: row.archived_at,
+    is_global: row.is_global,
+    tag_all_members: row.tag_all_members,
     published_at: row.published_at,
     created_at: row.created_at,
     updated_at: row.updated_at,

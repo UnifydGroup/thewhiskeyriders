@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { Newspaper, Search } from 'lucide-react';
 import type { NewsItem } from '@/lib/news/types';
+import { toSearchableNewsText } from '@/lib/news/content';
 
 type NewsApiResponse = {
   success?: boolean;
@@ -35,7 +36,7 @@ export default function NewsPage() {
           throw new Error('Your session has expired. Please sign in again.');
         }
 
-        const response = await fetch('/api/news?limit=200', {
+        const response = await fetch('/api/news?placement=global&limit=200', {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -71,7 +72,7 @@ export default function NewsPage() {
 
     return (
       item.title.toLowerCase().includes(searchLower) ||
-      item.content.toLowerCase().includes(searchLower) ||
+      toSearchableNewsText(item.content).toLowerCase().includes(searchLower) ||
       tagsText.includes(searchLower)
     );
   });

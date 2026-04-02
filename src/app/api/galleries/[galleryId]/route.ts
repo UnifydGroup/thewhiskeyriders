@@ -7,6 +7,26 @@ type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
 const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
 
+interface JsonSignFile {
+  name?: unknown;
+  type?: unknown;
+  size?: unknown;
+  caption?: unknown;
+}
+
+interface JsonFinalizeUpload {
+  file_path?: unknown;
+  caption?: unknown;
+  media_type?: unknown;
+  mime_type?: unknown;
+}
+
+interface JsonUploadBody {
+  action?: unknown;
+  files?: unknown;
+  uploads?: unknown;
+}
+
 function getMediaType(mimeType: string): MediaType | null {
   if (mimeType.startsWith('image/')) {
     return 'image';
@@ -20,17 +40,29 @@ function getMediaType(mimeType: string): MediaType | null {
 }
 
 function getFileExtension(file: File) {
-  const fromName = file.name.split('.').pop()?.toLowerCase() || '';
+  return getFileExtensionFromParts(file.name, file.type);
+}
+
+function getFileExtensionFromParts(fileName: string, mimeType: string) {
+  const fromName = fileName.split('.').pop()?.toLowerCase() || '';
   if (fromName && /^[a-z0-9]+$/.test(fromName)) {
     return fromName;
   }
 
-  const fromMime = file.type.split('/').pop()?.toLowerCase() || '';
+  const fromMime = mimeType.split('/').pop()?.toLowerCase() || '';
   if (fromMime === 'jpeg') {
     return 'jpg';
   }
 
   return fromMime && /^[a-z0-9]+$/.test(fromMime) ? fromMime : 'bin';
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 async function getUserAndRole(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -146,6 +178,145 @@ export async function POST(
     const hasAccess = await canAccessTrip(supabase, user.id, role, gallery.trip_id);
     if (!hasAccess) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = (await request.json().catch(() => null)) as JsonUploadBody | null;
+      if (!body || typeof body !== 'object') {
+        return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+      }
+
+      const action = asString(body.action).toLowerCase();
+
+      if (action === 'sign') {
+        const files = Array.isArray(body.files) ? (body.files as JsonSignFile[]) : [];
+        if (files.length === 0) {
+          return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+        }
+
+        const uploads: Array<Record<string, unknown>> = [];
+        const failed: string[] = [];
+
+        for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+          const rawFile = files[fileIndex];
+          const name = asString(rawFile.name) || 'unknown-file';
+          const mimeType = asString(rawFile.type);
+          const size = asNumber(rawFile.size) ?? 0;
+          const mediaType = getMediaType(mimeType);
+
+          if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
+            failed.push(name);
+            continue;
+          }
+
+          const timestamp = Date.now();
+          const fileExt = getFileExtensionFromParts(name, mimeType);
+          const fileName = `${timestamp}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const filePath = `galleries/${galleryId}/${mediaType}s/${fileName}`;
+
+          const { data: signedData, error: signedError } = await adminSupabase.storage
+            .from('photos')
+            .createSignedUploadUrl(filePath, {
+              upsert: false,
+            });
+
+          if (signedError || !signedData?.token) {
+            failed.push(name);
+            continue;
+          }
+
+          uploads.push({
+            input_index: fileIndex,
+            original_name: name,
+            file_path: filePath,
+            token: signedData.token,
+            media_type: mediaType,
+            mime_type: mimeType || null,
+            caption: asString(rawFile.caption) || null,
+          });
+        }
+
+        return NextResponse.json({ uploads, failed }, { status: 200 });
+      }
+
+      if (action === 'finalize') {
+        const uploads = Array.isArray(body.uploads) ? (body.uploads as JsonFinalizeUpload[]) : [];
+        if (uploads.length === 0) {
+          return NextResponse.json({ error: 'No uploads provided' }, { status: 400 });
+        }
+
+        const uploadedPhotos: Array<Record<string, unknown>> = [];
+        const failed: string[] = [];
+
+        for (const rawUpload of uploads) {
+          const filePath = asString(rawUpload.file_path);
+          const mimeType = asString(rawUpload.mime_type);
+          const mediaTypeRaw = asString(rawUpload.media_type);
+          const mediaType: MediaType =
+            mediaTypeRaw === 'video' || mediaTypeRaw === 'image'
+              ? mediaTypeRaw
+              : getMediaType(mimeType || '') || 'image';
+
+          if (!filePath.startsWith(`galleries/${galleryId}/`)) {
+            failed.push(filePath || 'unknown-file');
+            continue;
+          }
+
+          const caption = asString(rawUpload.caption) || null;
+
+          const { data: photo, error: photoError } = await adminSupabase
+            .from('photos')
+            .insert({
+              trip_id: gallery.trip_id,
+              gallery_id: galleryId,
+              uploaded_by: user.id,
+              storage_path: filePath,
+              caption: caption,
+              media_type: mediaType,
+              mime_type: mimeType || null,
+              width: null,
+              height: null,
+            })
+            .select()
+            .single();
+
+          if (photoError || !photo) {
+            failed.push(filePath || 'unknown-file');
+            continue;
+          }
+
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('photos').getPublicUrl(filePath);
+
+          uploadedPhotos.push({
+            ...photo,
+            url: publicUrl,
+          });
+        }
+
+        if (uploadedPhotos.length === 0) {
+          return NextResponse.json(
+            { error: 'Failed to finalize any uploads', failed },
+            { status: 400 }
+          );
+        }
+
+        if (uploadedPhotos.length === 1 && uploads.length === 1 && failed.length === 0) {
+          return NextResponse.json({ photo: uploadedPhotos[0] }, { status: 201 });
+        }
+
+        return NextResponse.json(
+          {
+            photos: uploadedPhotos,
+            failed,
+          },
+          { status: 201 }
+        );
+      }
+
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
     // Parse form data
