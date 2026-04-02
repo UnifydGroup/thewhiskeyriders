@@ -79,7 +79,7 @@ export default function BadgeManagementPage() {
       const { data: membersData } = await supabase
         .from('profiles')
         .select('id, full_name, nickname, first_name, surname, email')
-        .order('full_name', { ascending: true });
+        .order('nickname', { ascending: true });
       setMembers(membersData || []);
 
       const { data: userBadgesData } = await supabase.from('user_badges').select('*');

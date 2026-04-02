@@ -90,7 +90,7 @@ function getUploaderName(
   profileValue: ProfileDisplay | ProfileDisplay[] | null | undefined
 ) {
   const profile = Array.isArray(profileValue) ? profileValue[0] : profileValue;
-  return profile?.full_name || profile?.nickname || 'Unknown';
+  return profile?.nickname || profile?.full_name || 'Unknown';
 }
 
 async function getTripById(

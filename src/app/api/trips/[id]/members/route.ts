@@ -37,7 +37,7 @@ export async function GET(request: NextRequest, props: { params: Params }) {
       .select(
         `
         *,
-        profiles:user_id (id, email, full_name, avatar_url, role)
+        profiles:user_id (id, email, nickname, full_name, avatar_url, role)
       `
       )
       .eq('trip_id', tripId)

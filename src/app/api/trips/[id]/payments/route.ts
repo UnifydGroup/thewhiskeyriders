@@ -37,7 +37,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       .select(
         `
         *,
-        users:user_id (id, email, full_name, avatar_url)
+        users:user_id (id, email, nickname, full_name, avatar_url)
       `,
         { count: 'exact' }
       )

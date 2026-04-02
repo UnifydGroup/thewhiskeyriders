@@ -88,7 +88,12 @@ const SORT_OPTIONS = [
 type MemberSort = (typeof SORT_OPTIONS)[number]['value'];
 type SortDirection = 'asc' | 'desc';
 
-function buildFullName(profile: MemberProfile): string {
+function getDisplayName(profile: MemberProfile): string {
+  const nickname = profile.nickname?.trim();
+  if (nickname) {
+    return nickname;
+  }
+
   const assembled = [profile.first_name, profile.middle_name, profile.surname]
     .filter(Boolean)
     .join(' ')
@@ -127,7 +132,7 @@ export default function MembersPage() {
             .from('profiles')
             .select('id, full_name, first_name, middle_name, surname, nickname, avatar_url, bio, role')
             .eq('status', 'active')
-            .order('full_name', { ascending: true }),
+            .order('nickname', { ascending: true }),
           supabase
             .from('trip_members')
             .select(
@@ -190,11 +195,9 @@ export default function MembersPage() {
             badgeCount: badges.length,
             uniqueCountries,
           });
-          const nicknameOnly = profile.nickname?.trim() || 'No nickname';
-
           return {
             profile,
-            displayName: nicknameOnly,
+            displayName: getDisplayName(profile),
             trips,
             badges,
             uniqueCountries,
@@ -224,7 +227,8 @@ export default function MembersPage() {
 
         const searchable = [
           member.displayName,
-          buildFullName(member.profile),
+          getDisplayName(member.profile),
+          member.profile.full_name || '',
           member.profile.bio || '',
           ...member.trips.map((trip) => `${trip.name} ${trip.destination} ${trip.country}`),
           ...member.badges.map((badge) => badge.name),
@@ -238,7 +242,7 @@ export default function MembersPage() {
         let primaryComparison = 0;
 
         if (sortBy === 'name') {
-          primaryComparison = buildFullName(a.profile).localeCompare(buildFullName(b.profile)) * directionFactor;
+          primaryComparison = getDisplayName(a.profile).localeCompare(getDisplayName(b.profile)) * directionFactor;
         } else if (sortBy === 'trip-count') {
           primaryComparison = (a.trips.length - b.trips.length) * directionFactor;
         } else {

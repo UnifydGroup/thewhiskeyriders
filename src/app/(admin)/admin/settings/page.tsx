@@ -14,7 +14,6 @@ const DEFAULT_LOGO_URL = '/3.png';
 const DEFAULT_BACKGROUND_URL = '/swirl-bg.svg';
 const DEFAULT_BACKGROUND_MEDIA_TYPE: BackgroundMediaType = 'image';
 const MAX_BACKGROUND_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-const MAX_BACKGROUND_VIDEO_SIZE_BYTES = 80 * 1024 * 1024;
 const SITE_SETTINGS_MISSING_TABLE_TEXT = "Could not find the table 'public.site_settings'";
 const SUPPORTED_BACKGROUND_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'svg'];
 const SUPPORTED_BACKGROUND_MIME_TYPES = new Set([
@@ -24,14 +23,6 @@ const SUPPORTED_BACKGROUND_MIME_TYPES = new Set([
   'image/gif',
   'image/avif',
   'image/svg+xml',
-]);
-const SUPPORTED_BACKGROUND_VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'ogg', 'm4v'];
-const SUPPORTED_BACKGROUND_VIDEO_MIME_TYPES = new Set([
-  'video/mp4',
-  'video/webm',
-  'video/quicktime',
-  'video/ogg',
-  'video/x-m4v',
 ]);
 const SITE_SETTINGS_SELECT =
   'id, logo_url, background_image_url, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity';
@@ -385,7 +376,11 @@ export default function SettingsPage() {
       const isVideo = file.type.startsWith('video/');
 
       if (!isImage && !isVideo) {
-        throw new Error('Please choose an image or video file.');
+        throw new Error('Please choose an image file.');
+      }
+
+      if (isVideo) {
+        throw new Error('Video uploads are temporarily disabled. Use an image file for now.');
       }
 
       if (isImage && isHeicOrHeif(fileName, file.type)) {
@@ -402,27 +397,13 @@ export default function SettingsPage() {
         }
       }
 
-      if (isVideo) {
-        const mimeLooksSupported = file.type ? SUPPORTED_BACKGROUND_VIDEO_MIME_TYPES.has(file.type) : false;
-        const extensionLooksSupported = SUPPORTED_BACKGROUND_VIDEO_EXTENSIONS.includes(fileExtension);
-        if (!mimeLooksSupported && !extensionLooksSupported) {
-          throw new Error('Unsupported video format. Use MP4, WEBM, MOV, OGG, or M4V.');
-        }
-      }
-
       if (isImage && file.size > MAX_BACKGROUND_IMAGE_SIZE_BYTES) {
         throw new Error('Background image must be 10MB or smaller.');
       }
 
-      if (isVideo && file.size > MAX_BACKGROUND_VIDEO_SIZE_BYTES) {
-        throw new Error('Background video must be 80MB or smaller.');
-      }
-
       const safeExtension = /^[a-z0-9]+$/.test(fileExtension)
         ? fileExtension
-        : isVideo
-          ? 'mp4'
-          : 'jpg';
+        : 'jpg';
       const path = `site/backgrounds/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExtension}`;
 
       const { error: uploadError } = await supabase.storage.from('photos').upload(path, file, {
@@ -440,14 +421,9 @@ export default function SettingsPage() {
         throw new Error('Failed to generate public URL for uploaded media.');
       }
 
-      if (isVideo) {
-        handleChange('background_media_type', 'video');
-        handleChange('background_video_url', data.publicUrl);
-      } else {
-        handleChange('background_media_type', 'image');
-        handleChange('background_image_url', data.publicUrl);
-      }
-      setUploadMessage('Background media uploaded. Click "Save Settings" to publish it on the landing page.');
+      handleChange('background_media_type', 'image');
+      handleChange('background_image_url', data.publicUrl);
+      setUploadMessage('Background image uploaded. Click "Save Settings" to publish it on the landing page.');
     } catch (err) {
       console.error('Background upload error:', err);
       setErrorMessage(toFriendlyErrorMessage(err, 'upload'));
@@ -658,7 +634,7 @@ export default function SettingsPage() {
                 <input
                   type="checkbox"
                   checked={settings[item.key as keyof typeof settings] as boolean}
-                  onChange={(e) => handleChange(item.key, e.target.checked)}
+                  onChange={(e) => handleChange(item.key as keyof PortalSettings, e.target.checked)}
                   className="w-4 h-4 rounded"
                 />
                 <div className="flex-1">
@@ -746,7 +722,7 @@ export default function SettingsPage() {
                 <input
                   type="checkbox"
                   checked={settings[item.key as keyof typeof settings] as boolean}
-                  onChange={(e) => handleChange(item.key, e.target.checked)}
+                  onChange={(e) => handleChange(item.key as keyof PortalSettings, e.target.checked)}
                   className="w-4 h-4 rounded"
                 />
                 <div className="flex-1">
@@ -761,7 +737,7 @@ export default function SettingsPage() {
             <div>
               <h3 className="font-bold text-lg">Landing Background</h3>
               <p className="text-gray-400 text-sm">
-                Upload a new image/video or paste a URL. This is used on the public landing page hero.
+                Upload a new image or paste a URL. This is used on the public landing page hero.
               </p>
             </div>
 
@@ -784,13 +760,13 @@ export default function SettingsPage() {
                 {isUploadingBackground ? 'Uploading...' : 'Choose File'}
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,video/mp4,video/webm,video/quicktime,video/ogg,video/x-m4v,.jpg,.jpeg,.png,.webp,.gif,.avif,.svg,.mp4,.webm,.mov,.ogg,.m4v"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.avif,.svg"
                   className="hidden"
                   onChange={handleBackgroundUpload}
                   disabled={isUploadingBackground}
                 />
               </label>
-              <p className="text-xs text-gray-500">Allowed: images up to 10MB and videos up to 80MB.</p>
+              <p className="text-xs text-gray-500">Allowed: images up to 10MB. Video file uploads are temporarily disabled.</p>
             </div>
 
             {settings.background_media_type === 'image' ? (

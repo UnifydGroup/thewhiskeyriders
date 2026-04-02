@@ -7,6 +7,7 @@ type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
 type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
 const MAX_MEDIA_UPLOAD_BYTES = 500 * 1024 * 1024;
+const VIDEO_UPLOADS_ENABLED = false;
 const VIDEO_EXTENSIONS = [
   'mp4',
   'mov',
@@ -290,6 +291,8 @@ async function ensureUploaderProfile(adminSupabase: SupabaseAdminClient, user: U
       : `${user.id}@users.whiskeyriders.local`;
   const fullName =
     typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null;
+  const nickname =
+    typeof user.user_metadata?.nickname === 'string' ? user.user_metadata.nickname : null;
 
   const { error: createProfileError } = await adminSupabase.from('profiles').insert({
     id: user.id,
@@ -298,6 +301,7 @@ async function ensureUploaderProfile(adminSupabase: SupabaseAdminClient, user: U
     role: 'member',
     status: 'active',
     full_name: fullName,
+    nickname,
   });
 
   if (createProfileError && createProfileError.code !== '23505') {
@@ -394,7 +398,7 @@ async function insertTripPhotoRecord(
  * POST /api/trips/[id]/photos/upload - Upload media file(s) directly to a trip
  *
  * Expected FormData:
- * - files: File[] (image/video) OR file: File
+ * - files: File[] (images only) OR file: File
  * - caption: string (optional)
  * - detailed query param (optional): when true/1, response includes {photos, failed}
  */
@@ -466,14 +470,19 @@ export async function POST(
           const mediaType = getMediaType(mimeTypeInput, name);
           const mimeType = normalizeUploadMimeType(mimeTypeInput, name, mediaType) || '';
 
-          if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
+          let reason: string | null = null;
+          if (!mediaType) {
+            reason = 'Unsupported file type';
+          } else if (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) {
+            reason = 'Video uploads are temporarily disabled';
+          } else if (size <= 0) {
+            reason = 'Empty file';
+          } else if (size > MAX_MEDIA_UPLOAD_BYTES) {
+            reason = `File too large. Max ${formatSizeMB(MAX_MEDIA_UPLOAD_BYTES)}MB`;
+          }
+
+          if (reason) {
             failed.push(name);
-            let reason = 'Unsupported file type';
-            if (size <= 0) {
-              reason = 'Empty file';
-            } else if (size > MAX_MEDIA_UPLOAD_BYTES) {
-              reason = `File too large. Max ${formatSizeMB(MAX_MEDIA_UPLOAD_BYTES)}MB`;
-            }
             failedDetails.push({
               input_index: fileIndex,
               original_name: name,
@@ -543,6 +552,16 @@ export async function POST(
               file_path: filePath || null,
               reason: 'Invalid upload path',
             });
+            continue;
+          }
+
+          if (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) {
+            failed.push(filePath || 'unknown-file');
+            failedDetails.push({
+              file_path: filePath || null,
+              reason: 'Video uploads are temporarily disabled',
+            });
+            await adminSupabase.storage.from('photos').remove([filePath]);
             continue;
           }
 
@@ -629,6 +648,10 @@ export async function POST(
     for (const file of files) {
       const mediaType = getMediaType(file.type || '', file.name);
       if (!mediaType) {
+        failed.push(file.name || 'unknown-file');
+        continue;
+      }
+      if (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) {
         failed.push(file.name || 'unknown-file');
         continue;
       }

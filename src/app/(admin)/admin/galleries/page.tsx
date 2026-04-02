@@ -48,7 +48,10 @@ interface RawPhotoResponse {
   height?: number | null;
   created_at?: string;
   uploader_name?: string;
-  profiles?: { full_name?: string | null } | Array<{ full_name?: string | null }> | null;
+  profiles?:
+    | { full_name?: string | null; nickname?: string | null }
+    | Array<{ full_name?: string | null; nickname?: string | null }>
+    | null;
   url?: string;
 }
 
@@ -529,8 +532,8 @@ export default function GalleriesPage() {
                 uploader_name:
                   raw.uploader_name ||
                   (Array.isArray(raw.profiles)
-                    ? raw.profiles[0]?.full_name || 'Unknown'
-                    : raw.profiles?.full_name || 'Unknown'),
+                    ? raw.profiles[0]?.nickname || raw.profiles[0]?.full_name || 'Unknown'
+                    : raw.profiles?.nickname || raw.profiles?.full_name || 'Unknown'),
                 url: raw.url,
               };
             })
@@ -697,7 +700,16 @@ export default function GalleriesPage() {
 
     resetMessages();
     setUploadingGalleryId(gallery.id);
-    const uploadFileItems = files.map((file, index) => ({
+    const imageFiles = files.filter((file) => isImageUploadFile(file));
+    const blockedCount = files.length - imageFiles.length;
+
+    if (imageFiles.length === 0) {
+      setError('Video uploads are temporarily disabled. Please upload images only.');
+      setUploadingGalleryId(null);
+      return;
+    }
+
+    const uploadFileItems = imageFiles.map((file, index) => ({
       id: `${Date.now()}-${index}-${file.size}`,
       file,
     }));
@@ -709,7 +721,16 @@ export default function GalleriesPage() {
         status: 'queued',
       }))
     );
-    setUploadStatusText(`Preparing ${files.length} file${files.length !== 1 ? 's' : ''}...`);
+    setUploadStatusText(
+      `Preparing ${imageFiles.length} file${imageFiles.length !== 1 ? 's' : ''}${
+        blockedCount > 0 ? ` (${blockedCount} video file${blockedCount !== 1 ? 's' : ''} skipped)` : ''
+      }...`
+    );
+    if (blockedCount > 0) {
+      setError(
+        `Skipped ${blockedCount} video file${blockedCount !== 1 ? 's' : ''}. Video uploads are temporarily disabled.`
+      );
+    }
     setUploadBatchInfo({ current: 0, total: 0 });
 
     let successCount = 0;
@@ -1230,7 +1251,7 @@ export default function GalleriesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Create New Gallery</CardTitle>
-          <CardDescription>Create a gallery for a trip and start uploading photos and videos.</CardDescription>
+          <CardDescription>Create a gallery for a trip and start uploading photos.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreateGallery} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -1483,7 +1504,7 @@ export default function GalleriesPage() {
           <CardHeader>
             <CardTitle>{selectedGallery.name} - Media Management</CardTitle>
             <CardDescription>
-              Upload photos and videos to this gallery, then use bulk tagging and filters below.
+              Upload photos to this gallery, then use bulk tagging and filters below.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1531,7 +1552,7 @@ export default function GalleriesPage() {
               )}
               <input
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*"
                 multiple
                 onChange={(event) => {
                   const files = Array.from(event.target.files || []);

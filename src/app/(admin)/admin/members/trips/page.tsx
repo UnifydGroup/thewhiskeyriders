@@ -28,7 +28,7 @@ export default function MemberTripsPage() {
       const { data: membersData } = await supabase
         .from('profiles')
         .select('id, full_name, nickname')
-        .order('full_name');
+        .order('nickname');
 
       setMembers(membersData || []);
 

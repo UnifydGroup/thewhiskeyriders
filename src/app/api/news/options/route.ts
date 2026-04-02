@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
         .from('profiles')
         .select('id, full_name, nickname, avatar_url, status')
         .eq('status', 'active')
-        .order('full_name', { ascending: true }),
+        .order('nickname', { ascending: true }),
     ]);
 
     if (tripsResult.error || membersResult.error) {

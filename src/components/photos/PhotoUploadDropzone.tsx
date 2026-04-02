@@ -130,7 +130,7 @@ export default function PhotoUploadDropzone({
   const isSupportedMediaFile = useCallback(
     (file: File) => {
       const mimeType = resolveUploadMimeType(file);
-      return Boolean(mimeType && (mimeType.startsWith('image/') || mimeType.startsWith('video/')));
+      return Boolean(mimeType && mimeType.startsWith('image/'));
     },
     [resolveUploadMimeType]
   );
@@ -243,7 +243,7 @@ export default function PhotoUploadDropzone({
       const mediaFiles = files.filter((file) => isSupportedMediaFile(file));
 
       if (mediaFiles.length === 0) {
-        onError?.('No supported media selected (image/video)');
+        onError?.('Video uploads are temporarily disabled. Please upload images only.');
         setUploading(false);
         return;
       }
@@ -777,7 +777,7 @@ export default function PhotoUploadDropzone({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,video/*"
+        accept="image/*"
         onChange={handleFileSelect}
         className="hidden"
       />
@@ -786,7 +786,7 @@ export default function PhotoUploadDropzone({
         ref={cameraInputRef}
         type="file"
         multiple
-        accept="image/*,video/*"
+        accept="image/*"
         capture="environment"
         onChange={handleFileSelect}
         className="hidden"
@@ -802,7 +802,7 @@ export default function PhotoUploadDropzone({
           >
             <Upload className="h-5 w-5 text-brand-tan flex-shrink-0" />
             <span className="text-sm text-brand-cream/70 font-medium">
-              {uploading ? `Uploading ${uploadProgress.length}…` : 'Choose Media'}
+              {uploading ? `Uploading ${uploadProgress.length}…` : 'Choose Photos'}
             </span>
           </button>
           <button
@@ -834,7 +834,7 @@ export default function PhotoUploadDropzone({
                 ? `Uploading ${uploadProgress.length} file${uploadProgress.length !== 1 ? 's' : ''}…`
                 : isDragActive
                 ? 'Drop to upload'
-                : 'Drop photos/videos here or click to upload'}
+                : 'Drop photos here or click to upload'}
             </span>
           </div>
       )}

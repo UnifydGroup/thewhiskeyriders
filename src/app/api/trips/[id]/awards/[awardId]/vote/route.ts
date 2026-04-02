@@ -38,8 +38,8 @@ export async function GET(
       .select(
         `
         *,
-        voters:voter_id (id, full_name, avatar_url),
-        nominees:nominee_id (id, full_name, avatar_url)
+        voters:voter_id (id, nickname, full_name, avatar_url),
+        nominees:nominee_id (id, nickname, full_name, avatar_url)
       `
       )
       .eq('award_id', awardId);

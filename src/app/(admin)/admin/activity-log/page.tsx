@@ -9,6 +9,7 @@ import { Activity, Download, Search, Clock } from 'lucide-react';
 
 interface ActivityUser {
   id: string;
+  nickname: string | null;
   full_name: string | null;
   email: string;
   role: string;
@@ -91,6 +92,10 @@ function toUniqueSorted(values: Array<string | null | undefined>, limit = 12): s
     .slice(0, limit);
 }
 
+function getActivityUserName(user: ActivityUser | null): string {
+  return user?.nickname?.trim() || user?.full_name?.trim() || user?.email || 'Unknown';
+}
+
 export default function ActivityLogPage() {
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -157,7 +162,7 @@ export default function ActivityLogPage() {
 
   const quickPeople = useMemo(() => {
     return toUniqueSorted(
-      activities.flatMap((activity) => [activity.user?.full_name, activity.user?.email]),
+      activities.flatMap((activity) => [getActivityUserName(activity.user), activity.user?.email]),
       10
     );
   }, [activities]);
@@ -176,7 +181,7 @@ export default function ActivityLogPage() {
   const searchSuggestions = useMemo(() => {
     return toUniqueSorted(
       activities.flatMap((activity) => [
-        activity.user?.full_name,
+        getActivityUserName(activity.user),
         activity.user?.email,
         activity.user_id,
         activity.entity_type,
@@ -198,7 +203,7 @@ export default function ActivityLogPage() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter((activity) => {
         const searchParts = [
-          activity.user?.full_name || '',
+          getActivityUserName(activity.user),
           activity.user?.email || '',
           activity.user_id,
           activity.entity_type,
@@ -270,7 +275,7 @@ export default function ActivityLogPage() {
       render: (_: string, row: ActivityRow) => (
         <div className="text-sm">
           <p className="font-medium text-brand-cream">
-            {row.user?.full_name || row.user?.email || `${row.user_id.slice(0, 8)}...`}
+            {getActivityUserName(row.user) || `${row.user_id.slice(0, 8)}...`}
           </p>
           <p className="text-brand-cream/60 text-xs">{row.user?.email || row.user_id}</p>
         </div>
@@ -306,7 +311,7 @@ export default function ActivityLogPage() {
       ...filteredActivities.map((activity) => [
         new Date(activity.created_at).toISOString(),
         activity.action,
-        activity.user?.full_name || '',
+        getActivityUserName(activity.user),
         activity.user?.email || '',
         activity.entity_type,
         activity.entity_id,

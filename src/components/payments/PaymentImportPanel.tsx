@@ -108,7 +108,7 @@ export default function PaymentImportPanel({
       const headers = ['user_id', 'name', 'date', 'amount', 'payment_method', 'notes'];
       const dataRows = (members || []).map((m: any) => {
         const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-        return [p?.member_id || m.user_id, p?.full_name || p?.nickname || '', '', '', 'bank_transfer', ''];
+        return [p?.member_id || m.user_id, p?.nickname || p?.full_name || '', '', '', 'bank_transfer', ''];
       });
 
       const wb = XLSX.utils.book_new();

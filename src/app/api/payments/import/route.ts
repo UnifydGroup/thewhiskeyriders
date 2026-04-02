@@ -69,7 +69,7 @@ function buildNameMap(profiles: Profile[]): Map<string, ResolvedProfile> {
     const resolved: ResolvedProfile = {
       id: p.id,
       member_id: p.member_id ?? p.id,
-      name: p.full_name ?? '',
+      name: p.nickname?.trim() || p.full_name || '',
     };
     if (p.full_name) {
       map.set(p.full_name.toLowerCase().trim(), resolved);
@@ -145,11 +145,11 @@ export async function PUT(request: NextRequest) {
         .filter((p) => p.member_id)
         .map((p) => [
           p.member_id!.toUpperCase(),
-          { id: p.id, member_id: p.member_id!, name: p.full_name ?? '' },
+          { id: p.id, member_id: p.member_id!, name: p.nickname?.trim() || p.full_name || '' },
         ])
     );
     const profilesByUuid = new Map<string, ResolvedProfile>(
-      profiles.map((p) => [p.id, { id: p.id, member_id: p.member_id ?? p.id, name: p.full_name ?? '' }])
+      profiles.map((p) => [p.id, { id: p.id, member_id: p.member_id ?? p.id, name: p.nickname?.trim() || p.full_name || '' }])
     );
     const nameMap = buildNameMap(profiles);
 
@@ -207,11 +207,11 @@ export async function POST(request: NextRequest) {
         .filter((p) => p.member_id)
         .map((p) => [
           p.member_id!.toUpperCase(),
-          { id: p.id, member_id: p.member_id!, name: p.full_name ?? '' },
+          { id: p.id, member_id: p.member_id!, name: p.nickname?.trim() || p.full_name || '' },
         ])
     );
     const profilesByUuid = new Map<string, ResolvedProfile>(
-      profiles.map((p) => [p.id, { id: p.id, member_id: p.member_id ?? p.id, name: p.full_name ?? '' }])
+      profiles.map((p) => [p.id, { id: p.id, member_id: p.member_id ?? p.id, name: p.nickname?.trim() || p.full_name || '' }])
     );
     const nameMap = buildNameMap(profiles);
 

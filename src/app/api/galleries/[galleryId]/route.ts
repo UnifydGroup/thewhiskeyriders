@@ -6,6 +6,7 @@ type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
 type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
 const MAX_MEDIA_UPLOAD_BYTES = 500 * 1024 * 1024;
+const VIDEO_UPLOADS_ENABLED = false;
 const VIDEO_EXTENSIONS = [
   'mp4',
   'mov',
@@ -231,10 +232,10 @@ async function canManageTrip(
 
 /**
  * POST /api/galleries/[galleryId] - Upload media file(s) to a gallery
- * All authenticated users can upload images/videos to galleries of trips they're members of
+ * All authenticated users can upload images to galleries of trips they're members of
  * 
  * Expected FormData:
- * - files: File[] (image(s)/video(s) to upload) OR file: File
+ * - files: File[] (image(s) to upload) OR file: File
  * - caption: string (optional)
  */
 export async function POST(
@@ -300,7 +301,12 @@ export async function POST(
           const mediaType = getMediaType(mimeTypeInput, name);
           const mimeType = normalizeUploadMimeType(mimeTypeInput, name, mediaType) || '';
 
-          if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
+          if (
+            !mediaType ||
+            (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) ||
+            size <= 0 ||
+            size > MAX_MEDIA_UPLOAD_BYTES
+          ) {
             failed.push(name);
             continue;
           }
@@ -356,6 +362,12 @@ export async function POST(
 
           if (!filePath.startsWith(`galleries/${galleryId}/`)) {
             failed.push(filePath || 'unknown-file');
+            continue;
+          }
+
+          if (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) {
+            failed.push(filePath || 'unknown-file');
+            await adminSupabase.storage.from('photos').remove([filePath]);
             continue;
           }
 
@@ -437,6 +449,10 @@ export async function POST(
     for (const file of files) {
       const mediaType = getMediaType(file.type || '', file.name);
       if (!mediaType) {
+        failed.push(file.name || 'unknown-file');
+        continue;
+      }
+      if (mediaType === 'video' && !VIDEO_UPLOADS_ENABLED) {
         failed.push(file.name || 'unknown-file');
         continue;
       }
@@ -574,7 +590,7 @@ export async function GET(
         width,
         height,
         created_at,
-        profiles:uploaded_by(full_name, avatar_url)
+        profiles:uploaded_by(full_name, nickname, avatar_url)
         `
       )
       .eq('gallery_id', galleryId)

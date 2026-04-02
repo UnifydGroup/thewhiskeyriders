@@ -48,7 +48,7 @@ interface PhotoQueryRow {
 
 function getUploaderName(profile: ProfileLite | ProfileLite[] | null | undefined) {
   const value = Array.isArray(profile) ? profile[0] : profile;
-  return value?.full_name || value?.nickname || 'Unknown';
+  return value?.nickname || value?.full_name || 'Unknown';
 }
 
 export default function TripGalleryPage() {

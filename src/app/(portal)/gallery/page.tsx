@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
+import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import type { Trip } from '@/lib/types/database';
 
 interface TripWithCover extends Trip {
@@ -44,7 +45,7 @@ export default function GalleryPage() {
             if (trip.cover_image_url) {
               return {
                 ...trip,
-                coverPhotoUrl: trip.cover_image_url,
+                coverPhotoUrl: buildOptimizedPhotoUrl(trip.cover_image_url, 'cover'),
                 coverMediaType: 'image' as const,
               };
             }
@@ -71,7 +72,9 @@ export default function GalleryPage() {
 
             return {
               ...trip,
-              coverPhotoUrl: publicUrl,
+              coverPhotoUrl: latest.media_type === 'video'
+                ? publicUrl
+                : buildOptimizedPhotoUrl(publicUrl, 'cover'),
               coverMediaType: latest.media_type === 'video' ? 'video' : 'image',
             };
           })

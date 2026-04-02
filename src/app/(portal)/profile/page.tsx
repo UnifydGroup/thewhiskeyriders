@@ -21,7 +21,7 @@ function getDisplayName(profile: Profile) {
     .filter(Boolean)
     .join(' ')
     .trim();
-  return fullName || profile.full_name || 'Rider';
+  return profile.nickname?.trim() || fullName || profile.full_name || 'Rider';
 }
 
 function getPhone(profile: Profile) {

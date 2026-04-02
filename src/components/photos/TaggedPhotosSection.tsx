@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { createClient } from '@/lib/supabase/client';
+import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import type { Profile } from '@/lib/types/database';
 
 interface TaggedPhoto {
@@ -69,6 +70,7 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
   const [loading, setLoading] = useState(true);
   const [photos, setPhotos] = useState<TaggedPhoto[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [thumbnailFallbackIds, setThumbnailFallbackIds] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +217,13 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
     };
   }, [profile, supabase]);
 
+  useEffect(() => {
+    const validPhotoIds = new Set(photos.map((photo) => photo.id));
+    setThumbnailFallbackIds((previous) =>
+      previous.filter((photoId) => validPhotoIds.has(photoId))
+    );
+  }, [photos]);
+
   return (
     <div>
       <h2 className="text-2xl font-bold text-brand-cream mb-4">Tagged Photos</h2>
@@ -254,12 +263,21 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
                   />
                 ) : (
                   <Image
-                    src={photo.url}
+                    src={
+                      thumbnailFallbackIds.includes(photo.id)
+                        ? photo.url
+                        : buildOptimizedPhotoUrl(photo.url, 'thumbnail') || photo.url
+                    }
                     alt={photo.caption || `Tagged photo from ${photo.trip_name}`}
                     fill
                     className="object-cover group-hover:scale-105 transition-transform"
                     sizes="(max-width: 768px) 50vw, 25vw"
                     unoptimized
+                    onError={() =>
+                      setThumbnailFallbackIds((previous) =>
+                        previous.includes(photo.id) ? previous : [...previous, photo.id]
+                      )
+                    }
                   />
                 )}
               </div>

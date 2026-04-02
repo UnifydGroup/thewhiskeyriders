@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { createClient } from '@/lib/supabase/client';
+import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import PhotoTagEditor from './PhotoTagEditor';
 import PhotoLikeButton from './PhotoLikeButton';
 import PhotoCommentsSection from './PhotoCommentsSection';
@@ -31,6 +32,8 @@ interface Photo {
   uploaded_by: string;
   uploader_name?: string;
   url: string;
+  thumbnail_url?: string;
+  detail_url?: string;
 }
 
 interface PhotoGridProps {
@@ -101,6 +104,7 @@ export default function PhotoGrid({
     location: [],
     person: [],
   });
+  const [thumbnailFallbackIds, setThumbnailFallbackIds] = useState<string[]>([]);
 
   const supabase = useMemo(() => createClient(), []);
   const editablePhotoIds = useMemo(
@@ -236,6 +240,33 @@ export default function PhotoGrid({
     const validPhotoIds = new Set(photos.map((photo) => photo.id));
     setSelectedPhotoIds((previous) => previous.filter((photoId) => validPhotoIds.has(photoId)));
   }, [photos]);
+
+  useEffect(() => {
+    const validPhotoIds = new Set(photos.map((photo) => photo.id));
+    setThumbnailFallbackIds((previous) =>
+      previous.filter((photoId) => validPhotoIds.has(photoId))
+    );
+  }, [photos]);
+
+  const getThumbnailUrl = (photo: Photo) => {
+    if (photo.thumbnail_url?.trim()) {
+      return photo.thumbnail_url;
+    }
+    return buildOptimizedPhotoUrl(photo.url, 'thumbnail') || photo.url;
+  };
+
+  const getDetailUrl = (photo: Photo) => {
+    if (photo.detail_url?.trim()) {
+      return photo.detail_url;
+    }
+    return buildOptimizedPhotoUrl(photo.url, 'detail') || photo.url;
+  };
+
+  const markThumbnailFallback = (photoId: string) => {
+    setThumbnailFallbackIds((previous) =>
+      previous.includes(photoId) ? previous : [...previous, photoId]
+    );
+  };
 
   const uploaderOptions = useMemo(() => {
     const uploaderNames = photos
@@ -690,6 +721,10 @@ export default function PhotoGrid({
             const isSelected = selectedPhotoIds.includes(photo.id);
             const isCurrentAlbumThumbnail =
               Boolean(albumThumbnailPhotoUrl) && photo.url === albumThumbnailPhotoUrl;
+            const detailUrl = getDetailUrl(photo);
+            const thumbnailUrl = thumbnailFallbackIds.includes(photo.id)
+              ? detailUrl
+              : getThumbnailUrl(photo);
             return (
               <div
                 key={photo.id}
@@ -706,11 +741,13 @@ export default function PhotoGrid({
                   />
                 ) : (
                   <Image
-                    src={photo.url}
+                    src={thumbnailUrl}
                     alt={photo.caption || 'Trip photo'}
                     fill
                     className="object-cover group-hover:scale-105 transition-transform"
                     sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                    unoptimized
+                    onError={() => markThumbnailFallback(photo.id)}
                   />
                 )}
 
@@ -802,6 +839,7 @@ export default function PhotoGrid({
         <PhotoDetailModal
           key={filteredPhotos[selectedPhotoIdx].id}
           photo={filteredPhotos[selectedPhotoIdx]}
+          detailUrl={getDetailUrl(filteredPhotos[selectedPhotoIdx])}
           allPhotos={filteredPhotos}
           currentIndex={selectedPhotoIdx}
           tripId={tripId}
@@ -827,6 +865,7 @@ export default function PhotoGrid({
 
 interface PhotoDetailModalProps {
   photo: Photo;
+  detailUrl: string;
   allPhotos: Photo[];
   currentIndex: number;
   tripId: string;
@@ -846,6 +885,7 @@ interface PhotoDetailModalProps {
 
 function PhotoDetailModal({
   photo,
+  detailUrl,
   allPhotos,
   currentIndex,
   tripId,
@@ -864,6 +904,7 @@ function PhotoDetailModal({
 }: PhotoDetailModalProps) {
   const [tags, setTags] = useState<PhotoTag[]>(initialTags);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeImageUrl, setActiveImageUrl] = useState(detailUrl || photo.url);
   const supabase = useMemo(() => createClient(), []);
 
   // Touch-swipe state
@@ -952,9 +993,16 @@ function PhotoDetailModal({
             )}
             {photo.url && !isVideoPhoto(photo) && (
               <img
-                src={photo.url}
+                src={activeImageUrl}
                 alt={photo.caption || 'Trip photo'}
                 className="max-w-full max-h-[45vh] sm:max-h-[60vh] object-contain"
+                loading="eager"
+                decoding="async"
+                onError={() => {
+                  if (activeImageUrl !== photo.url) {
+                    setActiveImageUrl(photo.url);
+                  }
+                }}
               />
             )}
           </div>

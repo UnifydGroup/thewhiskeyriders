@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
       userIds.length > 0
         ? await supabase
             .from('profiles')
-            .select('id, full_name, email, role')
+            .select('id, nickname, full_name, email, role')
             .in('id', userIds)
         : { data: [] };
 

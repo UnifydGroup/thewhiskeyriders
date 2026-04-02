@@ -9,8 +9,8 @@ interface MemberProfile {
 
 /**
  * Get display name for a member
- * Returns nickname if available, otherwise full_name
- * Format: "Nickname (Full Name)" or just "Nickname"
+ * Returns nickname if available, otherwise full_name.
+ * Full names should only be used when nickname is missing.
  */
 export function getMemberDisplayName(
   member: MemberProfile | null | undefined,
@@ -32,16 +32,13 @@ export function getMemberDisplayName(
     return nickname || fullName || 'Unknown';
   }
 
-  // Smart format: use nickname if available, but fall back to full name
-  if (nickname) {
-    return nickname;
-  }
-  return fullName || 'Unknown';
+  // Smart format defaults to nickname-only for on-site display.
+  return nickname || fullName || 'Unknown';
 }
 
 /**
  * Get name for lists/dropdowns
- * Returns "Nickname - Full Name" format for clarity
+ * Defaults to nickname, falls back to full name when nickname is missing
  */
 export function getMemberListName(member: MemberProfile | null | undefined): string {
   if (!member) return 'Unknown';
@@ -49,11 +46,7 @@ export function getMemberListName(member: MemberProfile | null | undefined): str
   const nickname = member.nickname?.trim();
   const fullName = member.full_name?.trim();
 
-  if (nickname && fullName && nickname !== fullName) {
-    return `${nickname} - ${fullName}`;
-  }
-
-  return fullName || nickname || 'Unknown';
+  return nickname || fullName || 'Unknown';
 }
 
 /**

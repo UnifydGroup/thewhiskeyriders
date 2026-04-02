@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import type { SupabaseDatabase } from '@/lib/types/database.generated';
 
 interface TripRow {
@@ -58,7 +59,7 @@ export async function GET() {
         if (trip.cover_image_url) {
           return {
             ...trip,
-            coverPhotoUrl: trip.cover_image_url,
+            coverPhotoUrl: buildOptimizedPhotoUrl(trip.cover_image_url, 'cover'),
             coverMediaType: 'image' as const,
           };
         }
@@ -85,7 +86,9 @@ export async function GET() {
 
         return {
           ...trip,
-          coverPhotoUrl: publicUrl,
+          coverPhotoUrl: latest.media_type === 'video'
+            ? publicUrl
+            : buildOptimizedPhotoUrl(publicUrl, 'cover'),
           coverMediaType: latest.media_type === 'video' ? 'video' : 'image',
         };
       })

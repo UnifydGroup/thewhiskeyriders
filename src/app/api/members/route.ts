@@ -31,11 +31,11 @@ export async function GET(request: NextRequest) {
     let query = supabase.from('profiles').select('*', { count: 'exact' });
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+      query = query.or(`nickname.ilike.%${search}%,full_name.ilike.%${search}%,email.ilike.%${search}%`);
     }
 
     const { data: members, count, error } = await query
-      .order('full_name', { ascending: true })
+      .order('nickname', { ascending: true })
       .range(offset, offset + limit - 1);
 
     if (error) {
@@ -99,6 +99,7 @@ export async function GET_PROFILE(request: NextRequest, props: { params: Promise
       return successResponse({
         id: member.id,
         email: member.email,
+        nickname: member.nickname,
         full_name: member.full_name,
         avatar_url: member.avatar_url,
         bio: member.bio,

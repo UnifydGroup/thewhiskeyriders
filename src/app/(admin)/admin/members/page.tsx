@@ -181,7 +181,7 @@ export default function MemberManagementPage() {
       const { data: membersData } = await supabase
         .from('profiles')
         .select('*')
-        .order('full_name');
+        .order('nickname');
 
       if (membersData) {
         setMembers(membersData);
@@ -239,6 +239,7 @@ export default function MemberManagementPage() {
       filtered = filtered.filter(
         (m: any) =>
           (m.user_id?.toLowerCase() || '').includes(query) ||
+          (m.nickname?.toLowerCase() || '').includes(query) ||
           (m.full_name?.toLowerCase() || '').includes(query) ||
           (m.email?.toLowerCase() || '').includes(query) ||
           (m.phone?.toLowerCase() || '').includes(query)
@@ -1029,7 +1030,7 @@ export default function MemberManagementPage() {
                           ) : (
                             <div className="w-12 h-12 rounded-full bg-brand-brown/20 border border-brand-brown/40 flex items-center justify-center">
                               <span className="text-sm font-bold text-brand-cream/60">
-                                {(member.first_name?.[0] || member.full_name?.[0] || member.email?.[0] || '?').toUpperCase()}
+                                {(member.nickname?.[0] || member.first_name?.[0] || member.full_name?.[0] || member.email?.[0] || '?').toUpperCase()}
                               </span>
                             </div>
                           )}
@@ -1214,7 +1215,7 @@ export default function MemberManagementPage() {
                     ) : (
                       <div className="w-20 h-20 rounded-full bg-brand-brown/20 border-2 border-brand-brown/40 flex items-center justify-center">
                         <span className="text-2xl font-bold text-brand-cream/50">
-                          {(editingMember.first_name?.[0] || editingMember.full_name?.[0] || editingMember.email?.[0] || '?').toUpperCase()}
+                          {(editingMember.nickname?.[0] || editingMember.first_name?.[0] || editingMember.full_name?.[0] || editingMember.email?.[0] || '?').toUpperCase()}
                         </span>
                       </div>
                     )}
