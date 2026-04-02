@@ -178,6 +178,75 @@ export default function GalleriesPage() {
     return fallback;
   };
 
+  const inferMimeTypeFromFileName = (fileName: string) => {
+    const extension = fileName.split('.').pop()?.toLowerCase() || '';
+    const byExtension: Record<string, string> = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      avif: 'image/avif',
+      heic: 'image/heic',
+      heif: 'image/heif',
+      bmp: 'image/bmp',
+      svg: 'image/svg+xml',
+      tif: 'image/tiff',
+      tiff: 'image/tiff',
+      mp4: 'video/mp4',
+      mov: 'video/mp4',
+      m4v: 'video/mp4',
+      webm: 'video/webm',
+      ogg: 'video/ogg',
+      ogv: 'video/ogg',
+      avi: 'video/x-msvideo',
+      mkv: 'video/x-matroska',
+      '3gp': 'video/3gpp',
+      '3g2': 'video/3gpp2',
+      mpeg: 'video/mpeg',
+      mpg: 'video/mpeg',
+      mts: 'video/mp2t',
+      m2ts: 'video/mp2t',
+      ts: 'video/mp2t',
+      wmv: 'video/x-ms-wmv',
+      flv: 'video/x-flv',
+    };
+
+    return byExtension[extension] || null;
+  };
+
+  const resolveUploadMimeType = (file: File, signedMimeType?: string | null) => {
+    const raw =
+      (signedMimeType || file.type || inferMimeTypeFromFileName(file.name) || '').toLowerCase();
+
+    if (!raw) {
+      return null;
+    }
+
+    if (
+      raw === 'application/octet-stream' ||
+      raw === 'binary/octet-stream' ||
+      raw === 'application/x-binary'
+    ) {
+      return inferMimeTypeFromFileName(file.name);
+    }
+
+    if (raw === 'video/quicktime' || raw === 'video/x-quicktime' || raw === 'video/x-m4v') {
+      return 'video/mp4';
+    }
+
+    if (raw.startsWith('image/') || raw.startsWith('video/')) {
+      return raw;
+    }
+
+    return inferMimeTypeFromFileName(file.name);
+  };
+
+  const isImageUploadFile = (file: File) => {
+    const mimeType = resolveUploadMimeType(file);
+    return Boolean(mimeType?.startsWith('image/'));
+  };
+
   const hashFile = async (file: File) => hashArrayBuffer(await file.arrayBuffer());
 
   const hashPhotoUrl = async (url: string) => {
@@ -426,9 +495,9 @@ export default function GalleriesPage() {
             ? data.photos
             : null;
 
-      const parsedPhotos = Array.isArray(rawPhotos)
+      const parsedPhotos: GalleryPhoto[] = Array.isArray(rawPhotos)
         ? rawPhotos
-            .map((photo) => {
+            .map((photo): GalleryPhoto | null => {
               if (!photo || typeof photo !== 'object') {
                 return null;
               }
@@ -465,7 +534,7 @@ export default function GalleriesPage() {
                 url: raw.url,
               };
             })
-            .filter((photo): photo is NonNullable<typeof photo> => photo !== null)
+            .filter((photo): photo is GalleryPhoto => photo !== null)
         : [];
 
       setGalleryPhotos(parsedPhotos);
@@ -649,9 +718,7 @@ export default function GalleriesPage() {
     const MAX_BATCH_BYTES = 25 * 1024 * 1024;
 
     try {
-      const imageUploadItems = uploadFileItems.filter((item) =>
-        item.file.type.startsWith('image/')
-      );
+      const imageUploadItems = uploadFileItems.filter((item) => isImageUploadFile(item.file));
 
       let filesToUpload = uploadFileItems;
       if (imageUploadItems.length > 0) {
@@ -788,7 +855,7 @@ export default function GalleriesPage() {
             action: 'sign',
             files: batch.map((item) => ({
               name: item.file.name,
-              type: item.file.type,
+              type: resolveUploadMimeType(item.file) || item.file.type,
               size: item.file.size,
               caption: null,
             })),
@@ -891,7 +958,7 @@ export default function GalleriesPage() {
             .from('photos')
             .uploadToSignedUrl(signedUpload.filePath, signedUpload.token, batchItem.file, {
               cacheControl: '3600',
-              contentType: batchItem.file.type,
+              contentType: resolveUploadMimeType(batchItem.file, signedUpload.mimeType) || undefined,
             });
 
           if (storageError) {
@@ -904,7 +971,7 @@ export default function GalleriesPage() {
             fileName: batchItem.file.name,
             filePath: signedUpload.filePath,
             mediaType: signedUpload.mediaType,
-            mimeType: signedUpload.mimeType || batchItem.file.type || null,
+            mimeType: resolveUploadMimeType(batchItem.file, signedUpload.mimeType),
           });
         }
 

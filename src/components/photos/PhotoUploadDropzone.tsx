@@ -61,6 +61,80 @@ export default function PhotoUploadDropzone({
     return fallback;
   }, []);
 
+  const inferMimeTypeFromFileName = useCallback((fileName: string) => {
+    const extension = fileName.split('.').pop()?.toLowerCase() || '';
+    const byExtension: Record<string, string> = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      avif: 'image/avif',
+      heic: 'image/heic',
+      heif: 'image/heif',
+      bmp: 'image/bmp',
+      svg: 'image/svg+xml',
+      mp4: 'video/mp4',
+      mov: 'video/mp4',
+      m4v: 'video/mp4',
+      webm: 'video/webm',
+      ogg: 'video/ogg',
+      ogv: 'video/ogg',
+      avi: 'video/x-msvideo',
+      mkv: 'video/x-matroska',
+      '3gp': 'video/3gpp',
+      '3g2': 'video/3gpp2',
+      mpeg: 'video/mpeg',
+      mpg: 'video/mpeg',
+      mts: 'video/mp2t',
+      m2ts: 'video/mp2t',
+      ts: 'video/mp2t',
+      wmv: 'video/x-ms-wmv',
+      flv: 'video/x-flv',
+      tif: 'image/tiff',
+      tiff: 'image/tiff',
+    };
+
+    return byExtension[extension] || null;
+  }, []);
+
+  const resolveUploadMimeType = useCallback(
+    (file: File, signedMimeType?: string | null) => {
+      const raw =
+        (signedMimeType || file.type || inferMimeTypeFromFileName(file.name) || '').toLowerCase();
+      if (!raw) {
+        return null;
+      }
+
+      if (
+        raw === 'application/octet-stream' ||
+        raw === 'binary/octet-stream' ||
+        raw === 'application/x-binary'
+      ) {
+        return inferMimeTypeFromFileName(file.name);
+      }
+
+      if (raw === 'video/quicktime' || raw === 'video/x-quicktime' || raw === 'video/x-m4v') {
+        return 'video/mp4';
+      }
+
+      if (raw.startsWith('image/') || raw.startsWith('video/')) {
+        return raw;
+      }
+
+      return inferMimeTypeFromFileName(file.name);
+    },
+    [inferMimeTypeFromFileName]
+  );
+
+  const isSupportedMediaFile = useCallback(
+    (file: File) => {
+      const mimeType = resolveUploadMimeType(file);
+      return Boolean(mimeType && (mimeType.startsWith('image/') || mimeType.startsWith('video/')));
+    },
+    [resolveUploadMimeType]
+  );
+
   const hashArrayBuffer = useCallback(async (buffer: ArrayBuffer) => {
     const digest = await crypto.subtle.digest('SHA-256', buffer);
     return Array.from(new Uint8Array(digest))
@@ -166,9 +240,7 @@ export default function PhotoUploadDropzone({
 
       setUploading(true);
 
-      const mediaFiles = files.filter(
-        (file) => file.type.startsWith('image/') || file.type.startsWith('video/')
-      );
+      const mediaFiles = files.filter((file) => isSupportedMediaFile(file));
 
       if (mediaFiles.length === 0) {
         onError?.('No supported media selected (image/video)');
@@ -285,7 +357,7 @@ export default function PhotoUploadDropzone({
               action: 'sign',
               files: batch.map((item) => ({
                 name: item.file.name,
-                type: item.file.type,
+                type: resolveUploadMimeType(item.file) || item.file.type,
                 size: item.file.size,
               })),
             }),
@@ -412,11 +484,12 @@ export default function PhotoUploadDropzone({
 
             const batchItem = batch[inputIndex];
             const file = batchItem.file;
+            const resolvedMimeType = resolveUploadMimeType(file, mimeType);
             const { error: signedUploadError } = await supabase.storage
               .from('photos')
               .uploadToSignedUrl(filePath, token, file, {
                 cacheControl: '3600',
-                contentType: file.type || mimeType || undefined,
+                contentType: resolvedMimeType || undefined,
               });
 
             if (signedUploadError) {
@@ -434,7 +507,7 @@ export default function PhotoUploadDropzone({
                 file_path: filePath,
                 caption: null,
                 media_type: mediaType,
-                mime_type: mimeType || file.type || null,
+                mime_type: resolvedMimeType,
               },
             });
           }
@@ -670,9 +743,11 @@ export default function PhotoUploadDropzone({
       extractErrorMessage,
       fingerprintFile,
       getTripMediaFingerprints,
+      isSupportedMediaFile,
       onError,
       onUploadComplete,
       parseJsonSafely,
+      resolveUploadMimeType,
       supabase,
       tripId,
     ]

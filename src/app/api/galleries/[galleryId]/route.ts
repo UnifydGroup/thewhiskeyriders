@@ -5,7 +5,27 @@ import { NextRequest, NextResponse } from 'next/server';
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
 type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
-const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_MEDIA_UPLOAD_BYTES = 500 * 1024 * 1024;
+const VIDEO_EXTENSIONS = [
+  'mp4',
+  'mov',
+  'm4v',
+  'webm',
+  'ogg',
+  'ogv',
+  'avi',
+  'mkv',
+  '3gp',
+  '3g2',
+  'mpeg',
+  'mpg',
+  'mts',
+  'm2ts',
+  'ts',
+  'wmv',
+  'flv',
+];
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif', 'bmp', 'svg', 'tif', 'tiff'];
 
 interface JsonSignFile {
   name?: unknown;
@@ -27,7 +47,7 @@ interface JsonUploadBody {
   uploads?: unknown;
 }
 
-function getMediaType(mimeType: string): MediaType | null {
+function getMediaType(mimeType: string, fileName = ''): MediaType | null {
   if (mimeType.startsWith('image/')) {
     return 'image';
   }
@@ -36,11 +56,15 @@ function getMediaType(mimeType: string): MediaType | null {
     return 'video';
   }
 
-  return null;
-}
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (IMAGE_EXTENSIONS.includes(ext)) {
+    return 'image';
+  }
+  if (VIDEO_EXTENSIONS.includes(ext)) {
+    return 'video';
+  }
 
-function getFileExtension(file: File) {
-  return getFileExtensionFromParts(file.name, file.type);
+  return null;
 }
 
 function getFileExtensionFromParts(fileName: string, mimeType: string) {
@@ -55,6 +79,76 @@ function getFileExtensionFromParts(fileName: string, mimeType: string) {
   }
 
   return fromMime && /^[a-z0-9]+$/.test(fromMime) ? fromMime : 'bin';
+}
+
+function inferMimeType(fileName: string, mediaType: MediaType | null): string | null {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const byExt: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    avif: 'image/avif',
+    heic: 'image/heic',
+    heif: 'image/heif',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+    mp4: 'video/mp4',
+    mov: 'video/mp4',
+    m4v: 'video/mp4',
+    webm: 'video/webm',
+    ogg: 'video/ogg',
+    ogv: 'video/ogg',
+    avi: 'video/x-msvideo',
+    mkv: 'video/x-matroska',
+    '3gp': 'video/3gpp',
+    '3g2': 'video/3gpp2',
+    mpeg: 'video/mpeg',
+    mpg: 'video/mpeg',
+    mts: 'video/mp2t',
+    m2ts: 'video/mp2t',
+    ts: 'video/mp2t',
+    wmv: 'video/x-ms-wmv',
+    flv: 'video/x-flv',
+  };
+
+  if (ext && byExt[ext]) {
+    return byExt[ext];
+  }
+
+  if (mediaType === 'image') {
+    return 'image/jpeg';
+  }
+  if (mediaType === 'video') {
+    return 'video/mp4';
+  }
+  return null;
+}
+
+function normalizeUploadMimeType(
+  mimeTypeInput: string,
+  fileName: string,
+  mediaType: MediaType | null
+) {
+  const input = mimeTypeInput.trim().toLowerCase();
+  if (!input) {
+    return inferMimeType(fileName, mediaType);
+  }
+
+  if (
+    input === 'application/octet-stream' ||
+    input === 'binary/octet-stream' ||
+    input === 'application/x-binary'
+  ) {
+    return inferMimeType(fileName, mediaType) || input;
+  }
+
+  if (input === 'video/quicktime' || input === 'video/x-quicktime' || input === 'video/x-m4v') {
+    return 'video/mp4';
+  }
+
+  return input;
 }
 
 function asString(value: unknown): string {
@@ -201,9 +295,10 @@ export async function POST(
         for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
           const rawFile = files[fileIndex];
           const name = asString(rawFile.name) || 'unknown-file';
-          const mimeType = asString(rawFile.type);
+          const mimeTypeInput = asString(rawFile.type);
           const size = asNumber(rawFile.size) ?? 0;
-          const mediaType = getMediaType(mimeType);
+          const mediaType = getMediaType(mimeTypeInput, name);
+          const mimeType = normalizeUploadMimeType(mimeTypeInput, name, mediaType) || '';
 
           if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
             failed.push(name);
@@ -211,7 +306,7 @@ export async function POST(
           }
 
           const timestamp = Date.now();
-          const fileExt = getFileExtensionFromParts(name, mimeType);
+          const fileExt = getFileExtensionFromParts(name, mimeType || mimeTypeInput);
           const fileName = `${timestamp}-${Math.random().toString(36).substring(7)}.${fileExt}`;
           const filePath = `galleries/${galleryId}/${mediaType}s/${fileName}`;
 
@@ -251,12 +346,13 @@ export async function POST(
 
         for (const rawUpload of uploads) {
           const filePath = asString(rawUpload.file_path);
-          const mimeType = asString(rawUpload.mime_type);
+          const mimeTypeInput = asString(rawUpload.mime_type);
           const mediaTypeRaw = asString(rawUpload.media_type);
           const mediaType: MediaType =
             mediaTypeRaw === 'video' || mediaTypeRaw === 'image'
               ? mediaTypeRaw
-              : getMediaType(mimeType || '') || 'image';
+              : getMediaType(mimeTypeInput || '', filePath) || 'image';
+          const mimeType = normalizeUploadMimeType(mimeTypeInput, filePath, mediaType) || null;
 
           if (!filePath.startsWith(`galleries/${galleryId}/`)) {
             failed.push(filePath || 'unknown-file');
@@ -339,7 +435,7 @@ export async function POST(
     const failed: string[] = [];
 
     for (const file of files) {
-      const mediaType = getMediaType(file.type || '');
+      const mediaType = getMediaType(file.type || '', file.name);
       if (!mediaType) {
         failed.push(file.name || 'unknown-file');
         continue;
@@ -351,7 +447,8 @@ export async function POST(
 
       // Create a unique file path
       const timestamp = Date.now();
-      const fileExt = getFileExtension(file);
+      const mimeType = normalizeUploadMimeType(file.type || '', file.name, mediaType) || '';
+      const fileExt = getFileExtensionFromParts(file.name, mimeType || file.type);
       const fileName = `${timestamp}-${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `galleries/${galleryId}/${mediaType}s/${fileName}`;
 
@@ -360,7 +457,7 @@ export async function POST(
       const { error: uploadError } = await adminSupabase.storage
         .from('photos')
         .upload(filePath, buffer, {
-          contentType: file.type,
+          contentType: mimeType || undefined,
           cacheControl: '3600',
         });
 
@@ -385,7 +482,7 @@ export async function POST(
           storage_path: filePath,
           caption: caption,
           media_type: mediaType,
-          mime_type: file.type || null,
+          mime_type: mimeType || null,
           width: null, // Could be extracted from file, but keeping simple for now
           height: null,
         })
@@ -488,7 +585,7 @@ export async function GET(
     }
 
     // Add public URLs to photos
-    const photosWithUrls = (photos || []).map((photo: any) => {
+    const photosWithUrls = (photos || []).map((photo: { storage_path: string } & Record<string, unknown>) => {
       const { data: { publicUrl } } = supabase.storage
         .from('photos')
         .getPublicUrl(photo.storage_path);
