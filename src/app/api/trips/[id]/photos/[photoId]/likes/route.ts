@@ -1,8 +1,20 @@
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
+function createAdminClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  return createSupabaseClient(supabaseUrl, serviceRoleKey);
+}
+
 async function photoExistsInTrip(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createSupabaseClient> | Awaited<ReturnType<typeof createClient>>,
   tripId: string,
   photoId: string
 ) {
@@ -21,7 +33,7 @@ async function photoExistsInTrip(
 }
 
 async function getLikeCount(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createSupabaseClient> | Awaited<ReturnType<typeof createClient>>,
   photoId: string
 ) {
   const { count, error } = await supabase
@@ -47,13 +59,15 @@ export async function GET(
   try {
     const { id: tripId, photoId } = await context.params;
     const supabase = await createClient();
+    const adminSupabase = createAdminClient();
+    const dbClient = adminSupabase ?? supabase;
 
-    const exists = await photoExistsInTrip(supabase, tripId, photoId);
+    const exists = await photoExistsInTrip(dbClient, tripId, photoId);
     if (!exists) {
       return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
     }
 
-    const likeCount = await getLikeCount(supabase, photoId);
+    const likeCount = await getLikeCount(dbClient, photoId);
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -67,11 +81,24 @@ export async function GET(
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error && adminSupabase) {
+        const adminLike = await adminSupabase
+        .from('photo_likes')
+        .select('id')
+        .eq('photo_id', photoId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+        if (adminLike.error) {
+          throw new Error(adminLike.error.message);
+        }
+        userLiked = Boolean(adminLike.data?.id);
+      } else {
+        if (error) {
+          throw new Error(error.message);
+        }
 
-      userLiked = Boolean(likeRow?.id);
+        userLiked = Boolean(likeRow?.id);
+      }
     }
 
     return NextResponse.json({ count: likeCount, userLiked });
@@ -92,6 +119,8 @@ export async function POST(
   try {
     const { id: tripId, photoId } = await context.params;
     const supabase = await createClient();
+    const adminSupabase = createAdminClient();
+    const dbClient = adminSupabase ?? supabase;
 
     const {
       data: { user },
@@ -102,12 +131,12 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const exists = await photoExistsInTrip(supabase, tripId, photoId);
+    const exists = await photoExistsInTrip(dbClient, tripId, photoId);
     if (!exists) {
       return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
     }
 
-    const { error } = await supabase
+    const { error } = await dbClient
       .from('photo_likes')
       .insert({ photo_id: photoId, user_id: user.id });
 
@@ -116,7 +145,7 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const likeCount = await getLikeCount(supabase, photoId);
+    const likeCount = await getLikeCount(dbClient, photoId);
     return NextResponse.json({ success: true, count: likeCount, userLiked: true });
   } catch (error) {
     console.error('POST /api/trips/[id]/photos/[photoId]/likes error:', error);
@@ -135,6 +164,8 @@ export async function DELETE(
   try {
     const { id: tripId, photoId } = await context.params;
     const supabase = await createClient();
+    const adminSupabase = createAdminClient();
+    const dbClient = adminSupabase ?? supabase;
 
     const {
       data: { user },
@@ -145,12 +176,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const exists = await photoExistsInTrip(supabase, tripId, photoId);
+    const exists = await photoExistsInTrip(dbClient, tripId, photoId);
     if (!exists) {
       return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
     }
 
-    const { error } = await supabase
+    const { error } = await dbClient
       .from('photo_likes')
       .delete()
       .eq('photo_id', photoId)
@@ -160,7 +191,7 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const likeCount = await getLikeCount(supabase, photoId);
+    const likeCount = await getLikeCount(dbClient, photoId);
     return NextResponse.json({ success: true, count: likeCount, userLiked: false });
   } catch (error) {
     console.error('DELETE /api/trips/[id]/photos/[photoId]/likes error:', error);

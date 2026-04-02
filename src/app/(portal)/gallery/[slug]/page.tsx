@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
@@ -29,70 +28,47 @@ interface Photo {
 export default function TripGalleryPage() {
   const params = useParams();
   const router = useRouter();
-  const supabase = createClient();
   const slug = params.slug as string;
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    loadTrip();
-  }, [slug, supabase, router]);
+    void loadTrip();
+  }, [slug, router]);
 
   const loadTrip = async () => {
     try {
-      // Get trip
-      const { data: tripData } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('slug', slug)
-        .single();
+      const response = await fetch(`/api/public/galleries/${slug}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
 
-      if (!tripData) {
-        router.push('/gallery');
+      const payload = await response.json().catch(() => null) as
+        | { trip?: Trip; photos?: Photo[]; error?: string }
+        | null;
+
+      if (response.status === 404) {
+        setTrip(null);
+        setPhotos([]);
+        setErrorMessage('Gallery not found.');
         return;
       }
 
-      setTrip(tripData);
-
-      // Load all photos for this trip
-      const { data: photosData } = await supabase
-        .from('photos')
-        .select(`
-          *,
-          profiles!uploaded_by(full_name, nickname)
-        `)
-        .eq('trip_id', tripData.id)
-        .order('created_at', { ascending: false });
-
-      if (photosData) {
-        const photosWithUrls = photosData.map((photo: any) => {
-          const { data: { publicUrl } } = supabase.storage
-            .from('photos')
-            .getPublicUrl(photo.storage_path);
-
-          return {
-            id: photo.id,
-            trip_id: photo.trip_id,
-            storage_path: photo.storage_path,
-            caption: photo.caption,
-            media_type: photo.media_type === 'video' ? 'video' : 'image',
-            mime_type: photo.mime_type || null,
-            width: photo.width,
-            height: photo.height,
-            created_at: photo.created_at,
-            uploaded_by: photo.uploaded_by,
-            uploader_name: photo.profiles?.full_name || photo.profiles?.nickname || 'Unknown',
-            url: publicUrl,
-          };
-        });
-
-        setPhotos(photosWithUrls);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to load gallery');
       }
+
+      setTrip(payload?.trip || null);
+      setPhotos(Array.isArray(payload?.photos) ? payload!.photos : []);
+      setErrorMessage(null);
     } catch (err) {
       console.error('Failed to load trip:', err);
-      router.push('/gallery');
+      setTrip(null);
+      setPhotos([]);
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to load gallery');
     } finally {
       setLoading(false);
     }
@@ -110,6 +86,7 @@ export default function TripGalleryPage() {
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-brand-cream">Gallery not found</h1>
+        {errorMessage && <p className="text-sm text-red-300">{errorMessage}</p>}
         <Link href="/gallery">
           <Button variant="primary">Back to Gallery</Button>
         </Link>

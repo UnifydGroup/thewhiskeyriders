@@ -2,7 +2,6 @@
 export const dynamic = 'force-dynamic';
 import { useEffect, useState } from 'react';
 import { useMemo } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
@@ -14,60 +13,40 @@ interface TripWithCover extends Trip {
 }
 
 export default function GalleryPage() {
-  const supabase = createClient();
   const [trips, setTrips] = useState<TripWithCover[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState('all');
 
   useEffect(() => {
     const loadTrips = async () => {
       try {
-        const { data } = await supabase
-          .from('trips')
-          .select('*')
-          .order('start_date', { ascending: false });
+        const response = await fetch('/api/public/galleries', {
+          method: 'GET',
+          credentials: 'include',
+        });
 
-        if (data) {
-          // For each trip, fetch the most recent photo to use as cover
-          const tripsWithCovers = await Promise.all(
-            data.map(async (trip) => {
-              // Use cover_image_url if set
-              if (trip.cover_image_url) {
-                return { ...trip, coverPhotoUrl: trip.cover_image_url, coverMediaType: 'image' };
-              }
-              // Otherwise fetch the most recent photo from the photos table
-              const { data: photos } = await supabase
-                .from('photos')
-                .select('storage_path, media_type')
-                .eq('trip_id', trip.id)
-                .order('created_at', { ascending: false })
-                .limit(1);
+        const payload = await response.json().catch(() => null) as
+          | { trips?: TripWithCover[]; error?: string }
+          | null;
 
-              if (photos && photos.length > 0) {
-                const { data: { publicUrl } } = supabase.storage
-                  .from('photos')
-                  .getPublicUrl(photos[0].storage_path);
-                return {
-                  ...trip,
-                  coverPhotoUrl: publicUrl,
-                  coverMediaType: photos[0].media_type === 'video' ? 'video' : 'image',
-                };
-              }
-
-              return { ...trip, coverPhotoUrl: undefined, coverMediaType: undefined };
-            })
-          );
-          setTrips(tripsWithCovers);
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Failed to load public galleries');
         }
+
+        setTrips(Array.isArray(payload?.trips) ? payload!.trips : []);
+        setErrorMessage(null);
       } catch (err) {
         console.error('Failed to load trips:', err);
+        setTrips([]);
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to load public galleries');
       } finally {
         setLoading(false);
       }
     };
-    loadTrips();
-  }, [supabase]);
+    void loadTrips();
+  }, []);
 
   const countryOptions = useMemo(() => {
     const countries = new Set(
@@ -106,6 +85,11 @@ export default function GalleryPage() {
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Gallery</h1>
         <p className="text-brand-cream/70">Memories from our adventures</p>
       </div>
+      {errorMessage && (
+        <Card className="border border-red-500/50 bg-red-900/20">
+          <CardContent className="pt-4 text-sm text-red-300">{errorMessage}</CardContent>
+        </Card>
+      )}
 
       <div className="space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -189,13 +173,21 @@ export default function GalleryPage() {
             </Link>
           ))}
         </div>
-      ) : (
+      ) : !errorMessage ? (
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-brand-cream/70 mb-4">No trips match your search</p>
             <p className="text-sm text-brand-cream/50">
               Try a different search query or clear the country filter
             </p>
+          </CardContent>
+        </Card>
+      ) : null}
+      {!loading && trips.length === 0 && errorMessage && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-brand-cream/70 mb-4">Public galleries are temporarily unavailable.</p>
+            <p className="text-sm text-brand-cream/50">Please try again in a moment.</p>
           </CardContent>
         </Card>
       )}
