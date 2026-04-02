@@ -2,13 +2,14 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { NewsCard } from '@/components/news/NewsCard';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
-import { Newspaper, Search } from 'lucide-react';
+import { CalendarDays, ChevronRight, Newspaper, Search } from 'lucide-react';
 import type { NewsItem } from '@/lib/news/types';
-import { toSearchableNewsText } from '@/lib/news/content';
+import { getCompactPreview, toSearchableNewsText } from '@/lib/news/content';
+import { formatDate } from '@/lib/utils';
 
 type NewsApiResponse = {
   success?: boolean;
@@ -98,7 +99,7 @@ export default function NewsPage() {
           </div>
           <h1 className="mt-4 text-3xl font-bold text-brand-cream sm:text-4xl">Latest Updates</h1>
           <p className="mt-3 max-w-2xl text-brand-cream/80">
-            Announcements from the crew, tagged to trips and riders so you can jump straight to what matters.
+            Published articles from the crew. Open any headline to read the full article.
           </p>
         </div>
       </section>
@@ -133,9 +134,34 @@ export default function NewsPage() {
       )}
 
       <div className="space-y-4">
-        {filteredNews.map((item) => (
-          <NewsCard key={item.id} item={item} />
-        ))}
+        {filteredNews.map((item) => {
+          const publishedAt = item.published_at || item.created_at;
+          const preview = getCompactPreview(item.content, 180);
+
+          return (
+            <Link key={item.id} href={`/news/${item.id}`} className="block">
+              <Card hoverable>
+                <CardContent className="p-0">
+                  <div className="flex items-start justify-between gap-4 px-5 py-4">
+                    <div className="min-w-0 space-y-2">
+                      <h2 className="text-lg font-semibold text-brand-cream truncate">{item.title}</h2>
+                      {publishedAt && (
+                        <p className="text-xs text-brand-cream/60 inline-flex items-center gap-1">
+                          <CalendarDays className="w-3.5 h-3.5" />
+                          {formatDate(publishedAt, 'MMM d, yyyy h:mm a')}
+                        </p>
+                      )}
+                      {preview && (
+                        <p className="text-sm text-brand-cream/75 line-clamp-2">{preview}</p>
+                      )}
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-brand-brown shrink-0 mt-1" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
