@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
-import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Upload, CheckCircle, AlertCircle, Camera } from 'lucide-react';
 
 interface UploadProgress {
   file: File;
@@ -27,8 +27,14 @@ export default function PhotoUploadDropzone({
   const [isDragActive, setIsDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -46,16 +52,18 @@ export default function PhotoUploadDropzone({
 
       setUploading(true);
 
-      const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+      const mediaFiles = files.filter(
+        (file) => file.type.startsWith('image/') || file.type.startsWith('video/')
+      );
 
-      if (imageFiles.length === 0) {
-        onError?.('No image files selected');
+      if (mediaFiles.length === 0) {
+        onError?.('No supported media selected (image/video)');
         setUploading(false);
         return;
       }
 
       setUploadProgress(
-        imageFiles.map((file) => ({
+        mediaFiles.map((file) => ({
           file,
           progress: 0,
           status: 'uploading' as const,
@@ -68,7 +76,7 @@ export default function PhotoUploadDropzone({
         let currentBatch: File[] = [];
         let currentBatchBytes = 0;
 
-        for (const file of imageFiles) {
+        for (const file of mediaFiles) {
           const shouldStartNewBatch =
             currentBatch.length >= MAX_FILES_PER_BATCH ||
             currentBatchBytes + file.size > MAX_BATCH_BYTES;
@@ -116,7 +124,7 @@ export default function PhotoUploadDropzone({
         }
 
         setUploadProgress(
-          imageFiles.map((file) => ({
+          mediaFiles.map((file) => ({
             file,
             progress: 100,
             status: 'success' as const,
@@ -133,7 +141,7 @@ export default function PhotoUploadDropzone({
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
 
         setUploadProgress(
-          imageFiles.map((file) => ({
+          mediaFiles.map((file) => ({
             file,
             progress: 0,
             status: 'error' as const,
@@ -171,36 +179,72 @@ export default function PhotoUploadDropzone({
 
   return (
     <div className="w-full">
-      {/* Compact drop zone bar */}
-      <div
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-        onClick={() => !uploading && fileInputRef.current?.click()}
-        className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border border-dashed cursor-pointer transition-colors ${
-          isDragActive
-            ? 'border-brand-tan bg-brand-tan/10'
-            : 'border-brand-brown/50 hover:border-brand-tan/70 hover:bg-brand-brown/10'
-        } ${uploading ? 'cursor-default pointer-events-none opacity-70' : ''}`}
-      >
-        <Upload className="h-4 w-4 text-brand-tan flex-shrink-0" />
-        <span className="text-sm text-brand-cream/60">
-          {uploading
-            ? `Uploading ${uploadProgress.length} photo${uploadProgress.length !== 1 ? 's' : ''}…`
-            : isDragActive
-            ? 'Drop to upload'
-            : 'Drop photos here or click to upload'}
-        </span>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/*"
-          onChange={handleFileSelect}
-          className="hidden"
-        />
-      </div>
+      {/* Hidden inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+      {/* Camera-capture input (separate so `capture` doesn't block gallery on iOS) */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        capture="environment"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+
+      {isMobile ? (
+        /* ── Mobile: two prominent tap buttons ── */
+        <div className={`flex gap-2 ${uploading ? 'opacity-70 pointer-events-none' : ''}`}>
+          <button
+            type="button"
+            onClick={() => !uploading && fileInputRef.current?.click()}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-brand-brown/50 bg-brand-brown/10 active:bg-brand-brown/20 transition-colors min-h-[52px]"
+          >
+            <Upload className="h-5 w-5 text-brand-tan flex-shrink-0" />
+            <span className="text-sm text-brand-cream/70 font-medium">
+              {uploading ? `Uploading ${uploadProgress.length}…` : 'Choose Media'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => !uploading && cameraInputRef.current?.click()}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-brand-brown/50 bg-brand-brown/10 active:bg-brand-brown/20 transition-colors min-h-[52px]"
+          >
+            <Camera className="h-5 w-5 text-brand-tan flex-shrink-0" />
+            <span className="text-sm text-brand-cream/70 font-medium">Camera</span>
+          </button>
+        </div>
+      ) : (
+        /* ── Desktop: drag-and-drop bar ── */
+        <div
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => !uploading && fileInputRef.current?.click()}
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border border-dashed cursor-pointer transition-colors ${
+            isDragActive
+              ? 'border-brand-tan bg-brand-tan/10'
+              : 'border-brand-brown/50 hover:border-brand-tan/70 hover:bg-brand-brown/10'
+          } ${uploading ? 'cursor-default pointer-events-none opacity-70' : ''}`}
+        >
+          <Upload className="h-4 w-4 text-brand-tan flex-shrink-0" />
+            <span className="text-sm text-brand-cream/60">
+              {uploading
+                ? `Uploading ${uploadProgress.length} file${uploadProgress.length !== 1 ? 's' : ''}…`
+                : isDragActive
+                ? 'Drop to upload'
+                : 'Drop photos/videos here or click to upload'}
+            </span>
+          </div>
+      )}
 
       {/* Inline progress — only shown while uploading */}
       {uploadProgress.length > 0 && (

@@ -10,13 +10,15 @@ async function getSiteSettings() {
     const { data } = await supabase
       .from('site_settings')
       .select(
-        'logo_url, background_image_url, background_position_x, background_position_y, background_zoom, background_opacity'
+        'logo_url, background_image_url, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity'
       )
       .single();
     
     return {
       logoUrl: data?.logo_url || '/3.png',
+      backgroundMediaType: data?.background_media_type === 'video' ? 'video' : 'image',
       backgroundImageUrl: data?.background_image_url || '/swirl-bg.svg',
+      backgroundVideoUrl: data?.background_video_url || '',
       backgroundPositionX: clamp(data?.background_position_x ?? 50, 0, 100),
       backgroundPositionY: clamp(data?.background_position_y ?? 50, 0, 100),
       backgroundZoom: clamp(data?.background_zoom ?? 100, 25, 300),
@@ -26,7 +28,9 @@ async function getSiteSettings() {
     console.error('Failed to load site settings:', err);
     return {
       logoUrl: '/3.png',
+      backgroundMediaType: 'image' as const,
       backgroundImageUrl: '/swirl-bg.svg',
+      backgroundVideoUrl: '',
       backgroundPositionX: 50,
       backgroundPositionY: 50,
       backgroundZoom: 100,
@@ -55,7 +59,9 @@ async function getTrips() {
 export default async function Home() {
   const {
     logoUrl,
+    backgroundMediaType,
     backgroundImageUrl,
+    backgroundVideoUrl,
     backgroundPositionX,
     backgroundPositionY,
     backgroundZoom,
@@ -81,18 +87,35 @@ export default async function Home() {
 
       {/* Hero */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-20 relative overflow-hidden">
-        {/* Background Image */}
-        <div
-          className="absolute inset-0 z-0"
-          style={{
-            backgroundImage: `url('${backgroundImageUrl}')`,
-            backgroundSize: `${backgroundZoom}%`,
-            backgroundPosition: `${backgroundPositionX}% ${backgroundPositionY}%`,
-            backgroundRepeat: 'no-repeat',
-            backgroundAttachment: 'fixed',
-            opacity: backgroundOpacity / 100,
-          }}
-        />
+        {/* Background Media */}
+        {backgroundMediaType === 'video' && backgroundVideoUrl ? (
+          <video
+            src={backgroundVideoUrl}
+            className="absolute inset-0 z-0 h-full w-full object-cover"
+            style={{
+              objectPosition: `${backgroundPositionX}% ${backgroundPositionY}%`,
+              transform: `scale(${backgroundZoom / 100})`,
+              opacity: backgroundOpacity / 100,
+            }}
+            muted
+            autoPlay
+            loop
+            playsInline
+            preload="metadata"
+          />
+        ) : (
+          <div
+            className="absolute inset-0 z-0"
+            style={{
+              backgroundImage: `url('${backgroundImageUrl}')`,
+              backgroundSize: `${backgroundZoom}%`,
+              backgroundPosition: `${backgroundPositionX}% ${backgroundPositionY}%`,
+              backgroundRepeat: 'no-repeat',
+              backgroundAttachment: 'fixed',
+              opacity: backgroundOpacity / 100,
+            }}
+          />
+        )}
 
         <div className="relative z-10 text-center max-w-3xl mx-auto space-y-8">
           <div className="space-y-4">

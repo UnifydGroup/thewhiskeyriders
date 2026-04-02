@@ -70,7 +70,8 @@ export function DataTable<T>({
 
   return (
     <div className={cn('border border-gray-700 rounded-lg overflow-hidden', maxHeight && 'overflow-y-auto')}>
-      <table className="w-full border-collapse">
+      <div className="overflow-x-auto">
+      <table className="w-full border-collapse min-w-full">
         <thead>
           <tr
             className={cn(
@@ -173,6 +174,7 @@ export function DataTable<T>({
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

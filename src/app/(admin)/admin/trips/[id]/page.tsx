@@ -10,6 +10,14 @@ import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import { ArrowLeft, SaveIcon, Trash2 } from 'lucide-react';
 
+function toDateTimeLocalValue(value: string | null | undefined): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const offset = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export default function TripEditorPage() {
   const params = useParams();
   const router = useRouter();
@@ -26,6 +34,11 @@ export default function TripEditorPage() {
     name: '',
     destination: '',
     country: '',
+    country_code: '',
+    latitude: '',
+    longitude: '',
+    countdown_enabled: false,
+    countdown_target_at: '',
     start_date: '',
     end_date: '',
     description: '',
@@ -79,6 +92,11 @@ export default function TripEditorPage() {
         description: tripData.description || '',
         itinerary: tripData.itinerary || '',
         cover_image_url: tripData.cover_image_url || '',
+        country_code: tripData.country_code || '',
+        latitude: tripData.latitude != null ? String(tripData.latitude) : '',
+        longitude: tripData.longitude != null ? String(tripData.longitude) : '',
+        countdown_enabled: tripData.countdown_enabled === true,
+        countdown_target_at: toDateTimeLocalValue(tripData.countdown_target_at),
         status: tripData.status,
         max_members: tripData.max_members ? String(tripData.max_members) : '',
       });
@@ -90,7 +108,11 @@ export default function TripEditorPage() {
   };
 
   const handleChange = (e: React.ChangeEvent<any>) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    const value =
+      e.target instanceof HTMLInputElement && e.target.type === 'checkbox'
+        ? e.target.checked
+        : e.target.value;
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -119,6 +141,13 @@ export default function TripEditorPage() {
         },
         body: JSON.stringify({
           ...formData,
+          country_code: formData.country_code.toUpperCase() || null,
+          latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+          longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+          countdown_enabled: formData.countdown_enabled,
+          countdown_target_at: formData.countdown_target_at
+            ? new Date(formData.countdown_target_at).toISOString()
+            : null,
           max_members: formData.max_members ? parseInt(formData.max_members) : null,
         }),
       });
@@ -278,6 +307,59 @@ export default function TripEditorPage() {
             />
           </div>
 
+          {/* Map Coordinates */}
+          <div className="md:col-span-2 border-t border-gray-700 pt-4 mt-2">
+            <p className="text-sm font-semibold text-brand-tan mb-1">Map Coordinates</p>
+            <p className="text-xs text-gray-400 mb-4">
+              Used to place a pin on the interactive world map.{' '}
+              <a href="https://www.latlong.net/" target="_blank" rel="noreferrer" className="underline">
+                Find coordinates →
+              </a>
+              {' '}·{' '}
+              Country code:{' '}
+              <a href="https://www.iban.com/country-codes" target="_blank" rel="noreferrer" className="underline">
+                ISO alpha-3 list →
+              </a>
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Country Code <span className="text-gray-400 font-normal">(ISO alpha-3)</span>
+                </label>
+                <Input
+                  type="text"
+                  name="country_code"
+                  value={formData.country_code}
+                  onChange={handleChange}
+                  placeholder="e.g., MAR"
+                  maxLength={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Latitude</label>
+                <Input
+                  type="number"
+                  name="latitude"
+                  value={formData.latitude}
+                  onChange={handleChange}
+                  placeholder="e.g., 31.7917"
+                  step="any"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Longitude</label>
+                <Input
+                  type="number"
+                  name="longitude"
+                  value={formData.longitude}
+                  onChange={handleChange}
+                  placeholder="e.g., -7.0926"
+                  step="any"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Start Date */}
           <div>
             <label className="block text-sm font-medium mb-2">Start Date</label>
@@ -298,6 +380,38 @@ export default function TripEditorPage() {
               value={formData.end_date}
               onChange={handleChange}
             />
+          </div>
+
+          {/* Countdown */}
+          <div className="md:col-span-2 border-t border-gray-700 pt-4 mt-2">
+            <p className="text-sm font-semibold text-brand-tan mb-3">Trip Countdown</p>
+            <div className="space-y-4">
+              <label className="inline-flex items-center gap-3 text-sm text-gray-200">
+                <input
+                  type="checkbox"
+                  name="countdown_enabled"
+                  checked={formData.countdown_enabled}
+                  onChange={handleChange}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-brand-brown focus:ring-brand-brown/40"
+                />
+                Enable countdown on trip page
+              </label>
+              <div className="max-w-sm">
+                <label className="block text-sm font-medium mb-2">
+                  Countdown Target Date & Time
+                </label>
+                <Input
+                  type="datetime-local"
+                  name="countdown_target_at"
+                  value={formData.countdown_target_at}
+                  onChange={handleChange}
+                  disabled={!formData.countdown_enabled}
+                />
+                <p className="text-xs text-gray-400 mt-2">
+                  Leave empty to count down to the trip start date.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Status */}

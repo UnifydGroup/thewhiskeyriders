@@ -117,6 +117,11 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.name !== undefined) updateData.name = body.name;
     if (body.destination !== undefined) updateData.destination = body.destination;
     if (body.country !== undefined) updateData.country = body.country;
+    if (body.country_code !== undefined) updateData.country_code = body.country_code || null;
+    if (body.latitude !== undefined) updateData.latitude = body.latitude ?? null;
+    if (body.longitude !== undefined) updateData.longitude = body.longitude ?? null;
+    if (body.countdown_enabled !== undefined) updateData.countdown_enabled = body.countdown_enabled === true;
+    if (body.countdown_target_at !== undefined) updateData.countdown_target_at = body.countdown_target_at || null;
     if (body.start_date !== undefined) updateData.start_date = body.start_date;
     if (body.end_date !== undefined) updateData.end_date = body.end_date;
     if (body.description !== undefined) updateData.description = body.description;

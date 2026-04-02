@@ -13,6 +13,8 @@ import { formatDate } from '@/lib/utils';
 import { Mail, Phone, Edit } from 'lucide-react';
 import type { Profile } from '@/lib/types/database';
 import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
+import { NewsCard } from '@/components/news/NewsCard';
+import type { NewsItem } from '@/lib/news/types';
 
 function getDisplayName(profile: Profile) {
   const fullName = [profile.first_name, profile.middle_name, profile.surname]
@@ -30,18 +32,38 @@ export default function ProfilePage() {
   const router = useRouter();
   const supabase = createClient();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadProfile = async () => {
       try {
         const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const {
           data: { user },
         } = await supabase.auth.getUser();
         if (!user) return;
 
         const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        if (data) setProfile(data);
+        if (data) {
+          setProfile(data);
+
+          if (session?.access_token) {
+            const response = await fetch(`/api/news?memberId=${data.id}&limit=20`, {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            });
+
+            const payload = await response.json().catch(() => ({}));
+            if (response.ok && payload?.success) {
+              setTaggedNews(payload?.data?.news || []);
+            }
+          }
+        }
       } catch (err) {
         console.error('Failed to load profile:', err);
       } finally {
@@ -282,6 +304,17 @@ export default function ProfilePage() {
       </div>
 
       <TaggedPhotosSection profile={profile} />
+
+      {taggedNews.length > 0 && (
+        <div>
+          <h2 className="text-2xl font-bold text-brand-cream mb-4">News Tagged To You</h2>
+          <div className="space-y-4">
+            {taggedNews.map((item) => (
+              <NewsCard key={item.id} item={item} compact />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <h2 className="text-2xl font-bold text-brand-cream mb-4">Achievements</h2>

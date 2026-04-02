@@ -10,7 +10,16 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/ui/Avatar';
 import { formatDate } from '@/lib/utils';
-import { Calendar, MapPin, Users, Image as ImageIcon, FileText, Download, Eye } from 'lucide-react';
+import {
+  Calendar,
+  MapPin,
+  Users,
+  Image as ImageIcon,
+  FileText,
+  Download,
+  Eye,
+  Clock3,
+} from 'lucide-react';
 import Link from 'next/link';
 import PaymentScheduleSection from '@/components/trip/PaymentScheduleSection';
 import PaymentProgressCard from '@/components/dashboard/PaymentProgressCard';
@@ -18,6 +27,8 @@ import PhotosTabContent from '@/components/photos/PhotosTabContent';
 import MemberTransactions from '@/components/trips/MemberTransactions';
 import { getMemberDisplayName } from '@/lib/member-display';
 import type { Trip, TripKeyDate, TripUpdate, TripMember, Profile } from '@/lib/types/database';
+import { NewsCard } from '@/components/news/NewsCard';
+import type { NewsItem } from '@/lib/news/types';
 
 type TripMemberWithProfile = TripMember & {
   profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url'> | null;
@@ -32,11 +43,41 @@ type TripDocument = {
   created_at: string;
 };
 
+type CountdownTrip = Pick<Trip, 'id' | 'slug' | 'name' | 'start_date' | 'status'> & {
+  countdown_target_at?: string | null;
+};
+
+type NextCountdown = {
+  trip: CountdownTrip;
+  targetDate: Date;
+};
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
   }
   return fallback;
+}
+
+function getCountdownTargetDate(trip: Pick<Trip, 'start_date' | 'countdown_target_at'>): Date | null {
+  if (trip.countdown_target_at) {
+    const explicitDate = new Date(trip.countdown_target_at);
+    if (!Number.isNaN(explicitDate.getTime())) {
+      return explicitDate;
+    }
+  }
+
+  const fallbackDate = new Date(`${trip.start_date}T00:00:00`);
+  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+}
+
+function getCountdownParts(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { days, hours, minutes, seconds };
 }
 
 export default function TripDetailPage() {
@@ -48,8 +89,11 @@ export default function TripDetailPage() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [keyDates, setKeyDates] = useState<TripKeyDate[]>([]);
   const [updates, setUpdates] = useState<TripUpdate[]>([]);
+  const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
   const [members, setMembers] = useState<TripMemberWithProfile[]>([]);
   const [documents, setDocuments] = useState<TripDocument[]>([]);
+  const [nextCountdown, setNextCountdown] = useState<NextCountdown | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [tab, setTab] = useState<'overview' | 'photos' | 'documents' | 'payments' | 'votes'>('overview');
   const [loading, setLoading] = useState(true);
@@ -112,6 +156,23 @@ export default function TripDetailPage() {
           setUpdates(updatesData);
         }
 
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.access_token) {
+          const newsResponse = await fetch(`/api/news?tripId=${tripData.id}&limit=20`, {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          const newsPayload = await newsResponse.json().catch(() => ({}));
+          if (newsResponse.ok && newsPayload?.success) {
+            setTaggedNews(newsPayload?.data?.news || []);
+          }
+        }
+
         // Get members
         const { data: membersData } = await supabase
           .from('trip_members')
@@ -120,6 +181,32 @@ export default function TripDetailPage() {
 
         if (membersData) {
           setMembers(membersData as TripMemberWithProfile[]);
+        }
+
+        // Get next enabled countdown trip
+        const { data: countdownTripsData } = await supabase
+          .from('trips')
+          .select('id, slug, name, start_date, status, countdown_target_at')
+          .eq('countdown_enabled', true)
+          .neq('status', 'cancelled');
+
+        if (countdownTripsData) {
+          const now = Date.now();
+          const nearestCountdown = countdownTripsData
+            .map((candidate) => {
+              const targetDate = getCountdownTargetDate(candidate as CountdownTrip);
+              if (!targetDate) return null;
+              return {
+                trip: candidate as CountdownTrip,
+                targetDate,
+              };
+            })
+            .filter((entry): entry is NextCountdown => Boolean(entry))
+            .filter((entry) => entry.targetDate.getTime() > now)
+            .sort((a, b) => a.targetDate.getTime() - b.targetDate.getTime())[0];
+
+          setNextCountdown(nearestCountdown || null);
+          setNowMs(now);
         }
       } catch (err) {
         console.error('Failed to load trip:', err);
@@ -184,6 +271,20 @@ export default function TripDetailPage() {
     };
   }, [tab, trip?.id, supabase]);
 
+  useEffect(() => {
+    if (!nextCountdown) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [nextCountdown]);
+
   const getFileIcon = (fileType: string) => {
     const normalizedType = (fileType || '').toLowerCase();
     if (normalizedType.includes('pdf')) return '📄';
@@ -193,6 +294,17 @@ export default function TripDetailPage() {
     if (normalizedType.includes('sheet') || normalizedType.includes('excel')) return '📊';
     return '📎';
   };
+
+  const countdownTimeLeft = useMemo(() => {
+    if (!nextCountdown) return null;
+    const remainingMs = Math.max(0, nextCountdown.targetDate.getTime() - nowMs);
+    return getCountdownParts(remainingMs);
+  }, [nextCountdown, nowMs]);
+
+  const countdownComplete = useMemo(() => {
+    if (!nextCountdown) return false;
+    return nextCountdown.targetDate.getTime() <= nowMs;
+  }, [nextCountdown, nowMs]);
 
   if (loading) {
     return (
@@ -216,26 +328,77 @@ export default function TripDetailPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <Link href="/trips" className="text-brand-brown hover:text-brand-tan transition-colors mb-4 inline-block">
-          ← Back to Trips
-        </Link>
-        <h1 className="text-4xl font-bold text-brand-cream mb-2">{trip.name}</h1>
-        <div className="flex flex-wrap items-center gap-4 text-brand-cream/70">
-          <div className="flex items-center gap-2">
-            <MapPin className="w-5 h-5" />
-            <span>{trip.destination}, {trip.country}</span>
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+        <div>
+          <Link href="/trips" className="text-brand-brown hover:text-brand-tan transition-colors mb-4 inline-block">
+            ← Back to Trips
+          </Link>
+          <h1 className="text-4xl font-bold text-brand-cream mb-2">{trip.name}</h1>
+          <div className="flex flex-wrap items-center gap-4 text-brand-cream/70">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5" />
+              <span>{trip.destination}, {trip.country}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5" />
+              <span>{formatDate(trip.start_date)} - {formatDate(trip.end_date)}</span>
+            </div>
+            <Badge variant="secondary">{trip.status}</Badge>
           </div>
-          <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
-            <span>{formatDate(trip.start_date)} - {formatDate(trip.end_date)}</span>
-          </div>
-          <Badge variant="secondary">{trip.status}</Badge>
+          {trip.description && (
+            <p className="mt-4 text-brand-cream/80 max-w-2xl">
+              {trip.description}
+            </p>
+          )}
         </div>
-        {trip.description && (
-          <p className="mt-4 text-brand-cream/80 max-w-2xl">
-            {trip.description}
-          </p>
+
+        {nextCountdown && countdownTimeLeft && (
+          <Card className="w-full lg:max-w-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Clock3 className="w-5 h-5 text-brand-brown" />
+                Next Trip Countdown
+              </CardTitle>
+              <CardDescription className="text-brand-cream/70">
+                {nextCountdown.trip.name} · {formatDate(nextCountdown.targetDate, 'MMM d, yyyy h:mm a')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {countdownComplete ? (
+                <p className="text-brand-cream font-medium">Countdown reached.</p>
+              ) : (
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="rounded-lg border border-brand-brown/20 py-3">
+                    <p className="text-2xl font-bold text-brand-cream">{countdownTimeLeft.days}</p>
+                    <p className="text-xs text-brand-cream/60 uppercase tracking-wide">Days</p>
+                  </div>
+                  <div className="rounded-lg border border-brand-brown/20 py-3">
+                    <p className="text-2xl font-bold text-brand-cream">{countdownTimeLeft.hours}</p>
+                    <p className="text-xs text-brand-cream/60 uppercase tracking-wide">Hours</p>
+                  </div>
+                  <div className="rounded-lg border border-brand-brown/20 py-3">
+                    <p className="text-2xl font-bold text-brand-cream">{countdownTimeLeft.minutes}</p>
+                    <p className="text-xs text-brand-cream/60 uppercase tracking-wide">Min</p>
+                  </div>
+                  <div className="rounded-lg border border-brand-brown/20 py-3">
+                    <p className="text-2xl font-bold text-brand-cream">{countdownTimeLeft.seconds}</p>
+                    <p className="text-xs text-brand-cream/60 uppercase tracking-wide">Sec</p>
+                  </div>
+                </div>
+              )}
+
+              {nextCountdown.trip.id !== trip.id && (
+                <div>
+                  <Link
+                    href={`/trips/${nextCountdown.trip.slug}`}
+                    className="text-sm text-brand-brown hover:text-brand-tan transition-colors"
+                  >
+                    Open next trip →
+                  </Link>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -316,6 +479,17 @@ export default function TripDetailPage() {
                       <p className="text-brand-cream/80 whitespace-pre-wrap">{update.content}</p>
                     </CardContent>
                   </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {taggedNews.length > 0 && (
+            <div>
+              <h2 className="text-2xl font-bold text-brand-cream mb-4">News Tagged To This Trip</h2>
+              <div className="space-y-4">
+                {taggedNews.map((item) => (
+                  <NewsCard key={item.id} item={item} compact />
                 ))}
               </div>
             </div>

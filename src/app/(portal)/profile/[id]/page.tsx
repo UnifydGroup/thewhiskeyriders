@@ -10,15 +10,18 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
 import { formatDate } from '@/lib/utils';
-import { ExternalLink, Mail, MapPin, Phone, Route, Trophy, Users } from 'lucide-react';
-import type { BadgeType, Profile, Trip, TripRole, TripStatus } from '@/lib/types/database';
+import { Mail, MapPin, Phone, Route, Trophy, Users } from 'lucide-react';
+import type { BadgeType, Profile, Trip, TripRole } from '@/lib/types/database';
 import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
 import { ADVENTURE_SCORE_EXPLANATION, calculateAdventureScore } from '@/lib/adventure-score';
+import { WorldMap } from '@/components/map/WorldMap';
+import { NewsCard } from '@/components/news/NewsCard';
+import type { NewsItem } from '@/lib/news/types';
 
 type MemberTripRecord = {
   trip_role: TripRole;
   joined_at: string | null;
-  trips: Pick<Trip, 'id' | 'name' | 'destination' | 'country' | 'slug' | 'status' | 'start_date'> | null;
+  trips: Pick<Trip, 'id' | 'name' | 'destination' | 'country' | 'country_code' | 'slug' | 'status' | 'start_date' | 'end_date' | 'latitude' | 'longitude' | 'max_members' | 'cover_image_url' | 'description' | 'itinerary' | 'created_by' | 'created_at' | 'updated_at'> | null;
 };
 
 type MemberBadgeRecord = {
@@ -33,14 +36,7 @@ type MemberBadgeRecord = {
   trips: Pick<Trip, 'id' | 'name' | 'slug'> | null;
 };
 
-type MemberTripSummary = {
-  id: string;
-  name: string;
-  destination: string;
-  country: string;
-  slug: string;
-  status: TripStatus;
-  start_date: string;
+type MemberTripSummary = Trip & {
   trip_role: TripRole;
 };
 
@@ -81,16 +77,21 @@ export default function MemberProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [memberTrips, setMemberTrips] = useState<MemberTripSummary[]>([]);
   const [memberBadges, setMemberBadges] = useState<MemberBadgeSummary[]>([]);
+  const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadProfile = async () => {
       try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
         const [{ data: profileData }, { data: tripsData }, { data: badgesData }] = await Promise.all([
           supabase.from('profiles').select('*').eq('id', memberId).single(),
           supabase
             .from('trip_members')
-            .select('trip_role, joined_at, trips!trip_id(id, name, destination, country, slug, status, start_date)')
+            .select('trip_role, joined_at, trips!trip_id(*)')
             .eq('user_id', memberId),
           supabase
             .from('user_badges')
@@ -105,7 +106,7 @@ export default function MemberProfilePage() {
         const tripRecords = ((tripsData || []) as MemberTripRecord[])
           .filter((entry) => entry.trips)
           .map((entry) => ({
-            ...(entry.trips as MemberTripSummary),
+            ...(entry.trips as Trip),
             trip_role: entry.trip_role,
           }))
           .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
@@ -125,6 +126,19 @@ export default function MemberProfilePage() {
             return bTime - aTime;
           });
         setMemberBadges(badgeRecords);
+
+        if (session?.access_token) {
+          const response = await fetch(`/api/news?memberId=${memberId}&limit=20`, {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (response.ok && payload?.success) {
+            setTaggedNews(payload?.data?.news || []);
+          }
+        }
       } catch (err) {
         console.error('Failed to load member profile:', err);
       } finally {
@@ -165,28 +179,6 @@ export default function MemberProfilePage() {
     badgeCount: memberBadges.length,
     uniqueCountries,
   });
-
-  const destinations = Array.from(
-    new Map(
-      memberTrips.map((trip) => [
-        `${trip.destination.toLowerCase()}|${trip.country.toLowerCase()}`,
-        {
-          destination: trip.destination,
-          country: trip.country,
-        },
-      ])
-    ).values()
-  );
-
-  const mapQueryText = destinations
-    .slice(0, 12)
-    .map((place) => `${place.destination}, ${place.country}`)
-    .join(' | ');
-  const mapQuery = encodeURIComponent(mapQueryText);
-  const mapEmbedUrl = mapQuery ? `https://maps.google.com/maps?q=${mapQuery}&output=embed` : null;
-  const mapLinkUrl = mapQuery
-    ? `https://www.google.com/maps/search/?api=1&query=${mapQuery}`
-    : 'https://www.google.com/maps';
 
   const formattedAddress = [
     profile.address_line1,
@@ -262,49 +254,13 @@ export default function MemberProfilePage() {
               Rider Map
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {mapEmbedUrl ? (
-              <div className="overflow-hidden rounded-xl border border-brand-brown/20">
-                <iframe
-                  title={`${displayName} map`}
-                  src={mapEmbedUrl}
-                  className="h-72 w-full border-0"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
-              </div>
-            ) : (
-              <p className="text-brand-cream/70">No trip locations yet.</p>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              {destinations.map((place) => {
-                const placeQuery = encodeURIComponent(`${place.destination}, ${place.country}`);
-                const placeLink = `https://www.google.com/maps/search/?api=1&query=${placeQuery}`;
-                return (
-                  <a
-                    key={`${place.destination}-${place.country}`}
-                    href={placeLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-brand-brown/40 bg-brand-brown/10 px-3 py-1 text-xs font-semibold text-brand-cream hover:border-brand-brown hover:bg-brand-brown/20"
-                  >
-                    <MapPin className="h-3 w-3" />
-                    {place.destination}, {place.country}
-                  </a>
-                );
-              })}
-            </div>
-
-            <a
-              href={mapLinkUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-semibold text-brand-brown hover:text-brand-tan"
-            >
-              Open full map in Google Maps
-              <ExternalLink className="h-4 w-4" />
-            </a>
+          <CardContent>
+            <WorldMap
+              trips={memberTrips}
+              compact
+              showStats
+              memberMode
+            />
           </CardContent>
         </Card>
 
@@ -461,6 +417,17 @@ export default function MemberProfilePage() {
           </div>
         )}
       </section>
+
+      {taggedNews.length > 0 && (
+        <section>
+          <h2 className="mb-4 text-2xl font-bold text-brand-cream">News Tagged To This Rider</h2>
+          <div className="space-y-4">
+            {taggedNews.map((item) => (
+              <NewsCard key={item.id} item={item} compact />
+            ))}
+          </div>
+        </section>
+      )}
 
       <TaggedPhotosSection profile={profile} />
     </div>

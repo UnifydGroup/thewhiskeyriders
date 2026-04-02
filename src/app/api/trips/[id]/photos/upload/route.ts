@@ -3,7 +3,9 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
+type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
+const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 interface UploadedPhotoRow {
   id: string;
@@ -12,6 +14,8 @@ interface UploadedPhotoRow {
   uploaded_by: string;
   storage_path: string;
   caption: string | null;
+  media_type: MediaType;
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -102,11 +106,23 @@ function getFileExtension(file: File) {
   return fromMime && /^[a-z0-9]+$/.test(fromMime) ? fromMime : 'bin';
 }
 
+function getMediaType(mimeType: string): MediaType | null {
+  if (mimeType.startsWith('image/')) {
+    return 'image';
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return 'video';
+  }
+
+  return null;
+}
+
 /**
- * POST /api/trips/[id]/photos/upload - Upload photo(s) directly to a trip
+ * POST /api/trips/[id]/photos/upload - Upload media file(s) directly to a trip
  *
  * Expected FormData:
- * - files: File[] OR file: File
+ * - files: File[] (image/video) OR file: File
  * - caption: string (optional)
  * - detailed query param (optional): when true/1, response includes {photos, failed}
  */
@@ -164,7 +180,12 @@ export async function POST(
     const failed: string[] = [];
 
     for (const file of files) {
-      if (!file.type.startsWith('image/')) {
+      const mediaType = getMediaType(file.type || '');
+      if (!mediaType) {
+        failed.push(file.name || 'unknown-file');
+        continue;
+      }
+      if (file.size > MAX_MEDIA_UPLOAD_BYTES) {
         failed.push(file.name || 'unknown-file');
         continue;
       }
@@ -172,7 +193,7 @@ export async function POST(
       const timestamp = Date.now();
       const ext = getFileExtension(file);
       const fileName = `${timestamp}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-      const filePath = `trips/${tripId}/${fileName}`;
+      const filePath = `trips/${tripId}/${mediaType}s/${fileName}`;
 
       const buffer = await file.arrayBuffer();
       const { error: uploadError } = await adminSupabase.storage
@@ -196,6 +217,8 @@ export async function POST(
           uploaded_by: user.id,
           storage_path: filePath,
           caption,
+          media_type: mediaType,
+          mime_type: file.type || null,
           width: null,
           height: null,
         })

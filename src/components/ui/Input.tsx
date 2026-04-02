@@ -56,7 +56,7 @@ export function Input({
         type={type}
         maxLength={maxLength}
         className={cn(
-          'w-full px-4 py-2 rounded-lg bg-gray-800 border text-gray-100 placeholder-gray-500',
+          'w-full px-4 py-2 rounded-lg bg-gray-800 border text-base text-gray-100 placeholder-gray-500',
           error
             ? 'border-red-500 focus:ring-2 focus:ring-red-500/30'
             : 'border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20',
@@ -134,7 +134,7 @@ export function TextArea({
       <textarea
         maxLength={maxLength}
         className={cn(
-          'w-full px-4 py-2 rounded-lg bg-gray-800 border text-gray-100 placeholder-gray-500',
+          'w-full px-4 py-2 rounded-lg bg-gray-800 border text-base text-gray-100 placeholder-gray-500',
           error
             ? 'border-red-500 focus:ring-2 focus:ring-red-500/30'
             : 'border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20',
@@ -171,7 +171,7 @@ export function Select({ className, children, ...props }: SelectProps) {
   return (
     <select
       className={cn(
-        'w-full px-4 py-2 rounded-lg bg-brand-dark-grey border border-brand-brown/20 text-brand-cream',
+        'w-full px-4 py-2 rounded-lg bg-brand-dark-grey border border-brand-brown/20 text-base text-brand-cream',
         'focus:outline-none focus:border-brand-brown focus:ring-2 focus:ring-brand-brown/20',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         'transition-colors',

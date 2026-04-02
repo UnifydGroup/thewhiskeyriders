@@ -17,6 +17,8 @@ interface PhotoRow {
   uploaded_by: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -144,6 +146,8 @@ export async function GET(
         uploaded_by,
         storage_path,
         caption,
+        media_type,
+        mime_type,
         width,
         height,
         created_at,

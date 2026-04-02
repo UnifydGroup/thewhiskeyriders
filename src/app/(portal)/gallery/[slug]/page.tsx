@@ -17,6 +17,8 @@ interface Photo {
   trip_id: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -44,7 +46,7 @@ export default function TripGalleryPage() {
   }, [slug, supabase, router]);
 
   const handleUploadComplete = (count: number) => {
-    setUploadMessage(`Successfully uploaded ${count} photo${count !== 1 ? 's' : ''}!`);
+    setUploadMessage(`Successfully uploaded ${count} media file${count !== 1 ? 's' : ''}!`);
     setUploadError(null);
     setTimeout(() => setUploadMessage(null), 3000);
     // Refresh photos
@@ -111,6 +113,8 @@ export default function TripGalleryPage() {
             trip_id: photo.trip_id,
             storage_path: photo.storage_path,
             caption: photo.caption,
+            media_type: photo.media_type === 'video' ? 'video' : 'image',
+            mime_type: photo.mime_type || null,
             width: photo.width,
             height: photo.height,
             created_at: photo.created_at,
@@ -196,9 +200,9 @@ export default function TripGalleryPage() {
       ) : (
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-brand-cream/70 mb-4">No photos yet</p>
+            <p className="text-brand-cream/70 mb-4">No media yet</p>
             <p className="text-sm text-brand-cream/50">
-              Photos will appear here once uploaded
+              Photos and videos will appear here once uploaded
             </p>
           </CardContent>
         </Card>

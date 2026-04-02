@@ -10,6 +10,7 @@ import {
   LogOut,
   Settings,
   Image,
+  Newspaper,
   ChevronDown,
   Activity,
   type LucideIcon,
@@ -41,6 +42,7 @@ const adminNavItems: AdminNavItem[] = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/trips', label: 'Trips', icon: Bike },
   { href: '/admin/galleries', label: 'Galleries', icon: Image },
+  { href: '/admin/news', label: 'News', icon: Newspaper },
   {
     href: '/admin/members',
     label: 'Members',

@@ -26,6 +26,8 @@ interface GalleryPhoto {
   uploaded_by: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -40,6 +42,8 @@ interface RawPhotoResponse {
   uploaded_by?: string;
   storage_path?: string;
   caption?: string | null;
+  media_type?: 'image' | 'video';
+  mime_type?: string | null;
   width?: number | null;
   height?: number | null;
   created_at?: string;
@@ -215,6 +219,15 @@ export default function GalleriesPage() {
         typeof photo.url !== 'string' ||
         cachedHashes[photo.id]
       ) {
+        continue;
+      }
+
+      const mediaType =
+        'media_type' in photo && (photo.media_type === 'video' || photo.media_type === 'image')
+          ? photo.media_type
+          : 'image';
+
+      if (mediaType !== 'image') {
         continue;
       }
 
@@ -439,6 +452,8 @@ export default function GalleriesPage() {
                 uploaded_by: raw.uploaded_by,
                 storage_path: raw.storage_path,
                 caption: raw.caption ?? null,
+                media_type: raw.media_type === 'video' ? 'video' : 'image',
+                mime_type: raw.mime_type ?? null,
                 width: raw.width ?? null,
                 height: raw.height ?? null,
                 created_at: raw.created_at,
@@ -577,7 +592,7 @@ export default function GalleriesPage() {
     }
 
     const confirmed = window.confirm(
-      `Delete "${gallery.name}" and all ${gallery.photoCount} linked photo(s)? This cannot be undone.`
+      `Delete "${gallery.name}" and all ${gallery.photoCount} linked item(s)? This cannot be undone.`
     );
 
     if (!confirmed) {
@@ -597,7 +612,7 @@ export default function GalleriesPage() {
         throw new Error(data.error || 'Failed to delete gallery');
       }
 
-      setSuccess(`Gallery deleted. Removed ${data.deleted_photos || 0} photo(s).`);
+      setSuccess(`Gallery deleted. Removed ${data.deleted_photos || 0} item(s).`);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete gallery');
@@ -634,79 +649,87 @@ export default function GalleriesPage() {
     const MAX_BATCH_BYTES = 25 * 1024 * 1024;
 
     try {
-      setUploadStatusText('Checking for duplicate images...');
-
-      const selectedHashEntries = await Promise.all(
-        uploadFileItems.map(async (item) => ({
-          id: item.id,
-          hash: await hashFile(item.file),
-        }))
+      const imageUploadItems = uploadFileItems.filter((item) =>
+        item.file.type.startsWith('image/')
       );
-
-      const firstSeenByHash = new Map<string, string>();
-      const duplicateWithinSelection = new Set<string>();
-      selectedHashEntries.forEach((entry) => {
-        const existing = firstSeenByHash.get(entry.hash);
-        if (existing) {
-          duplicateWithinSelection.add(entry.id);
-        } else {
-          firstSeenByHash.set(entry.hash, entry.id);
-        }
-      });
-
-      const existingTripHashes = await getTripPhotoHashes(gallery.trip_id);
-      const duplicateInTrip = new Set(
-        selectedHashEntries
-          .filter((entry) => existingTripHashes.has(entry.hash))
-          .map((entry) => entry.id)
-      );
-
-      const duplicateIds = new Set<string>([
-        ...Array.from(duplicateWithinSelection),
-        ...Array.from(duplicateInTrip),
-      ]);
 
       let filesToUpload = uploadFileItems;
-      if (duplicateIds.size > 0) {
-        const choice = window.prompt(
-          [
-            'Duplicate check found possible duplicates.',
-            `${duplicateInTrip.size} already exist in trip galleries.`,
-            `${duplicateWithinSelection.size} are duplicates within this selection.`,
-            '',
-            'Choose action:',
-            '1 = Upload non-duplicates only (recommended)',
-            '2 = Upload all files anyway',
-            '3 = Cancel upload',
-          ].join('\n'),
-          '1'
+      if (imageUploadItems.length > 0) {
+        setUploadStatusText('Checking for duplicate images...');
+
+        const selectedHashEntries = await Promise.all(
+          imageUploadItems.map(async (item) => ({
+            id: item.id,
+            hash: await hashFile(item.file),
+          }))
         );
 
-        if (choice === null || choice.trim() === '3') {
-          setUploadStatusText('Upload canceled by user.');
-          setUploadItems((previous) =>
-            previous.map((item) => ({ ...item, status: 'skipped', error: 'Canceled by user' }))
-          );
-          return;
-        }
+        const firstSeenByHash = new Map<string, string>();
+        const duplicateWithinSelection = new Set<string>();
+        selectedHashEntries.forEach((entry) => {
+          const existing = firstSeenByHash.get(entry.hash);
+          if (existing) {
+            duplicateWithinSelection.add(entry.id);
+          } else {
+            firstSeenByHash.set(entry.hash, entry.id);
+          }
+        });
 
-        if (choice.trim() === '1') {
-          filesToUpload = uploadFileItems.filter((item) => !duplicateIds.has(item.id));
-          setUploadItems((previous) =>
-            previous.map((item) =>
-              duplicateIds.has(item.id)
-                ? { ...item, status: 'skipped', error: 'Skipped duplicate' }
-                : item
-            )
+        const existingTripHashes = await getTripPhotoHashes(gallery.trip_id);
+        const duplicateInTrip = new Set(
+          selectedHashEntries
+            .filter((entry) => existingTripHashes.has(entry.hash))
+            .map((entry) => entry.id)
+        );
+
+        const duplicateIds = new Set<string>([
+          ...Array.from(duplicateWithinSelection),
+          ...Array.from(duplicateInTrip),
+        ]);
+
+        if (duplicateIds.size > 0) {
+          const choice = window.prompt(
+            [
+              'Duplicate check found possible duplicate images.',
+              `${duplicateInTrip.size} already exist in trip galleries.`,
+              `${duplicateWithinSelection.size} are duplicates within this selection.`,
+              '',
+              'Choose action:',
+              '1 = Upload non-duplicates only (recommended)',
+              '2 = Upload all files anyway',
+              '3 = Cancel upload',
+            ].join('\n'),
+            '1'
           );
-          setUploadStatusText(
-            `Skipping ${duplicateIds.size} duplicate file${duplicateIds.size !== 1 ? 's' : ''}.`
-          );
+
+          if (choice === null || choice.trim() === '3') {
+            setUploadStatusText('Upload canceled by user.');
+            setUploadItems((previous) =>
+              previous.map((item) => ({ ...item, status: 'skipped', error: 'Canceled by user' }))
+            );
+            return;
+          }
+
+          if (choice.trim() === '1') {
+            filesToUpload = uploadFileItems.filter((item) => !duplicateIds.has(item.id));
+            setUploadItems((previous) =>
+              previous.map((item) =>
+                duplicateIds.has(item.id)
+                  ? { ...item, status: 'skipped', error: 'Skipped duplicate image' }
+                  : item
+              )
+            );
+            setUploadStatusText(
+              `Skipping ${duplicateIds.size} duplicate image file${duplicateIds.size !== 1 ? 's' : ''}.`
+            );
+          } else {
+            setUploadStatusText('Uploading all files including duplicate images...');
+          }
         } else {
-          setUploadStatusText('Uploading all files including duplicates...');
+          setUploadStatusText('No duplicate images found. Starting upload...');
         }
       } else {
-        setUploadStatusText('No duplicates found. Starting upload...');
+        setUploadStatusText('No images selected. Starting upload...');
       }
 
       if (filesToUpload.length === 0) {
@@ -840,7 +863,7 @@ export default function GalleriesPage() {
       }
 
       if (successCount > 0) {
-        setSuccess(`Uploaded ${successCount} photo${successCount !== 1 ? 's' : ''}.`);
+        setSuccess(`Uploaded ${successCount} media file${successCount !== 1 ? 's' : ''}.`);
       }
 
       if (failedFiles.length > 0) {
@@ -904,6 +927,10 @@ export default function GalleriesPage() {
 
   const handleSetAlbumThumbnail = async (photo: GalleryPhoto) => {
     if (!selectedGallery) {
+      return;
+    }
+    if (photo.media_type === 'video') {
+      setError('Album cover must be an image.');
       return;
     }
 
@@ -978,7 +1005,7 @@ export default function GalleriesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Create New Gallery</CardTitle>
-          <CardDescription>Create a gallery for a trip and start uploading photos.</CardDescription>
+          <CardDescription>Create a gallery for a trip and start uploading photos and videos.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreateGallery} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -1080,7 +1107,7 @@ export default function GalleriesPage() {
                   <CardHeader>
                     <CardTitle className="line-clamp-1">{gallery.name}</CardTitle>
                     <CardDescription>
-                      {gallery.trip?.name || 'Unknown Trip'} • {gallery.photoCount} photo
+                      {gallery.trip?.name || 'Unknown Trip'} • {gallery.photoCount} item
                       {gallery.photoCount !== 1 ? 's' : ''}
                       {gallery.source === 'trip_all' ? ' • Trip-wide' : ' • Named gallery'}
                     </CardDescription>
@@ -1229,9 +1256,9 @@ export default function GalleriesPage() {
         <div ref={managementSectionRef}>
           <Card>
           <CardHeader>
-            <CardTitle>{selectedGallery.name} - Photo Management</CardTitle>
+            <CardTitle>{selectedGallery.name} - Media Management</CardTitle>
             <CardDescription>
-              Upload photos to this gallery, then use bulk tagging and filters below.
+              Upload photos and videos to this gallery, then use bulk tagging and filters below.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1268,18 +1295,18 @@ export default function GalleriesPage() {
                 ) : (
                   <p className="text-xs text-brand-cream/60">
                     No thumbnail selected.
-                    {isAdmin ? ' Use "Set As Album Cover" on a photo below.' : ''}
+                    {isAdmin ? ' Use "Set As Album Cover" on an image below.' : ''}
                   </p>
                 )}
               </div>
               {selectedGallery.source === 'trip_all' && (
                 <p className="text-xs text-brand-cream/60">
-                  Uploading here adds photos directly to the public trip gallery.
+                  Uploading here adds media directly to the public trip gallery.
                 </p>
               )}
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 multiple
                 onChange={(event) => {
                   const files = Array.from(event.target.files || []);
@@ -1290,7 +1317,7 @@ export default function GalleriesPage() {
                 disabled={uploadingGalleryId === selectedGallery.id}
               />
               {uploadingGalleryId === selectedGallery.id && (
-                <p className="text-xs text-brand-cream/60">Uploading images...</p>
+                <p className="text-xs text-brand-cream/60">Uploading media...</p>
               )}
 
               {uploadItems.length > 0 && (
@@ -1363,9 +1390,9 @@ export default function GalleriesPage() {
               />
             ) : (
               <div className="py-12 text-center border border-brand-brown/20 rounded-lg">
-                <p className="text-brand-cream/70">No photos in this gallery yet.</p>
+                <p className="text-brand-cream/70">No media in this gallery yet.</p>
                 <p className="text-sm text-brand-cream/50 mt-1">
-                  Upload images above to start tagging.
+                  Upload media above to start tagging.
                 </p>
               </div>
             )}

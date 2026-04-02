@@ -15,6 +15,11 @@ export default function NewTripPage() {
     name: '',
     destination: '',
     country: '',
+    country_code: '',
+    latitude: '',
+    longitude: '',
+    countdown_enabled: false,
+    countdown_target_at: '',
     start_date: '',
     end_date: '',
     description: '',
@@ -29,7 +34,11 @@ export default function NewTripPage() {
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >
   ) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    const value =
+      e.target instanceof HTMLInputElement && e.target.type === 'checkbox'
+        ? e.target.checked
+        : e.target.value;
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -50,6 +59,13 @@ export default function NewTripPage() {
           slug,
           destination: formData.destination,
           country: formData.country,
+          country_code: formData.country_code.toUpperCase() || null,
+          latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+          longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+          countdown_enabled: formData.countdown_enabled,
+          countdown_target_at: formData.countdown_target_at
+            ? new Date(formData.countdown_target_at).toISOString()
+            : null,
           start_date: formData.start_date,
           end_date: formData.end_date,
           description: formData.description || null,
@@ -144,6 +160,74 @@ export default function NewTripPage() {
                   disabled={isLoading}
                 />
               </div>
+              <div className="md:col-span-2 border-t border-brand-brown/20 pt-4 mt-2">
+                <p className="text-sm font-semibold text-brand-tan mb-1">Map Coordinates</p>
+                <p className="text-xs text-brand-cream/50 mb-4">
+                  Used to place a pin on the interactive world map.{' '}
+                  <a
+                    href="https://www.latlong.net/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-brand-tan"
+                  >
+                    Find coordinates →
+                  </a>
+                  {' '}·{' '}
+                  Country code:{' '}
+                  <a
+                    href="https://www.iban.com/country-codes"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-brand-tan"
+                  >
+                    ISO alpha-3 list →
+                  </a>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-brand-cream mb-2">
+                      Country Code <span className="text-brand-cream/40 font-normal">(ISO alpha-3)</span>
+                    </label>
+                    <Input
+                      type="text"
+                      name="country_code"
+                      value={formData.country_code}
+                      onChange={handleChange}
+                      placeholder="e.g., MAR"
+                      maxLength={3}
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-brand-cream mb-2">
+                      Latitude
+                    </label>
+                    <Input
+                      type="number"
+                      name="latitude"
+                      value={formData.latitude}
+                      onChange={handleChange}
+                      placeholder="e.g., 31.7917"
+                      step="any"
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-brand-cream mb-2">
+                      Longitude
+                    </label>
+                    <Input
+                      type="number"
+                      name="longitude"
+                      value={formData.longitude}
+                      onChange={handleChange}
+                      placeholder="e.g., -7.0926"
+                      step="any"
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
                   Start Date *
@@ -169,6 +253,37 @@ export default function NewTripPage() {
                   required
                   disabled={isLoading}
                 />
+              </div>
+              <div className="md:col-span-2 border-t border-brand-brown/20 pt-4 mt-2">
+                <p className="text-sm font-semibold text-brand-tan mb-3">Trip Countdown</p>
+                <div className="space-y-4">
+                  <label className="inline-flex items-center gap-3 text-sm text-brand-cream">
+                    <input
+                      type="checkbox"
+                      name="countdown_enabled"
+                      checked={formData.countdown_enabled}
+                      onChange={handleChange}
+                      disabled={isLoading}
+                      className="h-4 w-4 rounded border-brand-brown/30 bg-brand-dark-grey text-brand-brown focus:ring-brand-brown/40"
+                    />
+                    Enable countdown on trip page
+                  </label>
+                  <div className="max-w-sm">
+                    <label className="block text-sm font-medium text-brand-cream mb-2">
+                      Countdown Target Date & Time
+                    </label>
+                    <Input
+                      type="datetime-local"
+                      name="countdown_target_at"
+                      value={formData.countdown_target_at}
+                      onChange={handleChange}
+                      disabled={isLoading || !formData.countdown_enabled}
+                    />
+                    <p className="text-xs text-brand-cream/50 mt-2">
+                      Leave empty to count down to the trip start date.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">

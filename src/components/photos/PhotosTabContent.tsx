@@ -11,6 +11,8 @@ interface Photo {
   trip_id: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -60,7 +62,7 @@ export default function PhotosTabContent({
   }, [tripId]);
 
   const handleUploadComplete = (count: number) => {
-    setUploadMessage(`Successfully uploaded ${count} photo${count !== 1 ? 's' : ''}!`);
+    setUploadMessage(`Successfully uploaded ${count} media file${count !== 1 ? 's' : ''}!`);
     setTimeout(() => setUploadMessage(null), 3000);
     // Refresh photos
     fetchPhotos();
@@ -112,12 +114,12 @@ export default function PhotosTabContent({
       {/* Gallery Section */}
       <div>
         <h3 className="text-lg font-semibold text-brand-cream mb-4">
-          Gallery ({photos.length} photos)
+          Gallery ({photos.length} items)
         </h3>
         {photos.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
-              <p className="text-brand-cream/70">No photos yet. Upload your first photo above!</p>
+              <p className="text-brand-cream/70">No media yet. Upload your first photo or video above.</p>
             </CardContent>
           </Card>
         ) : (

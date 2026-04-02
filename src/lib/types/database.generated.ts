@@ -236,9 +236,9 @@ export type SupabaseDatabase = {
         Relationships: [{ foreignKeyName: 'photo_tags_photo_id_fkey'; columns: ['photo_id']; isOneToOne: false; referencedRelation: 'photos'; referencedColumns: ['id'] }];
       };
       photos: {
-        Row: { caption: string | null; created_at: string | null; gallery_id: string | null; height: number | null; id: string; storage_path: string; trip_id: string; uploaded_by: string; width: number | null };
-        Insert: { caption?: string | null; created_at?: string | null; gallery_id?: string | null; height?: number | null; id?: string; storage_path: string; trip_id: string; uploaded_by: string; width?: number | null };
-        Update: { caption?: string | null; created_at?: string | null; gallery_id?: string | null; height?: number | null; id?: string; storage_path?: string; trip_id?: string; uploaded_by?: string; width?: number | null };
+        Row: { caption: string | null; created_at: string | null; gallery_id: string | null; height: number | null; id: string; media_type: 'image' | 'video'; mime_type: string | null; storage_path: string; trip_id: string; uploaded_by: string; width: number | null };
+        Insert: { caption?: string | null; created_at?: string | null; gallery_id?: string | null; height?: number | null; id?: string; media_type?: 'image' | 'video'; mime_type?: string | null; storage_path: string; trip_id: string; uploaded_by: string; width?: number | null };
+        Update: { caption?: string | null; created_at?: string | null; gallery_id?: string | null; height?: number | null; id?: string; media_type?: 'image' | 'video'; mime_type?: string | null; storage_path?: string; trip_id?: string; uploaded_by?: string; width?: number | null };
         Relationships: [
           { foreignKeyName: 'photos_gallery_id_fkey'; columns: ['gallery_id']; isOneToOne: false; referencedRelation: 'galleries'; referencedColumns: ['id'] },
           { foreignKeyName: 'photos_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] },
@@ -347,6 +347,83 @@ export type SupabaseDatabase = {
         };
         Relationships: [];
       };
+      news_posts: {
+        Row: {
+          author_id: string | null;
+          content: string;
+          created_at: string | null;
+          id: string;
+          is_published: boolean;
+          published_at: string | null;
+          title: string;
+          updated_at: string | null;
+        };
+        Insert: {
+          author_id?: string | null;
+          content: string;
+          created_at?: string | null;
+          id?: string;
+          is_published?: boolean;
+          published_at?: string | null;
+          title: string;
+          updated_at?: string | null;
+        };
+        Update: {
+          author_id?: string | null;
+          content?: string;
+          created_at?: string | null;
+          id?: string;
+          is_published?: boolean;
+          published_at?: string | null;
+          title?: string;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          { foreignKeyName: 'news_posts_author_id_fkey'; columns: ['author_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }
+        ];
+      };
+      news_post_trips: {
+        Row: {
+          created_at: string;
+          news_post_id: string;
+          trip_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          news_post_id: string;
+          trip_id: string;
+        };
+        Update: {
+          created_at?: string;
+          news_post_id?: string;
+          trip_id?: string;
+        };
+        Relationships: [
+          { foreignKeyName: 'news_post_trips_news_post_id_fkey'; columns: ['news_post_id']; isOneToOne: false; referencedRelation: 'news_posts'; referencedColumns: ['id'] },
+          { foreignKeyName: 'news_post_trips_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }
+        ];
+      };
+      news_post_members: {
+        Row: {
+          created_at: string;
+          member_id: string;
+          news_post_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          member_id: string;
+          news_post_id: string;
+        };
+        Update: {
+          created_at?: string;
+          member_id?: string;
+          news_post_id?: string;
+        };
+        Relationships: [
+          { foreignKeyName: 'news_post_members_member_id_fkey'; columns: ['member_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'news_post_members_news_post_id_fkey'; columns: ['news_post_id']; isOneToOne: false; referencedRelation: 'news_posts'; referencedColumns: ['id'] }
+        ];
+      };
       trip_documents: {
         Row: { created_at: string | null; file_type: string; file_url: string; id: string; is_admin_upload: boolean; name: string; trip_id: string; uploaded_by: string | null; user_id: string | null };
         Insert: { created_at?: string | null; file_type?: string; file_url: string; id?: string; is_admin_upload?: boolean; name: string; trip_id: string; uploaded_by?: string | null; user_id?: string | null };
@@ -382,9 +459,72 @@ export type SupabaseDatabase = {
         ];
       };
       trips: {
-        Row: { country: string; cover_image_url: string | null; created_at: string | null; created_by: string | null; description: string | null; destination: string; end_date: string; id: string; itinerary: string | null; max_members: number | null; name: string; slug: string; start_date: string; status: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at: string | null };
-        Insert: { country: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination: string; end_date: string; id?: string; itinerary?: string | null; max_members?: number | null; name: string; slug: string; start_date: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
-        Update: { country?: string; cover_image_url?: string | null; created_at?: string | null; created_by?: string | null; description?: string | null; destination?: string; end_date?: string; id?: string; itinerary?: string | null; max_members?: number | null; name?: string; slug?: string; start_date?: string; status?: 'upcoming' | 'active' | 'completed' | 'cancelled'; updated_at?: string | null };
+        Row: {
+          countdown_enabled: boolean;
+          countdown_target_at: string | null;
+          country: string;
+          country_code: string | null;
+          cover_image_url: string | null;
+          created_at: string | null;
+          created_by: string | null;
+          description: string | null;
+          destination: string;
+          end_date: string;
+          id: string;
+          itinerary: string | null;
+          latitude: number | null;
+          longitude: number | null;
+          max_members: number | null;
+          name: string;
+          slug: string;
+          start_date: string;
+          status: 'upcoming' | 'active' | 'completed' | 'cancelled';
+          updated_at: string | null;
+        };
+        Insert: {
+          countdown_enabled?: boolean;
+          countdown_target_at?: string | null;
+          country: string;
+          country_code?: string | null;
+          cover_image_url?: string | null;
+          created_at?: string | null;
+          created_by?: string | null;
+          description?: string | null;
+          destination: string;
+          end_date: string;
+          id?: string;
+          itinerary?: string | null;
+          latitude?: number | null;
+          longitude?: number | null;
+          max_members?: number | null;
+          name: string;
+          slug: string;
+          start_date: string;
+          status?: 'upcoming' | 'active' | 'completed' | 'cancelled';
+          updated_at?: string | null;
+        };
+        Update: {
+          countdown_enabled?: boolean;
+          countdown_target_at?: string | null;
+          country?: string;
+          country_code?: string | null;
+          cover_image_url?: string | null;
+          created_at?: string | null;
+          created_by?: string | null;
+          description?: string | null;
+          destination?: string;
+          end_date?: string;
+          id?: string;
+          itinerary?: string | null;
+          latitude?: number | null;
+          longitude?: number | null;
+          max_members?: number | null;
+          name?: string;
+          slug?: string;
+          start_date?: string;
+          status?: 'upcoming' | 'active' | 'completed' | 'cancelled';
+          updated_at?: string | null;
+        };
         Relationships: [{ foreignKeyName: 'trips_created_by_fkey'; columns: ['created_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }];
       };
       user_badges: {
@@ -413,6 +553,8 @@ export type SupabaseDatabase = {
           id: string;
           logo_url: string;
           background_image_url: string;
+          background_media_type: 'image' | 'video';
+          background_video_url: string | null;
           background_position_x: number;
           background_position_y: number;
           background_zoom: number;
@@ -424,6 +566,8 @@ export type SupabaseDatabase = {
           id?: string;
           logo_url: string;
           background_image_url: string;
+          background_media_type?: 'image' | 'video';
+          background_video_url?: string | null;
           background_position_x?: number;
           background_position_y?: number;
           background_zoom?: number;
@@ -435,6 +579,8 @@ export type SupabaseDatabase = {
           id?: string;
           logo_url?: string;
           background_image_url?: string;
+          background_media_type?: 'image' | 'video';
+          background_video_url?: string | null;
           background_position_x?: number;
           background_position_y?: number;
           background_zoom?: number;

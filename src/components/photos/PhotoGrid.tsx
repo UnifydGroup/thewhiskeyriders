@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -23,6 +23,8 @@ interface Photo {
   trip_id: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -61,6 +63,10 @@ function isPhotoTag(value: unknown): value is PhotoTag {
     typeof candidate.tag_type === 'string' &&
     typeof candidate.tag_value === 'string'
   );
+}
+
+function isVideoPhoto(photo: Pick<Photo, 'media_type'>) {
+  return photo.media_type === 'video';
 }
 
 export default function PhotoGrid({
@@ -419,7 +425,7 @@ export default function PhotoGrid({
         setSavedTagSuggestions(saveTagSuggestion(bulkTagType, finalValue));
       }
 
-      const summaryParts = [`Added to ${addedResults.length} photo(s)`];
+      const summaryParts = [`Added to ${addedResults.length} item(s)`];
       if (duplicateCount > 0) {
         summaryParts.push(`${duplicateCount} duplicate(s) skipped`);
       }
@@ -467,7 +473,7 @@ export default function PhotoGrid({
   if (photos.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-brand-cream/70">No photos uploaded yet</p>
+        <p className="text-brand-cream/70">No media uploaded yet</p>
       </div>
     );
   }
@@ -485,7 +491,7 @@ export default function PhotoGrid({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search by caption, uploader, date, or tag"
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-brand-cream placeholder:text-brand-cream/40 focus:outline-none focus:border-brand-brown"
+              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream placeholder:text-brand-cream/40 focus:outline-none focus:border-brand-brown"
             />
           </div>
           <div>
@@ -495,7 +501,7 @@ export default function PhotoGrid({
             <select
               value={uploaderFilter}
               onChange={(event) => setUploaderFilter(event.target.value)}
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-brand-cream focus:outline-none focus:border-brand-brown"
+              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
             >
               <option value="all">All uploaders</option>
               {uploaderOptions.map((uploaderName) => (
@@ -515,7 +521,7 @@ export default function PhotoGrid({
             <select
               value={personFilter}
               onChange={(event) => setPersonFilter(event.target.value)}
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-brand-cream focus:outline-none focus:border-brand-brown"
+              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
             >
               <option value="all">All people</option>
               {personTagOptions.map((personName) => (
@@ -527,7 +533,7 @@ export default function PhotoGrid({
           </div>
 
           <p className="text-sm text-brand-cream/70 md:col-span-2">
-            Showing {filteredPhotos.length} of {photos.length} photo{photos.length !== 1 ? 's' : ''}
+            Showing {filteredPhotos.length} of {photos.length} item{photos.length !== 1 ? 's' : ''}
             {tagDataLoading ? ' (loading tags...)' : ''}
           </p>
         </div>
@@ -553,7 +559,7 @@ export default function PhotoGrid({
         <div className="mb-6 p-4 rounded-lg border border-brand-brown/25 bg-brand-brown/10 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-brand-cream/80">
-              {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
+              {selectedPhotoIds.length} item{selectedPhotoIds.length !== 1 ? 's' : ''} selected
             </p>
             <div className="flex gap-2">
               <Button
@@ -585,7 +591,7 @@ export default function PhotoGrid({
             <select
               value={bulkTagType}
               onChange={(event) => setBulkTagType(event.target.value as TagType)}
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-brand-cream focus:outline-none focus:border-brand-brown"
+              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
               disabled={bulkTagLoading}
             >
               {TAG_TYPES.map((type) => (
@@ -601,7 +607,7 @@ export default function PhotoGrid({
               onChange={(event) => setBulkTagValue(event.target.value)}
               placeholder="Tag value"
               list={bulkTagType === 'person' ? `${tripId}-bulk-person-suggestions` : undefined}
-              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-brand-cream placeholder:text-brand-cream/40 focus:outline-none focus:border-brand-brown"
+              className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream placeholder:text-brand-cream/40 focus:outline-none focus:border-brand-brown"
               disabled={bulkTagLoading}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -666,13 +672,29 @@ export default function PhotoGrid({
                 className="group relative bg-brand-brown/20 rounded-lg overflow-hidden aspect-square cursor-pointer"
                 onClick={() => setSelectedPhotoIdx(idx)}
               >
-                <Image
-                  src={photo.url}
-                  alt={photo.caption || 'Trip photo'}
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform"
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                />
+                {isVideoPhoto(photo) ? (
+                  <video
+                    src={photo.url}
+                    className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <Image
+                    src={photo.url}
+                    alt={photo.caption || 'Trip photo'}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                  />
+                )}
+
+                {isVideoPhoto(photo) && (
+                  <div className="absolute bottom-2 right-2 z-10 rounded bg-brand-black/75 px-2 py-1 text-[10px] uppercase tracking-wide text-brand-cream">
+                    Video
+                  </div>
+                )}
 
                 {canBulkTag && editablePhotoIds.has(photo.id) && (
                   <label
@@ -694,7 +716,8 @@ export default function PhotoGrid({
                   </div>
                 )}
 
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
+                {/* Info overlay — always visible on mobile, hover-only on desktop */}
+                <div className="absolute inset-0 bg-black/60 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-end p-3">
                   <div className="w-full">
                     {photo.caption && (
                       <p className="text-xs text-brand-cream/90 line-clamp-2 mb-2">{photo.caption}</p>
@@ -709,13 +732,19 @@ export default function PhotoGrid({
                           className="w-full text-xs"
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (!isCurrentAlbumThumbnail) {
+                            if (!isCurrentAlbumThumbnail && !isVideoPhoto(photo)) {
                               void onSetAlbumThumbnail(photo);
                             }
                           }}
-                          disabled={isCurrentAlbumThumbnail || settingAlbumThumbnailPhotoId === photo.id}
+                          disabled={
+                            isVideoPhoto(photo) ||
+                            isCurrentAlbumThumbnail ||
+                            settingAlbumThumbnailPhotoId === photo.id
+                          }
                         >
-                          {isCurrentAlbumThumbnail
+                          {isVideoPhoto(photo)
+                            ? 'Image Only'
+                            : isCurrentAlbumThumbnail
                             ? 'Current Album Cover'
                             : settingAlbumThumbnailPhotoId === photo.id
                               ? 'Saving...'
@@ -726,6 +755,7 @@ export default function PhotoGrid({
                   </div>
                 </div>
 
+                {/* Delete button — always visible on mobile, hover-only on desktop */}
                 {(isAdmin || currentUserId === photo.uploaded_by) && (
                   <button
                     onClick={(event) => {
@@ -733,7 +763,7 @@ export default function PhotoGrid({
                       void handleDeletePhoto(photo.id);
                     }}
                     disabled={deletingId === photo.id}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/80 hover:bg-red-600 text-white p-2 rounded-lg"
+                    className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-red-500/80 hover:bg-red-600 active:bg-red-700 text-white p-2 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -806,6 +836,10 @@ function PhotoDetailModal({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const supabase = useMemo(() => createClient(), []);
 
+  // Touch-swipe state
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+
   useEffect(() => {
     const checkAuth = async () => {
       const {
@@ -817,37 +851,80 @@ function PhotoDetailModal({
     checkAuth();
   }, [supabase]);
 
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') onPrev();
+      else if (e.key === 'ArrowRight') onNext();
+      else if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onPrev, onNext, onClose]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    // Only trigger on primarily horizontal swipes (dx > dy * 1.5 and sufficient distance)
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) onNext();
+      else onPrev();
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
   return (
     <div
-      className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-brand-black border border-brand-brown/20 rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden"
+        className="bg-brand-black border border-brand-brown/20 rounded-lg max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(event) => event.stopPropagation()}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
-        <div className="sticky top-0 bg-brand-black border-b border-brand-brown/20 p-4 flex items-center justify-between flex-shrink-0">
+        {/* Header */}
+        <div className="sticky top-0 bg-brand-black border-b border-brand-brown/20 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div>
-            <h3 className="text-lg font-semibold text-brand-cream">
-              Photo {currentIndex + 1} of {allPhotos.length}
+            <h3 className="text-base font-semibold text-brand-cream">
+              {isVideoPhoto(photo) ? 'Video' : 'Photo'} {currentIndex + 1} of {allPhotos.length}
             </h3>
-            {photo.caption && <p className="text-sm text-brand-cream/70 mt-1">{photo.caption}</p>}
+            {photo.caption && <p className="text-xs text-brand-cream/70 mt-0.5 line-clamp-1">{photo.caption}</p>}
           </div>
           <button
             onClick={onClose}
-            className="text-brand-cream/60 hover:text-brand-cream text-2xl leading-none"
+            className="text-brand-cream/60 hover:text-brand-cream text-2xl leading-none min-w-[44px] min-h-[44px] flex items-center justify-center"
           >
             ×
           </button>
         </div>
 
         <div className="overflow-y-auto flex-1 flex flex-col">
-          <div className="relative w-full bg-brand-black/50 flex items-center justify-center p-4 flex-shrink-0">
-            {photo.url && (
+          {/* Media */}
+          <div className="relative w-full bg-brand-black/50 flex items-center justify-center p-2 sm:p-4 flex-shrink-0">
+            {photo.url && isVideoPhoto(photo) && (
+              <video
+                src={photo.url}
+                className="max-w-full max-h-[45vh] sm:max-h-[60vh] object-contain"
+                controls
+                autoPlay
+                playsInline
+                preload="metadata"
+              />
+            )}
+            {photo.url && !isVideoPhoto(photo) && (
               <img
                 src={photo.url}
                 alt={photo.caption || 'Trip photo'}
-                className="max-w-full max-h-[60vh] object-contain"
+                className="max-w-full max-h-[45vh] sm:max-h-[60vh] object-contain"
               />
             )}
           </div>
@@ -858,6 +935,7 @@ function PhotoDetailModal({
                 Uploaded by <span className="text-brand-cream">{photo.uploader_name}</span>
               </p>
               <p>{new Date(photo.created_at).toLocaleDateString()}</p>
+              {photo.mime_type && <p>{photo.mime_type}</p>}
               {photo.width && photo.height && <p>{photo.width} × {photo.height} pixels</p>}
             </div>
 
@@ -903,16 +981,27 @@ function PhotoDetailModal({
           </div>
         </div>
 
-        <div className="bg-brand-black border-t border-brand-brown/20 p-4 space-y-4 flex-shrink-0">
+        {/* Navigation footer */}
+        <div className="bg-brand-black border-t border-brand-brown/20 px-4 py-3 flex-shrink-0">
           <div className="flex gap-2 justify-between">
-            <Button variant="outline" onClick={onPrev} disabled={currentIndex === 0} size="sm">
-              ← Previous
+            <Button
+              variant="outline"
+              onClick={onPrev}
+              disabled={currentIndex === 0}
+              size="sm"
+              className="flex-1 min-h-[44px]"
+            >
+              ← Prev
             </Button>
+            <span className="text-xs text-brand-cream/40 self-center px-2 hidden sm:block select-none">
+              swipe to navigate
+            </span>
             <Button
               variant="primary"
               onClick={onNext}
               disabled={currentIndex === allPhotos.length - 1}
               size="sm"
+              className="flex-1 min-h-[44px]"
             >
               Next →
             </Button>

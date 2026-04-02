@@ -10,6 +10,7 @@ import { formatDate, formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 import { MapPin, Users } from 'lucide-react';
 import type { Trip } from '@/lib/types/database';
+import { WorldMap } from '@/components/map/WorldMap';
 export default function TripsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -75,6 +76,12 @@ export default function TripsPage() {
       <div>
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Adventures</h1>
         <p className="text-brand-cream/70">Your motorcycle adventures</p>
+      </div>
+
+      {/* World Map — shows all trips */}
+      <div className="rounded-2xl border border-brand-brown/20 bg-brand-dark-grey/40 p-4 sm:p-6">
+        <h2 className="text-lg font-semibold text-brand-cream mb-4">Ride Map</h2>
+        <WorldMap trips={trips} showStats />
       </div>
       {/* Your Trips Section */}
       {myTrips.length > 0 ? (

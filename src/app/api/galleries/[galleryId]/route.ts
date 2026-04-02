@@ -3,7 +3,35 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
+type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
+const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+function getMediaType(mimeType: string): MediaType | null {
+  if (mimeType.startsWith('image/')) {
+    return 'image';
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return 'video';
+  }
+
+  return null;
+}
+
+function getFileExtension(file: File) {
+  const fromName = file.name.split('.').pop()?.toLowerCase() || '';
+  if (fromName && /^[a-z0-9]+$/.test(fromName)) {
+    return fromName;
+  }
+
+  const fromMime = file.type.split('/').pop()?.toLowerCase() || '';
+  if (fromMime === 'jpeg') {
+    return 'jpg';
+  }
+
+  return fromMime && /^[a-z0-9]+$/.test(fromMime) ? fromMime : 'bin';
+}
 
 async function getUserAndRole(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -76,11 +104,11 @@ async function canManageTrip(
 }
 
 /**
- * POST /api/galleries/[galleryId] - Upload photo(s) to a gallery
- * All authenticated users can upload photos to galleries of trips they're members of
+ * POST /api/galleries/[galleryId] - Upload media file(s) to a gallery
+ * All authenticated users can upload images/videos to galleries of trips they're members of
  * 
  * Expected FormData:
- * - files: File[] (image(s) to upload) OR file: File
+ * - files: File[] (image(s)/video(s) to upload) OR file: File
  * - caption: string (optional)
  */
 export async function POST(
@@ -140,17 +168,21 @@ export async function POST(
     const failed: string[] = [];
 
     for (const file of files) {
-      // Validate file is an image
-      if (!file.type.startsWith('image/')) {
+      const mediaType = getMediaType(file.type || '');
+      if (!mediaType) {
+        failed.push(file.name || 'unknown-file');
+        continue;
+      }
+      if (file.size > MAX_MEDIA_UPLOAD_BYTES) {
         failed.push(file.name || 'unknown-file');
         continue;
       }
 
       // Create a unique file path
       const timestamp = Date.now();
-      const fileExt = file.name.split('.').pop();
+      const fileExt = getFileExtension(file);
       const fileName = `${timestamp}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `galleries/${galleryId}/${fileName}`;
+      const filePath = `galleries/${galleryId}/${mediaType}s/${fileName}`;
 
       // Upload file to storage
       const buffer = await file.arrayBuffer();
@@ -181,6 +213,8 @@ export async function POST(
           uploaded_by: user.id,
           storage_path: filePath,
           caption: caption,
+          media_type: mediaType,
+          mime_type: file.type || null,
           width: null, // Could be extracted from file, but keeping simple for now
           height: null,
         })
@@ -267,6 +301,8 @@ export async function GET(
         uploaded_by,
         storage_path,
         caption,
+        media_type,
+        mime_type,
         width,
         height,
         created_at,

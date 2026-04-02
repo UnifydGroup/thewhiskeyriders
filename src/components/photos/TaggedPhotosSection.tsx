@@ -14,6 +14,8 @@ interface TaggedPhoto {
   caption: string | null;
   created_at: string;
   url: string;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   trip_name: string;
   trip_slug: string;
   matched_tag: string;
@@ -29,6 +31,8 @@ interface PhotoRow {
   trip_id: string;
   storage_path: string;
   caption: string | null;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
   created_at: string;
 }
 
@@ -133,7 +137,7 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
 
         const { data: photosData, error: photosError } = await supabase
           .from('photos')
-          .select('id, trip_id, storage_path, caption, created_at')
+          .select('id, trip_id, storage_path, caption, media_type, mime_type, created_at')
           .in('id', uniquePhotoIds)
           .order('created_at', { ascending: false });
 
@@ -180,6 +184,8 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
               caption: photo.caption,
               created_at: photo.created_at,
               url: data.publicUrl,
+              media_type: photo.media_type === 'video' ? 'video' : 'image',
+              mime_type: photo.mime_type || null,
               trip_name: trip.name,
               trip_slug: trip.slug,
               matched_tag: firstTagByPhotoId.get(photo.id) || '',
@@ -238,14 +244,24 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
               className="group rounded-lg overflow-hidden border border-brand-brown/20 bg-brand-brown/10"
             >
               <div className="relative aspect-square">
-                <Image
-                  src={photo.url}
-                  alt={photo.caption || `Tagged photo from ${photo.trip_name}`}
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform"
-                  sizes="(max-width: 768px) 50vw, 25vw"
-                  unoptimized
-                />
+                {photo.media_type === 'video' ? (
+                  <video
+                    src={photo.url}
+                    className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <Image
+                    src={photo.url}
+                    alt={photo.caption || `Tagged photo from ${photo.trip_name}`}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform"
+                    sizes="(max-width: 768px) 50vw, 25vw"
+                    unoptimized
+                  />
+                )}
               </div>
               <div className="p-2 space-y-1">
                 <p className="text-xs text-brand-cream/80 truncate">{photo.trip_name}</p>

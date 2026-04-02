@@ -10,6 +10,7 @@ import type { Trip } from '@/lib/types/database';
 
 interface TripWithCover extends Trip {
   coverPhotoUrl?: string;
+  coverMediaType?: 'image' | 'video';
 }
 
 export default function GalleryPage() {
@@ -33,12 +34,12 @@ export default function GalleryPage() {
             data.map(async (trip) => {
               // Use cover_image_url if set
               if (trip.cover_image_url) {
-                return { ...trip, coverPhotoUrl: trip.cover_image_url };
+                return { ...trip, coverPhotoUrl: trip.cover_image_url, coverMediaType: 'image' };
               }
               // Otherwise fetch the most recent photo from the photos table
               const { data: photos } = await supabase
                 .from('photos')
-                .select('storage_path')
+                .select('storage_path, media_type')
                 .eq('trip_id', trip.id)
                 .order('created_at', { ascending: false })
                 .limit(1);
@@ -47,10 +48,14 @@ export default function GalleryPage() {
                 const { data: { publicUrl } } = supabase.storage
                   .from('photos')
                   .getPublicUrl(photos[0].storage_path);
-                return { ...trip, coverPhotoUrl: publicUrl };
+                return {
+                  ...trip,
+                  coverPhotoUrl: publicUrl,
+                  coverMediaType: photos[0].media_type === 'video' ? 'video' : 'image',
+                };
               }
 
-              return { ...trip, coverPhotoUrl: undefined };
+              return { ...trip, coverPhotoUrl: undefined, coverMediaType: undefined };
             })
           );
           setTrips(tripsWithCovers);
@@ -151,11 +156,23 @@ export default function GalleryPage() {
               <Card hoverable className="h-full">
                 <div className="h-40 bg-gradient-to-br from-brand-brown to-brand-tan relative overflow-hidden rounded-t-lg">
                   {trip.coverPhotoUrl && (
-                    <img
-                      src={trip.coverPhotoUrl}
-                      alt={trip.name}
-                      className="w-full h-full object-cover"
-                    />
+                    trip.coverMediaType === 'video' ? (
+                      <video
+                        src={trip.coverPhotoUrl}
+                        className="w-full h-full object-cover"
+                        muted
+                        autoPlay
+                        loop
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <img
+                        src={trip.coverPhotoUrl}
+                        alt={trip.name}
+                        className="w-full h-full object-cover"
+                      />
+                    )
                   )}
                   <div className="absolute inset-0 bg-brand-black/40" />
                 </div>
@@ -165,7 +182,7 @@ export default function GalleryPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-brand-cream/60">
-                    Photos from this adventure
+                    Media from this adventure
                   </p>
                 </CardContent>
               </Card>

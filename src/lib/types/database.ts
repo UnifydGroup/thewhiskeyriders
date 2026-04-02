@@ -5,6 +5,7 @@ export type KeyDateType = 'departure' | 'arrival' | 'payment_due' | 'deadline' |
 export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'waived';
 export type BadgeType = 'trip' | 'role' | 'achievement';
 export type TagType = 'trip' | 'year' | 'location' | 'person';
+export type MediaType = 'image' | 'video';
 
 export interface Profile {
   id: string;
@@ -46,6 +47,16 @@ export interface Trip {
   name: string;
   destination: string;
   country: string;
+  /** ISO 3166-1 alpha-3 country code, e.g. 'MAR'. Used for map country highlighting. */
+  country_code?: string | null;
+  /** Decimal latitude for the trip's map pin (e.g. 31.7917 for Morocco). */
+  latitude?: number | null;
+  /** Decimal longitude for the trip's map pin (e.g. -7.0926 for Morocco). */
+  longitude?: number | null;
+  /** Controls whether this trip is eligible for the trip-page countdown timer. */
+  countdown_enabled?: boolean | null;
+  /** Optional countdown target timestamp. Falls back to `start_date` when null. */
+  countdown_target_at?: string | null;
   start_date: string;
   end_date: string;
   description: string | null;
@@ -73,6 +84,29 @@ export interface TripUpdate {
   content: string;
   author_id: string | null;
   published_at: string | null;
+  created_at: string | null;
+}
+
+export interface NewsPost {
+  id: string;
+  title: string;
+  content: string;
+  author_id: string | null;
+  is_published: boolean;
+  published_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface NewsPostTripTag {
+  news_post_id: string;
+  trip_id: string;
+  created_at: string | null;
+}
+
+export interface NewsPostMemberTag {
+  news_post_id: string;
+  member_id: string;
   created_at: string | null;
 }
 
@@ -144,6 +178,8 @@ export interface Photo {
   uploaded_by: string;
   storage_path: string;
   caption: string | null;
+  media_type: MediaType;
+  mime_type: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
@@ -193,6 +229,8 @@ export interface SiteSettings {
   id: string;
   logo_url: string;
   background_image_url: string;
+  background_media_type: MediaType;
+  background_video_url: string | null;
   background_position_x: number;
   background_position_y: number;
   background_zoom: number;
@@ -284,6 +322,21 @@ export interface Database {
         Row: TripUpdate;
         Insert: Omit<TripUpdate, 'id' | 'created_at'>;
         Update: Partial<Omit<TripUpdate, 'id' | 'created_at'>>;
+      };
+      news_posts: {
+        Row: NewsPost;
+        Insert: Omit<NewsPost, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<NewsPost, 'id' | 'created_at'>>;
+      };
+      news_post_trips: {
+        Row: NewsPostTripTag;
+        Insert: Omit<NewsPostTripTag, 'created_at'>;
+        Update: Partial<Omit<NewsPostTripTag, 'created_at'>>;
+      };
+      news_post_members: {
+        Row: NewsPostMemberTag;
+        Insert: Omit<NewsPostMemberTag, 'created_at'>;
+        Update: Partial<Omit<NewsPostMemberTag, 'created_at'>>;
       };
       trip_key_dates: {
         Row: TripKeyDate;

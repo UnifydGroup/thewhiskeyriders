@@ -91,7 +91,7 @@ WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.profiles p
-    WHERE p.user_id::text = auth.uid()::text
+    WHERE (p.id::text = auth.uid()::text OR p.user_id::text = auth.uid()::text)
       AND p.role IN ('admin', 'super_admin')
   )
 );
@@ -105,7 +105,7 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.profiles p
-    WHERE p.user_id::text = auth.uid()::text
+    WHERE (p.id::text = auth.uid()::text OR p.user_id::text = auth.uid()::text)
       AND p.role IN ('admin', 'super_admin')
   )
 )
@@ -113,7 +113,7 @@ WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.profiles p
-    WHERE p.user_id::text = auth.uid()::text
+    WHERE (p.id::text = auth.uid()::text OR p.user_id::text = auth.uid()::text)
       AND p.role IN ('admin', 'super_admin')
   )
 );
