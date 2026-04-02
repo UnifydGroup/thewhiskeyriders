@@ -15,10 +15,19 @@ function normalizeDateValue(value: unknown): string | null {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
+    if (!supabaseUrl || !anonKey) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: missing Supabase URL or anon key' },
+        { status: 500 }
+      );
+    }
+
     const cookieStore = await cookies();
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+      supabaseUrl,
+      anonKey,
       {
         cookies: {
           getAll() {

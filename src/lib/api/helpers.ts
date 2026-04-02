@@ -5,13 +5,22 @@ import type { SupabaseDatabase } from '@/lib/types/database.generated';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
+function getEnv(name: string): string {
+  return process.env[name]?.trim() || '';
+}
+
 // Lazy singleton — not created at module load time so build succeeds without env vars
 let _supabase: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
 function getSupabase() {
   if (!_supabase) {
+    const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+    if (!url || !serviceRoleKey) {
+      throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    }
     _supabase = createClient<SupabaseDatabase>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      url,
+      serviceRoleKey
     );
   }
   return _supabase;
@@ -24,8 +33,8 @@ const supabase = new Proxy({} as ReturnType<typeof createClient<SupabaseDatabase
 let _authClient: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
 function getAuthClient() {
   if (!_authClient) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const anonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
     if (!url || !anonKey) {
       throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
     }
@@ -36,8 +45,8 @@ function getAuthClient() {
 
 async function getCurrentUserFromCookies() {
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const anonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
     if (!url || !anonKey) return null;
 
     const cookieStore = await cookies();

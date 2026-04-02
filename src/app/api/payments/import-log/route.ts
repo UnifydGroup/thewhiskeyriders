@@ -6,15 +6,20 @@ import { NextRequest, NextResponse } from 'next/server';
 let _importLogInstance: ReturnType<typeof createClient> | null = null;
 function _getSupabase() {
   if (!_importLogInstance) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    }
     _importLogInstance = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-      process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+      supabaseUrl,
+      serviceRoleKey
     );
   }
   return _importLogInstance;
 }
 const supabase = new Proxy({} as ReturnType<typeof createClient>, {
-  get: (_t, prop) => (_getSupabase() as any)[prop],
+  get: (_t, prop) => _getSupabase()[prop as keyof ReturnType<typeof createClient>],
 });
 
 export async function GET(request: NextRequest) {
