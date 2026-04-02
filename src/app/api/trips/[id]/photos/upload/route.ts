@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
@@ -40,6 +41,12 @@ interface JsonUploadBody {
   files?: unknown;
   uploads?: unknown;
 }
+
+type SupabaseAdminClient = SupabaseClient;
+type InsertPhotoResult = {
+  data: UploadedPhotoRow | null;
+  error: { code?: string | null; message?: string | null } | null;
+};
 
 async function getUserAndRole(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -150,6 +157,141 @@ function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function isMissingMediaColumnsError(error: { code?: string | null; message?: string | null } | null) {
+  if (!error) {
+    return false;
+  }
+
+  const message = (error.message || '').toLowerCase();
+  return (
+    error.code === '42703' ||
+    message.includes('media_type') ||
+    message.includes('mime_type')
+  );
+}
+
+async function ensureUploaderProfile(adminSupabase: SupabaseAdminClient, user: User) {
+  const { data: profile, error: profileError } = await adminSupabase
+    .from('profiles')
+    .select('id')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profileError && profileError.code !== 'PGRST116') {
+    console.error('Failed checking uploader profile:', profileError);
+    return false;
+  }
+
+  if (profile?.id) {
+    return true;
+  }
+
+  const fallbackEmail =
+    typeof user.email === 'string' && user.email.trim()
+      ? user.email.trim()
+      : `${user.id}@users.whiskeyriders.local`;
+  const fullName =
+    typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null;
+
+  const { error: createProfileError } = await adminSupabase.from('profiles').insert({
+    id: user.id,
+    user_id: user.id,
+    email: fallbackEmail,
+    role: 'member',
+    status: 'active',
+    full_name: fullName,
+  });
+
+  if (createProfileError && createProfileError.code !== '23505') {
+    console.error('Failed creating missing uploader profile:', createProfileError);
+    return false;
+  }
+
+  return true;
+}
+
+async function insertTripPhotoRecord(
+  adminSupabase: SupabaseAdminClient,
+  params: {
+    tripId: string;
+    userId: string;
+    filePath: string;
+    caption: string | null;
+    mediaType: MediaType;
+    mimeType: string | null;
+  }
+) : Promise<InsertPhotoResult> {
+  const insertPayload = {
+    trip_id: params.tripId,
+    gallery_id: null,
+    uploaded_by: params.userId,
+    storage_path: params.filePath,
+    caption: params.caption,
+    media_type: params.mediaType,
+    mime_type: params.mimeType,
+    width: null,
+    height: null,
+  };
+
+  const firstAttempt = await adminSupabase
+    .from('photos')
+    .insert(insertPayload)
+    .select()
+    .single();
+
+  if (!firstAttempt.error || !isMissingMediaColumnsError(firstAttempt.error)) {
+    if (firstAttempt.error) {
+      return {
+        data: null,
+        error: {
+          code: firstAttempt.error.code,
+          message: firstAttempt.error.message,
+        },
+      };
+    }
+
+    return {
+      data: (firstAttempt.data as UploadedPhotoRow | null) ?? null,
+      error: null,
+    };
+  }
+
+  const legacyAttempt = await adminSupabase
+    .from('photos')
+    .insert({
+      trip_id: params.tripId,
+      gallery_id: null,
+      uploaded_by: params.userId,
+      storage_path: params.filePath,
+      caption: params.caption,
+      width: null,
+      height: null,
+    })
+    .select()
+    .single();
+
+  if (legacyAttempt.error) {
+    return {
+      data: null,
+      error: {
+        code: legacyAttempt.error.code,
+        message: legacyAttempt.error.message,
+      },
+    };
+  }
+
+  const legacyPhoto =
+    legacyAttempt.data && typeof legacyAttempt.data === 'object'
+      ? {
+          ...legacyAttempt.data,
+          media_type: params.mediaType,
+          mime_type: params.mimeType,
+        }
+      : legacyAttempt.data;
+
+  return { data: (legacyPhoto as UploadedPhotoRow | null) ?? null, error: null };
+}
+
 /**
  * POST /api/trips/[id]/photos/upload - Upload media file(s) directly to a trip
  *
@@ -189,6 +331,14 @@ export async function POST(
     const hasAccess = await canAccessTrip(supabase, user.id, role, tripId);
     if (!hasAccess) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const readyForUpload = await ensureUploaderProfile(adminSupabase, user);
+    if (!readyForUpload) {
+      return NextResponse.json(
+        { error: 'Unable to prepare your account for uploads. Please contact support.' },
+        { status: 500 }
+      );
     }
 
     const contentType = request.headers.get('content-type') || '';
@@ -276,23 +426,17 @@ export async function POST(
 
           const caption = asString(rawUpload.caption) || null;
 
-          const { data: photo, error: photoError } = await adminSupabase
-            .from('photos')
-            .insert({
-              trip_id: tripId,
-              gallery_id: null,
-              uploaded_by: user.id,
-              storage_path: filePath,
-              caption,
-              media_type: mediaType,
-              mime_type: mimeType || null,
-              width: null,
-              height: null,
-            })
-            .select()
-            .single();
+          const { data: photo, error: photoError } = await insertTripPhotoRecord(adminSupabase, {
+            tripId,
+            userId: user.id,
+            filePath,
+            caption,
+            mediaType,
+            mimeType: mimeType || null,
+          });
 
           if (photoError || !photo) {
+            console.error('Trip upload finalize insert error:', photoError);
             failed.push(filePath);
             continue;
           }
@@ -385,21 +529,14 @@ export async function POST(
         continue;
       }
 
-      const { data: photo, error: photoError } = await adminSupabase
-        .from('photos')
-        .insert({
-          trip_id: tripId,
-          gallery_id: null,
-          uploaded_by: user.id,
-          storage_path: filePath,
-          caption,
-          media_type: mediaType,
-          mime_type: file.type || null,
-          width: null,
-          height: null,
-        })
-        .select()
-        .single();
+      const { data: photo, error: photoError } = await insertTripPhotoRecord(adminSupabase, {
+        tripId,
+        userId: user.id,
+        filePath,
+        caption,
+        mediaType,
+        mimeType: file.type || null,
+      });
 
       if (photoError || !photo) {
         console.error('Trip photo insert error:', photoError);

@@ -5,9 +5,10 @@ import { Upload, CheckCircle, AlertCircle, Camera } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface UploadProgress {
+  id: string;
   file: File;
   progress: number;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  status: 'pending' | 'uploading' | 'success' | 'error' | 'skipped';
   error?: string;
 }
 
@@ -24,11 +25,13 @@ export default function PhotoUploadDropzone({
 }: PhotoUploadDropzoneProps) {
   const MAX_FILES_PER_BATCH = 10;
   const MAX_BATCH_BYTES = 25 * 1024 * 1024; // Keep each multipart payload comfortably sized
+  const DUPLICATE_FINGERPRINT_BYTES = 1024 * 1024; // 1MB
 
   const [isDragActive, setIsDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const tripHashCacheRef = useRef<Record<string, string>>({});
   const supabase = useMemo(() => createClient(), []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,6 +40,101 @@ export default function PhotoUploadDropzone({
   useEffect(() => {
     setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0);
   }, []);
+
+  const parseJsonSafely = useCallback(async (response: Response): Promise<unknown> => {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const extractErrorMessage = useCallback((payload: unknown, fallback: string) => {
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      'error' in payload &&
+      typeof payload.error === 'string'
+    ) {
+      return payload.error;
+    }
+    return fallback;
+  }, []);
+
+  const hashArrayBuffer = useCallback(async (buffer: ArrayBuffer) => {
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }, []);
+
+  const fingerprintFile = useCallback(
+    async (file: File) =>
+      hashArrayBuffer(await file.slice(0, DUPLICATE_FINGERPRINT_BYTES).arrayBuffer()),
+    [DUPLICATE_FINGERPRINT_BYTES, hashArrayBuffer]
+  );
+
+  const fingerprintUrl = useCallback(
+    async (url: string) => {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          Range: `bytes=0-${DUPLICATE_FINGERPRINT_BYTES - 1}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch existing media (${response.status})`);
+      }
+
+      return hashArrayBuffer(await response.arrayBuffer());
+    },
+    [DUPLICATE_FINGERPRINT_BYTES, hashArrayBuffer]
+  );
+
+  const getTripMediaFingerprints = useCallback(async () => {
+    const cachedHashes = tripHashCacheRef.current;
+
+    const response = await fetch(`/api/trips/${tripId}/photos`, {
+      credentials: 'include',
+    });
+    const payload = await parseJsonSafely(response);
+    if (!response.ok) {
+      throw new Error(
+        extractErrorMessage(
+          payload,
+          `Failed to fetch trip media for duplicate check (HTTP ${response.status})`
+        )
+      );
+    }
+
+    if (!Array.isArray(payload)) {
+      throw new Error('Failed to fetch trip media for duplicate check');
+    }
+
+    for (const item of payload) {
+      if (
+        !item ||
+        typeof item !== 'object' ||
+        !('id' in item) ||
+        !('url' in item) ||
+        typeof item.id !== 'string' ||
+        typeof item.url !== 'string' ||
+        cachedHashes[item.id]
+      ) {
+        continue;
+      }
+
+      try {
+        cachedHashes[item.id] = await fingerprintUrl(item.url);
+      } catch {
+        // Ignore fetch/hash failures for existing media; upload can still proceed.
+      }
+    }
+
+    tripHashCacheRef.current = cachedHashes;
+    return new Set(Object.values(cachedHashes));
+  }, [extractErrorMessage, fingerprintUrl, parseJsonSafely, tripId]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -64,21 +162,77 @@ export default function PhotoUploadDropzone({
         return;
       }
 
+      const mediaItems = mediaFiles.map((file, index) => ({
+        id: `${Date.now()}-${index}-${file.name}-${file.size}`,
+        file,
+      }));
       setUploadProgress(
-        mediaFiles.map((file) => ({
-          file,
+        mediaItems.map((item) => ({
+          id: item.id,
+          file: item.file,
           progress: 0,
-          status: 'uploading' as const,
+          status: 'pending' as const,
         }))
       );
 
       try {
+        const selectedFingerprints = await Promise.all(
+          mediaItems.map(async (item) => ({
+            id: item.id,
+            fingerprint: await fingerprintFile(item.file),
+          }))
+        );
+
+        const firstSelectedByFingerprint = new Map<string, string>();
+        const duplicateWithinSelection = new Set<string>();
+        selectedFingerprints.forEach((entry) => {
+          const existingId = firstSelectedByFingerprint.get(entry.fingerprint);
+          if (existingId) {
+            duplicateWithinSelection.add(entry.id);
+          } else {
+            firstSelectedByFingerprint.set(entry.fingerprint, entry.id);
+          }
+        });
+
+        const existingTripFingerprints = await getTripMediaFingerprints();
+        const duplicateInTrip = new Set(
+          selectedFingerprints
+            .filter((entry) => existingTripFingerprints.has(entry.fingerprint))
+            .map((entry) => entry.id)
+        );
+
+        const duplicateIds = new Set<string>([
+          ...Array.from(duplicateWithinSelection),
+          ...Array.from(duplicateInTrip),
+        ]);
+
+        let itemsToUpload = mediaItems;
+        if (duplicateIds.size > 0) {
+          itemsToUpload = mediaItems.filter((item) => !duplicateIds.has(item.id));
+          setUploadProgress((previous) =>
+            previous.map((item) =>
+              duplicateIds.has(item.id)
+                ? { ...item, status: 'skipped', error: 'Skipped duplicate media' }
+                : item
+            )
+          );
+        }
+
+        if (itemsToUpload.length === 0) {
+          onError?.('No new media to upload. Selected files are duplicates of existing trip media.');
+          setTimeout(() => {
+            setUploading(false);
+          }, 1200);
+          return;
+        }
+
         // Upload in smaller batches so large bulk uploads do not create oversized multipart payloads.
-        const batches: File[][] = [];
-        let currentBatch: File[] = [];
+        const batches: Array<Array<{ id: string; file: File }>> = [];
+        let currentBatch: Array<{ id: string; file: File }> = [];
         let currentBatchBytes = 0;
 
-        for (const file of mediaFiles) {
+        for (const item of itemsToUpload) {
+          const file = item.file;
           const shouldStartNewBatch =
             currentBatch.length >= MAX_FILES_PER_BATCH ||
             currentBatchBytes + file.size > MAX_BATCH_BYTES;
@@ -89,7 +243,7 @@ export default function PhotoUploadDropzone({
             currentBatchBytes = 0;
           }
 
-          currentBatch.push(file);
+          currentBatch.push(item);
           currentBatchBytes += file.size;
         }
 
@@ -98,42 +252,80 @@ export default function PhotoUploadDropzone({
         }
 
         let totalUploaded = 0;
+        let totalFailed = 0;
 
         for (const batch of batches) {
+          const batchIds = batch.map((item) => item.id);
+          setUploadProgress((previous) =>
+            previous.map((item) =>
+              batchIds.includes(item.id) ? { ...item, status: 'uploading', error: undefined } : item
+            )
+          );
+
           const signResponse = await fetch(`/api/trips/${tripId}/photos/upload`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
               action: 'sign',
-              files: batch.map((file) => ({
-                name: file.name,
-                type: file.type,
-                size: file.size,
+              files: batch.map((item) => ({
+                name: item.file.name,
+                type: item.file.type,
+                size: item.file.size,
               })),
             }),
           });
 
-          const signPayload = await signResponse.json();
+          const signPayload = await parseJsonSafely(signResponse);
           if (!signResponse.ok) {
-            throw new Error(
-              typeof signPayload === 'object' && signPayload.error
-                ? signPayload.error
-                : 'Upload failed'
+            const message = extractErrorMessage(
+              signPayload,
+              `Upload failed while preparing media (HTTP ${signResponse.status})`
             );
+            totalFailed += batch.length;
+            setUploadProgress((previous) =>
+              previous.map((item) =>
+                batchIds.includes(item.id) ? { ...item, status: 'error', error: message } : item
+              )
+            );
+            continue;
           }
 
           const signedUploads =
-            signPayload && typeof signPayload === 'object' && Array.isArray(signPayload.uploads)
+            signPayload &&
+            typeof signPayload === 'object' &&
+            'uploads' in signPayload &&
+            Array.isArray(signPayload.uploads)
               ? signPayload.uploads
               : [];
+          const signFailedNames =
+            signPayload &&
+            typeof signPayload === 'object' &&
+            'failed' in signPayload &&
+            Array.isArray(signPayload.failed)
+              ? signPayload.failed
+              : [];
+
           const uploadsToFinalize: Array<{
-            file_path: string;
-            caption: null;
-            media_type: 'image' | 'video';
-            mime_type: string | null;
+            itemId: string;
+            payload: {
+              file_path: string;
+              caption: null;
+              media_type: 'image' | 'video';
+              mime_type: string | null;
+            };
           }> = [];
-          const localFailedIndexes = new Set<number>();
+          const localFailedIds = new Set<string>();
+
+          signFailedNames.forEach((failedName) => {
+            if (typeof failedName !== 'string') {
+              return;
+            }
+            const matching = batch.find((item) => item.file.name === failedName);
+            if (matching) {
+              localFailedIds.add(matching.id);
+            }
+          });
 
           for (const signedUpload of signedUploads) {
             if (!signedUpload || typeof signedUpload !== 'object') {
@@ -152,10 +344,14 @@ export default function PhotoUploadDropzone({
               typeof signedUpload.mime_type === 'string' ? signedUpload.mime_type : null;
 
             if (inputIndex < 0 || inputIndex >= batch.length || !filePath || !token || !mediaType) {
+              if (inputIndex >= 0 && inputIndex < batch.length) {
+                localFailedIds.add(batch[inputIndex].id);
+              }
               continue;
             }
 
-            const file = batch[inputIndex];
+            const batchItem = batch[inputIndex];
+            const file = batchItem.file;
             const { error: signedUploadError } = await supabase.storage
               .from('photos')
               .uploadToSignedUrl(filePath, token, file, {
@@ -164,21 +360,31 @@ export default function PhotoUploadDropzone({
               });
 
             if (signedUploadError) {
-              localFailedIndexes.add(inputIndex);
+              localFailedIds.add(batchItem.id);
               continue;
             }
 
             uploadsToFinalize.push({
-              file_path: filePath,
-              caption: null,
-              media_type: mediaType,
-              mime_type: mimeType || file.type || null,
+              itemId: batchItem.id,
+              payload: {
+                file_path: filePath,
+                caption: null,
+                media_type: mediaType,
+                mime_type: mimeType || file.type || null,
+              },
             });
           }
 
           if (uploadsToFinalize.length === 0) {
-            if (localFailedIndexes.size > 0) {
-              throw new Error('Failed to upload media to storage');
+            if (localFailedIds.size > 0) {
+              totalFailed += localFailedIds.size;
+              setUploadProgress((previous) =>
+                previous.map((item) =>
+                  localFailedIds.has(item.id)
+                    ? { ...item, status: 'error', error: 'Failed to upload to storage' }
+                    : item
+                )
+              );
             }
             continue;
           }
@@ -189,37 +395,117 @@ export default function PhotoUploadDropzone({
             credentials: 'include',
             body: JSON.stringify({
               action: 'finalize',
-              uploads: uploadsToFinalize,
+              uploads: uploadsToFinalize.map((entry) => entry.payload),
             }),
           });
-          const finalizePayload = await finalizeResponse.json();
+          const finalizePayload = await parseJsonSafely(finalizeResponse);
 
           if (!finalizeResponse.ok) {
-            throw new Error(
-              typeof finalizePayload === 'object' && finalizePayload.error
-                ? finalizePayload.error
-                : 'Failed to finalize upload'
+            const message = extractErrorMessage(
+              finalizePayload,
+              `Failed to finalize upload (HTTP ${finalizeResponse.status})`
             );
+            const failedIds = new Set<string>([
+              ...Array.from(localFailedIds),
+              ...uploadsToFinalize.map((entry) => entry.itemId),
+            ]);
+            totalFailed += failedIds.size;
+            setUploadProgress((previous) =>
+              previous.map((item) =>
+                failedIds.has(item.id) ? { ...item, status: 'error', error: message } : item
+              )
+            );
+            continue;
           }
 
-          if (finalizePayload && typeof finalizePayload === 'object') {
-            if (Array.isArray(finalizePayload.photos)) {
-              totalUploaded += finalizePayload.photos.length;
-            } else if (finalizePayload.photo) {
-              totalUploaded += 1;
-            } else if (Array.isArray(finalizePayload)) {
-              totalUploaded += finalizePayload.length;
+          const successfulPaths = new Set<string>();
+          const failedPaths = new Set<string>();
+
+          if (Array.isArray(finalizePayload)) {
+            finalizePayload.forEach((entry) => {
+              if (
+                entry &&
+                typeof entry === 'object' &&
+                'storage_path' in entry &&
+                typeof entry.storage_path === 'string'
+              ) {
+                successfulPaths.add(entry.storage_path);
+              }
+            });
+          } else if (finalizePayload && typeof finalizePayload === 'object') {
+            if ('photos' in finalizePayload && Array.isArray(finalizePayload.photos)) {
+              finalizePayload.photos.forEach((entry) => {
+                if (
+                  entry &&
+                  typeof entry === 'object' &&
+                  'storage_path' in entry &&
+                  typeof entry.storage_path === 'string'
+                ) {
+                  successfulPaths.add(entry.storage_path);
+                }
+              });
+            } else if (
+              'photo' in finalizePayload &&
+              finalizePayload.photo &&
+              typeof finalizePayload.photo === 'object' &&
+              'storage_path' in finalizePayload.photo &&
+              typeof finalizePayload.photo.storage_path === 'string'
+            ) {
+              successfulPaths.add(finalizePayload.photo.storage_path);
+            }
+
+            if ('failed' in finalizePayload && Array.isArray(finalizePayload.failed)) {
+              finalizePayload.failed.forEach((entry) => {
+                if (typeof entry === 'string') {
+                  failedPaths.add(entry);
+                }
+              });
             }
           }
+
+          const successIds = new Set<string>();
+          const failedIds = new Set<string>(localFailedIds);
+
+          uploadsToFinalize.forEach((entry) => {
+            if (successfulPaths.has(entry.payload.file_path)) {
+              successIds.add(entry.itemId);
+              return;
+            }
+            if (failedPaths.has(entry.payload.file_path)) {
+              failedIds.add(entry.itemId);
+              return;
+            }
+            successIds.add(entry.itemId);
+          });
+
+          totalUploaded += successIds.size;
+          totalFailed += failedIds.size;
+
+          setUploadProgress((previous) =>
+            previous.map((item) => {
+              if (successIds.has(item.id)) {
+                return { ...item, progress: 100, status: 'success', error: undefined };
+              }
+              if (failedIds.has(item.id)) {
+                return { ...item, status: 'error', error: item.error || 'Upload failed' };
+              }
+              return item;
+            })
+          );
         }
 
-        setUploadProgress(
-          mediaFiles.map((file) => ({
-            file,
-            progress: 100,
-            status: 'success' as const,
-          }))
+        setUploadProgress((previous) =>
+          previous.map((item) =>
+            item.status === 'uploading' ? { ...item, progress: 100, status: 'success' } : item
+          )
         );
+
+        if (totalUploaded === 0) {
+          if (totalFailed > 0) {
+            throw new Error('Failed to upload selected media');
+          }
+          throw new Error('No new media was uploaded');
+        }
 
         onUploadComplete?.(totalUploaded);
 
@@ -231,8 +517,9 @@ export default function PhotoUploadDropzone({
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
 
         setUploadProgress(
-          mediaFiles.map((file) => ({
-            file,
+          mediaItems.map((item) => ({
+            id: item.id,
+            file: item.file,
             progress: 0,
             status: 'error' as const,
             error: errorMessage,
@@ -247,7 +534,18 @@ export default function PhotoUploadDropzone({
         }, 2000);
       }
     },
-    [MAX_BATCH_BYTES, MAX_FILES_PER_BATCH, tripId, onUploadComplete, onError, supabase]
+    [
+      MAX_BATCH_BYTES,
+      MAX_FILES_PER_BATCH,
+      extractErrorMessage,
+      fingerprintFile,
+      getTripMediaFingerprints,
+      onError,
+      onUploadComplete,
+      parseJsonSafely,
+      supabase,
+      tripId,
+    ]
   );
 
   const handleDrop = useCallback(
@@ -341,11 +639,14 @@ export default function PhotoUploadDropzone({
         <div className="mt-2 space-y-1">
           {uploadProgress.map((item) => (
             <div
-              key={item.file.name}
+              key={item.id}
               className="flex items-center gap-2 px-3 py-1.5 rounded bg-brand-brown/20 text-xs"
             >
               {item.status === 'success' && (
                 <CheckCircle className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />
+              )}
+              {item.status === 'skipped' && (
+                <AlertCircle className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
               )}
               {item.status === 'error' && (
                 <AlertCircle className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
