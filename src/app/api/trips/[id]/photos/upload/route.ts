@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
 type MediaType = 'image' | 'video';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
-const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_MEDIA_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 interface UploadedPhotoRow {
   id: string;
@@ -40,6 +40,10 @@ interface JsonUploadBody {
   action?: unknown;
   files?: unknown;
   uploads?: unknown;
+}
+
+function formatSizeMB(bytes: number) {
+  return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
 type SupabaseAdminClient = SupabaseClient;
@@ -358,6 +362,7 @@ export async function POST(
 
         const uploads: Array<Record<string, unknown>> = [];
         const failed: string[] = [];
+        const failedDetails: Array<Record<string, unknown>> = [];
 
         for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
           const rawFile = files[fileIndex];
@@ -368,6 +373,17 @@ export async function POST(
 
           if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
             failed.push(name);
+            let reason = 'Unsupported file type';
+            if (size <= 0) {
+              reason = 'Empty file';
+            } else if (size > MAX_MEDIA_UPLOAD_BYTES) {
+              reason = `File too large. Max ${formatSizeMB(MAX_MEDIA_UPLOAD_BYTES)}MB`;
+            }
+            failedDetails.push({
+              input_index: fileIndex,
+              original_name: name,
+              reason,
+            });
             continue;
           }
 
@@ -384,6 +400,11 @@ export async function POST(
 
           if (signedError || !signedData?.token) {
             failed.push(name);
+            failedDetails.push({
+              input_index: fileIndex,
+              original_name: name,
+              reason: signedError?.message || 'Failed to prepare upload',
+            });
             continue;
           }
 
@@ -398,7 +419,7 @@ export async function POST(
           });
         }
 
-        return NextResponse.json({ uploads, failed }, { status: 200 });
+        return NextResponse.json({ uploads, failed, failed_details: failedDetails }, { status: 200 });
       }
 
       if (action === 'finalize') {
@@ -409,6 +430,7 @@ export async function POST(
 
         const uploadedPhotos: Array<Record<string, unknown>> = [];
         const failed: string[] = [];
+        const failedDetails: Array<Record<string, unknown>> = [];
 
         for (const rawUpload of uploads) {
           const filePath = asString(rawUpload.file_path);
@@ -421,6 +443,10 @@ export async function POST(
 
           if (!filePath.startsWith(`trips/${tripId}/`)) {
             failed.push(filePath || 'unknown-file');
+            failedDetails.push({
+              file_path: filePath || null,
+              reason: 'Invalid upload path',
+            });
             continue;
           }
 
@@ -438,6 +464,10 @@ export async function POST(
           if (photoError || !photo) {
             console.error('Trip upload finalize insert error:', photoError);
             failed.push(filePath);
+            failedDetails.push({
+              file_path: filePath,
+              reason: photoError?.message || 'Failed to finalize media record',
+            });
             continue;
           }
 
@@ -454,7 +484,7 @@ export async function POST(
 
         if (uploadedPhotos.length === 0) {
           return NextResponse.json(
-            { error: 'Failed to finalize any uploads', failed },
+            { error: 'Failed to finalize any uploads', failed, failed_details: failedDetails },
             { status: 400 }
           );
         }
@@ -471,6 +501,7 @@ export async function POST(
           {
             photos: uploadedPhotos,
             failed,
+            failed_details: failedDetails,
           },
           { status: 201 }
         );

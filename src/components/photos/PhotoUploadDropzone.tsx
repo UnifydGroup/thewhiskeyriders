@@ -176,6 +176,7 @@ export default function PhotoUploadDropzone({
       );
 
       try {
+        const failureMessages: string[] = [];
         const selectedFingerprints = await Promise.all(
           mediaItems.map(async (item) => ({
             id: item.id,
@@ -282,6 +283,7 @@ export default function PhotoUploadDropzone({
               signPayload,
               `Upload failed while preparing media (HTTP ${signResponse.status})`
             );
+            failureMessages.push(message);
             totalFailed += batch.length;
             setUploadProgress((previous) =>
               previous.map((item) =>
@@ -305,6 +307,13 @@ export default function PhotoUploadDropzone({
             Array.isArray(signPayload.failed)
               ? signPayload.failed
               : [];
+          const signFailedDetails =
+            signPayload &&
+            typeof signPayload === 'object' &&
+            'failed_details' in signPayload &&
+            Array.isArray(signPayload.failed_details)
+              ? signPayload.failed_details
+              : [];
 
           const uploadsToFinalize: Array<{
             itemId: string;
@@ -316,6 +325,7 @@ export default function PhotoUploadDropzone({
             };
           }> = [];
           const localFailedIds = new Set<string>();
+          const localFailureMessageById = new Map<string, string>();
 
           signFailedNames.forEach((failedName) => {
             if (typeof failedName !== 'string') {
@@ -324,6 +334,40 @@ export default function PhotoUploadDropzone({
             const matching = batch.find((item) => item.file.name === failedName);
             if (matching) {
               localFailedIds.add(matching.id);
+              localFailureMessageById.set(matching.id, 'Failed to prepare upload');
+            }
+          });
+          signFailedDetails.forEach((detail) => {
+            if (!detail || typeof detail !== 'object') {
+              return;
+            }
+
+            const inputIndex =
+              'input_index' in detail && typeof detail.input_index === 'number'
+                ? detail.input_index
+                : -1;
+            const reason =
+              'reason' in detail && typeof detail.reason === 'string'
+                ? detail.reason
+                : 'Failed to prepare upload';
+            const originalName =
+              'original_name' in detail && typeof detail.original_name === 'string'
+                ? detail.original_name
+                : '';
+
+            if (inputIndex >= 0 && inputIndex < batch.length) {
+              const itemId = batch[inputIndex].id;
+              localFailedIds.add(itemId);
+              localFailureMessageById.set(itemId, reason);
+              return;
+            }
+
+            if (originalName) {
+              const matching = batch.find((item) => item.file.name === originalName);
+              if (matching) {
+                localFailedIds.add(matching.id);
+                localFailureMessageById.set(matching.id, reason);
+              }
             }
           });
 
@@ -345,7 +389,9 @@ export default function PhotoUploadDropzone({
 
             if (inputIndex < 0 || inputIndex >= batch.length || !filePath || !token || !mediaType) {
               if (inputIndex >= 0 && inputIndex < batch.length) {
-                localFailedIds.add(batch[inputIndex].id);
+                const invalidId = batch[inputIndex].id;
+                localFailedIds.add(invalidId);
+                localFailureMessageById.set(invalidId, 'Invalid signed upload payload');
               }
               continue;
             }
@@ -361,6 +407,10 @@ export default function PhotoUploadDropzone({
 
             if (signedUploadError) {
               localFailedIds.add(batchItem.id);
+              localFailureMessageById.set(
+                batchItem.id,
+                signedUploadError.message || 'Failed to upload to storage'
+              );
               continue;
             }
 
@@ -378,10 +428,20 @@ export default function PhotoUploadDropzone({
           if (uploadsToFinalize.length === 0) {
             if (localFailedIds.size > 0) {
               totalFailed += localFailedIds.size;
+              localFailedIds.forEach((id) => {
+                const reason = localFailureMessageById.get(id);
+                if (reason) {
+                  failureMessages.push(reason);
+                }
+              });
               setUploadProgress((previous) =>
                 previous.map((item) =>
                   localFailedIds.has(item.id)
-                    ? { ...item, status: 'error', error: 'Failed to upload to storage' }
+                    ? {
+                        ...item,
+                        status: 'error',
+                        error: localFailureMessageById.get(item.id) || 'Failed to upload to storage',
+                      }
                     : item
                 )
               );
@@ -405,14 +465,49 @@ export default function PhotoUploadDropzone({
               finalizePayload,
               `Failed to finalize upload (HTTP ${finalizeResponse.status})`
             );
+            failureMessages.push(message);
             const failedIds = new Set<string>([
               ...Array.from(localFailedIds),
               ...uploadsToFinalize.map((entry) => entry.itemId),
             ]);
+            const failedDetailByPath = new Map<string, string>();
+            if (
+              finalizePayload &&
+              typeof finalizePayload === 'object' &&
+              'failed_details' in finalizePayload &&
+              Array.isArray(finalizePayload.failed_details)
+            ) {
+              finalizePayload.failed_details.forEach((detail) => {
+                if (!detail || typeof detail !== 'object') {
+                  return;
+                }
+                const path =
+                  'file_path' in detail && typeof detail.file_path === 'string'
+                    ? detail.file_path
+                    : '';
+                const reason =
+                  'reason' in detail && typeof detail.reason === 'string' ? detail.reason : message;
+                if (path) {
+                  failedDetailByPath.set(path, reason);
+                }
+              });
+            }
             totalFailed += failedIds.size;
             setUploadProgress((previous) =>
               previous.map((item) =>
-                failedIds.has(item.id) ? { ...item, status: 'error', error: message } : item
+                failedIds.has(item.id)
+                  ? {
+                      ...item,
+                      status: 'error',
+                      error: (() => {
+                        const uploadEntry = uploadsToFinalize.find((entry) => entry.itemId === item.id);
+                        if (!uploadEntry) {
+                          return message;
+                        }
+                        return failedDetailByPath.get(uploadEntry.payload.file_path) || message;
+                      })(),
+                    }
+                  : item
               )
             );
             continue;
@@ -420,6 +515,7 @@ export default function PhotoUploadDropzone({
 
           const successfulPaths = new Set<string>();
           const failedPaths = new Set<string>();
+          const failedDetailByPath = new Map<string, string>();
 
           if (Array.isArray(finalizePayload)) {
             finalizePayload.forEach((entry) => {
@@ -461,6 +557,19 @@ export default function PhotoUploadDropzone({
                 }
               });
             }
+            if ('failed_details' in finalizePayload && Array.isArray(finalizePayload.failed_details)) {
+              finalizePayload.failed_details.forEach((entry) => {
+                if (!entry || typeof entry !== 'object') {
+                  return;
+                }
+                const path =
+                  'file_path' in entry && typeof entry.file_path === 'string' ? entry.file_path : '';
+                const reason = 'reason' in entry && typeof entry.reason === 'string' ? entry.reason : '';
+                if (path && reason) {
+                  failedDetailByPath.set(path, reason);
+                }
+              });
+            }
           }
 
           const successIds = new Set<string>();
@@ -473,6 +582,11 @@ export default function PhotoUploadDropzone({
             }
             if (failedPaths.has(entry.payload.file_path)) {
               failedIds.add(entry.itemId);
+              const reason = failedDetailByPath.get(entry.payload.file_path);
+              if (reason) {
+                localFailureMessageById.set(entry.itemId, reason);
+                failureMessages.push(reason);
+              }
               return;
             }
             successIds.add(entry.itemId);
@@ -487,7 +601,11 @@ export default function PhotoUploadDropzone({
                 return { ...item, progress: 100, status: 'success', error: undefined };
               }
               if (failedIds.has(item.id)) {
-                return { ...item, status: 'error', error: item.error || 'Upload failed' };
+                return {
+                  ...item,
+                  status: 'error',
+                  error: localFailureMessageById.get(item.id) || item.error || 'Upload failed',
+                };
               }
               return item;
             })
@@ -502,7 +620,7 @@ export default function PhotoUploadDropzone({
 
         if (totalUploaded === 0) {
           if (totalFailed > 0) {
-            throw new Error('Failed to upload selected media');
+            throw new Error(failureMessages[0] || 'Failed to upload selected media');
           }
           throw new Error('No new media was uploaded');
         }
@@ -516,14 +634,12 @@ export default function PhotoUploadDropzone({
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
 
-        setUploadProgress(
-          mediaItems.map((item) => ({
-            id: item.id,
-            file: item.file,
-            progress: 0,
-            status: 'error' as const,
-            error: errorMessage,
-          }))
+        setUploadProgress((previous) =>
+          previous.map((item) =>
+            item.status === 'success' || item.status === 'skipped'
+              ? item
+              : { ...item, progress: 0, status: 'error', error: item.error || errorMessage }
+          )
         );
 
         onError?.(errorMessage);
