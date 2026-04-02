@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { TopBar } from '@/components/layout/TopBar';
@@ -16,20 +16,20 @@ export default function PortalLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('');
-  const isPublicGalleryRoute = pathname === '/gallery' || pathname.startsWith('/gallery/');
 
   useEffect(() => {
-    if (isPublicGalleryRoute) {
-      return;
-    }
-
     const checkAuth = async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
+        if (pathname === '/gallery' || pathname.startsWith('/gallery/')) {
+          const publicPath = pathname.replace('/gallery', '/public/gallery');
+          router.push(publicPath);
+          return;
+        }
         router.push('/login');
       } else {
         setUserEmail(data.session.user.email || '');
@@ -42,8 +42,8 @@ export default function PortalLayout({
         if (profile) setUserRole(profile.role);
       }
     };
-    checkAuth();
-  }, [isPublicGalleryRoute, router, supabase]);
+    void checkAuth();
+  }, [pathname, router, supabase]);
 
   const handleLogout = async () => {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -60,19 +60,6 @@ export default function PortalLayout({
     await supabase.auth.signOut();
     router.push('/');
   };
-
-  if (isPublicGalleryRoute) {
-    return (
-      <div className="min-h-full flex flex-col bg-brand-black">
-        <main className="flex-1">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {children}
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
-  }
 
   return (
     <div className="h-full flex flex-col">

@@ -84,7 +84,7 @@ export default async function Home() {
           </div>
           <div className="flex items-center gap-3">
             <Link
-              href="/gallery"
+              href="/public/gallery"
               className="px-4 py-2 rounded-lg border border-brand-brown/40 text-brand-tan hover:bg-brand-brown/15 transition-colors text-sm font-semibold"
             >
               Trip Galleries
@@ -148,7 +148,7 @@ export default async function Home() {
             </p>
             <div className="flex flex-wrap justify-center lg:justify-start gap-3">
               <Link
-                href="/gallery"
+                href="/public/gallery"
                 className="inline-block px-8 py-4 border border-brand-brown/60 hover:bg-brand-brown/15 text-brand-tan font-bold text-lg rounded-lg transition-colors"
               >
                 View Trip Galleries
@@ -197,7 +197,7 @@ export default async function Home() {
               {trips.map((trip) => (
                 <Link
                   key={trip.id}
-                  href={`/gallery/${trip.slug}`}
+                  href={`/public/gallery/${trip.slug}`}
                   className="group relative overflow-hidden rounded-lg border border-brand-brown/20 hover:border-brand-brown/60 transition-all duration-300"
                 >
                   {/* Trip Image */}
@@ -231,7 +231,7 @@ export default async function Home() {
       {/* Footer */}
       <footer className="border-t border-brand-brown/20 bg-brand-black/50 py-8">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-brand-cream/60 text-sm">
-          <p>&copy; 2024 Whiskey Riders. All rights reserved.</p>
+          <p>&copy; 2026 Whiskey Riders. All rights reserved.</p>
         </div>
       </footer>
     </div>

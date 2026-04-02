@@ -1,25 +1,18 @@
 'use client';
 export const dynamic = 'force-dynamic';
-
-import { useEffect, useMemo, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import type { Trip } from '@/lib/types/database';
 
 interface TripWithCover extends Trip {
-  coverPhotoUrl?: string | null;
-  coverMediaType?: 'image' | 'video' | null;
-}
-
-interface PhotoCoverRow {
-  storage_path: string;
-  media_type: 'image' | 'video' | null;
+  coverPhotoUrl?: string;
+  coverMediaType?: 'image' | 'video';
 }
 
 export default function GalleryPage() {
-  const supabase = useMemo(() => createClient(), []);
   const [trips, setTrips] = useState<TripWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -29,69 +22,31 @@ export default function GalleryPage() {
   useEffect(() => {
     const loadTrips = async () => {
       try {
-        const { data: tripRows, error: tripsError } = await supabase
-          .from('trips')
-          .select('*')
-          .neq('status', 'cancelled')
-          .order('start_date', { ascending: false });
+        const response = await fetch('/api/public/galleries', {
+          method: 'GET',
+          credentials: 'include',
+        });
 
-        if (tripsError) {
-          throw new Error(tripsError.message);
+        const payload = await response.json().catch(() => null) as
+          | { trips?: TripWithCover[]; error?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Failed to load public galleries');
         }
 
-        const tripsWithCovers = await Promise.all(
-          (tripRows || []).map(async (trip) => {
-            if (trip.cover_image_url) {
-              return {
-                ...trip,
-                coverPhotoUrl: trip.cover_image_url,
-                coverMediaType: 'image' as const,
-              };
-            }
-
-            const { data: photosData, error: photosError } = await supabase
-              .from('photos')
-              .select('storage_path, media_type')
-              .eq('trip_id', trip.id)
-              .order('created_at', { ascending: false })
-              .limit(1);
-
-            if (photosError || !photosData || photosData.length === 0) {
-              return {
-                ...trip,
-                coverPhotoUrl: null,
-                coverMediaType: null,
-              };
-            }
-
-            const latest = photosData[0] as PhotoCoverRow;
-            const {
-              data: { publicUrl },
-            } = supabase.storage.from('photos').getPublicUrl(latest.storage_path);
-
-            return {
-              ...trip,
-              coverPhotoUrl: publicUrl,
-              coverMediaType: latest.media_type === 'video' ? 'video' : 'image',
-            };
-          })
-        );
-
-        setTrips(tripsWithCovers);
+        setTrips(Array.isArray(payload?.trips) ? payload!.trips : []);
         setErrorMessage(null);
       } catch (err) {
-        console.error('Failed to load member galleries:', err);
+        console.error('Failed to load trips:', err);
         setTrips([]);
-        setErrorMessage(
-          err instanceof Error ? err.message : 'Failed to load galleries'
-        );
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to load public galleries');
       } finally {
         setLoading(false);
       }
     };
-
     void loadTrips();
-  }, [supabase]);
+  }, []);
 
   const countryOptions = useMemo(() => {
     const countries = new Set(
@@ -125,11 +80,11 @@ export default function GalleryPage() {
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div>
-        <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Member Gallery</h1>
-        <p className="text-brand-cream/70">Upload, tag, and discuss trip media</p>
+        <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Gallery</h1>
+        <p className="text-brand-cream/70">Memories from our adventures</p>
       </div>
-
       {errorMessage && (
         <Card className="border border-red-500/50 bg-red-900/20">
           <CardContent className="pt-4 text-sm text-red-300">{errorMessage}</CardContent>
@@ -174,14 +129,18 @@ export default function GalleryPage() {
         </p>
       </div>
 
+      {/* Trip Galleries */}
       {filteredTrips.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTrips.map((trip) => (
-            <Link key={trip.id} href={`/gallery/${trip.slug}`}>
+            <Link
+              key={trip.id}
+              href={`/public/gallery/${trip.slug}`}
+            >
               <Card hoverable className="h-full">
                 <div className="h-40 bg-gradient-to-br from-brand-brown to-brand-tan relative overflow-hidden rounded-t-lg">
-                  {trip.coverPhotoUrl &&
-                    (trip.coverMediaType === 'video' ? (
+                  {trip.coverPhotoUrl && (
+                    trip.coverMediaType === 'video' ? (
                       <video
                         src={trip.coverPhotoUrl}
                         className="w-full h-full object-cover"
@@ -192,8 +151,13 @@ export default function GalleryPage() {
                         preload="metadata"
                       />
                     ) : (
-                      <img src={trip.coverPhotoUrl} alt={trip.name} className="w-full h-full object-cover" />
-                    ))}
+                      <img
+                        src={trip.coverPhotoUrl}
+                        alt={trip.name}
+                        className="w-full h-full object-cover"
+                      />
+                    )
+                  )}
                   <div className="absolute inset-0 bg-brand-black/40" />
                 </div>
                 <CardHeader className="pt-4">
@@ -201,7 +165,9 @@ export default function GalleryPage() {
                   <CardDescription>{trip.destination}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-brand-cream/60">Open gallery to upload and manage media</p>
+                  <p className="text-sm text-brand-cream/60">
+                    Media from this adventure
+                  </p>
                 </CardContent>
               </Card>
             </Link>
@@ -217,6 +183,14 @@ export default function GalleryPage() {
           </CardContent>
         </Card>
       ) : null}
+      {!loading && trips.length === 0 && errorMessage && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-brand-cream/70 mb-4">Public galleries are temporarily unavailable.</p>
+            <p className="text-sm text-brand-cream/50">Please try again in a moment.</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

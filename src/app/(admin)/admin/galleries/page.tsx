@@ -1395,7 +1395,7 @@ export default function GalleriesPage() {
                       )}
                       {gallery.trip?.slug && (
                         <Link
-                          href={`/gallery/${gallery.trip.slug}`}
+                          href={`/public/gallery/${gallery.trip.slug}`}
                           className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-semibold rounded-lg text-brand-cream hover:bg-brand-dark-grey transition-colors"
                         >
                           View Trip Gallery
