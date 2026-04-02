@@ -15,6 +15,7 @@ import type { SupabaseDatabase } from '@/lib/types/database.generated';
 
 const NEWS_ASSETS_BUCKET = 'news-assets';
 const MAX_ASSET_UPLOAD_BYTES = 250 * 1024 * 1024;
+const MAX_ASSET_UPLOAD_LIMIT = '250MB';
 
 const ALLOWED_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'text/'];
 const ALLOWED_MIME_EXACT = new Set([
@@ -42,6 +43,37 @@ const EXTENSION_MIME_MAP: Record<string, string> = {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
+}
+
+function parseBucketSizeLimitToBytes(limit: unknown): number {
+  if (typeof limit === 'number' && Number.isFinite(limit)) {
+    return Math.max(0, Math.floor(limit));
+  }
+
+  if (typeof limit === 'string') {
+    const normalized = limit.trim().toLowerCase();
+    const numberPart = Number.parseFloat(normalized);
+    if (!Number.isFinite(numberPart) || numberPart <= 0) {
+      return 0;
+    }
+
+    if (normalized.endsWith('gb')) {
+      return Math.floor(numberPart * 1024 * 1024 * 1024);
+    }
+    if (normalized.endsWith('mb')) {
+      return Math.floor(numberPart * 1024 * 1024);
+    }
+    if (normalized.endsWith('kb')) {
+      return Math.floor(numberPart * 1024);
+    }
+    if (normalized.endsWith('b')) {
+      return Math.floor(numberPart);
+    }
+
+    return Math.floor(numberPart);
+  }
+
+  return 0;
 }
 
 function isAllowedMimeType(mimeType: string): boolean {
@@ -115,11 +147,11 @@ async function ensureAssetsBucket(
       ((existingBucket as unknown as { file_size_limit?: number }).file_size_limit) ??
       ((existingBucket as unknown as { fileSizeLimit?: number }).fileSizeLimit) ??
       0;
-    const currentLimit = Number(rawLimit) || 0;
+    const currentLimit = parseBucketSizeLimitToBytes(rawLimit);
     if (currentLimit < MAX_ASSET_UPLOAD_BYTES) {
       const { error: updateBucketError } = await serviceClient.storage.updateBucket(NEWS_ASSETS_BUCKET, {
         public: true,
-        fileSizeLimit: MAX_ASSET_UPLOAD_BYTES,
+        fileSizeLimit: MAX_ASSET_UPLOAD_LIMIT,
       });
       if (updateBucketError) {
         throw new Error(updateBucketError.message);
@@ -130,7 +162,7 @@ async function ensureAssetsBucket(
 
   const { error: createBucketError } = await serviceClient.storage.createBucket(NEWS_ASSETS_BUCKET, {
     public: true,
-    fileSizeLimit: MAX_ASSET_UPLOAD_BYTES,
+    fileSizeLimit: MAX_ASSET_UPLOAD_LIMIT,
   });
 
   if (createBucketError) {

@@ -96,6 +96,10 @@ function TripMarker({ trip, isSelected, zoom, x, y, onClick }: TripMarkerProps) 
   return (
     <g
       transform={`translate(${x} ${y})`}
+      onPointerDown={(e: React.PointerEvent<SVGGElement>) => {
+        // Prevent map-level drag capture so marker clicks can open the popup.
+        e.stopPropagation();
+      }}
       onClick={(e: React.MouseEvent) => onClick(e)}
       style={{ cursor: 'pointer' }}
       role="button"
