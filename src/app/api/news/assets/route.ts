@@ -4,6 +4,7 @@ import {
   ApiErrors,
   errorResponse,
   getIpAddress,
+  getJsonBody,
   getPagination,
   logActivity,
   successResponse,
@@ -13,7 +14,7 @@ import {
 import type { SupabaseDatabase } from '@/lib/types/database.generated';
 
 const NEWS_ASSETS_BUCKET = 'news-assets';
-const MAX_ASSET_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_ASSET_UPLOAD_BYTES = 250 * 1024 * 1024;
 
 const ALLOWED_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'text/'];
 const ALLOWED_MIME_EXACT = new Set([
@@ -28,6 +29,16 @@ const ALLOWED_MIME_EXACT = new Set([
   'application/vnd.ms-powerpoint',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ]);
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  pdf: 'application/pdf',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  ogv: 'video/ogg',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+};
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
@@ -40,6 +51,28 @@ function isAllowedMimeType(mimeType: string): boolean {
   return ALLOWED_MIME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
+function getExtension(fileName: string): string {
+  const trimmed = fileName.trim().toLowerCase();
+  const index = trimmed.lastIndexOf('.');
+  if (index < 0 || index === trimmed.length - 1) return '';
+  return trimmed.slice(index + 1);
+}
+
+function resolveMimeType(fileName: string, providedMimeType: string): string | null {
+  const normalized = providedMimeType.trim().toLowerCase();
+  if (isAllowedMimeType(normalized)) {
+    return normalized;
+  }
+
+  const extension = getExtension(fileName);
+  const extensionMimeType = extension ? EXTENSION_MIME_MAP[extension] : undefined;
+  if (extensionMimeType && isAllowedMimeType(extensionMimeType)) {
+    return extensionMimeType;
+  }
+
+  return null;
+}
+
 function sanitizeFileName(fileName: string): string {
   const cleaned = fileName
     .toLowerCase()
@@ -48,6 +81,13 @@ function sanitizeFileName(fileName: string): string {
     .replace(/^-|-$/g, '');
 
   return cleaned || 'asset';
+}
+
+function createAssetStoragePath(fileName: string): string {
+  const safeName = sanitizeFileName(fileName || 'asset');
+  return `news/${new Date().getUTCFullYear()}/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}-${safeName}`;
 }
 
 function getServiceClient() {
@@ -69,8 +109,22 @@ async function ensureAssetsBucket(
     throw new Error(bucketsError.message);
   }
 
-  const exists = (buckets || []).some((bucket) => bucket.name === NEWS_ASSETS_BUCKET);
-  if (exists) {
+  const existingBucket = (buckets || []).find((bucket) => bucket.name === NEWS_ASSETS_BUCKET);
+  if (existingBucket) {
+    const rawLimit =
+      ((existingBucket as unknown as { file_size_limit?: number }).file_size_limit) ??
+      ((existingBucket as unknown as { fileSizeLimit?: number }).fileSizeLimit) ??
+      0;
+    const currentLimit = Number(rawLimit) || 0;
+    if (currentLimit < MAX_ASSET_UPLOAD_BYTES) {
+      const { error: updateBucketError } = await serviceClient.storage.updateBucket(NEWS_ASSETS_BUCKET, {
+        public: true,
+        fileSizeLimit: MAX_ASSET_UPLOAD_BYTES,
+      });
+      if (updateBucketError) {
+        throw new Error(updateBucketError.message);
+      }
+    }
     return;
   }
 
@@ -143,65 +197,176 @@ export async function POST(request: NextRequest) {
       return errorResponse(ApiErrors.FORBIDDEN);
     }
 
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return errorResponse(ApiErrors.BAD_REQUEST, 'file is required');
-    }
-
-    if (file.size <= 0) {
-      return errorResponse(ApiErrors.BAD_REQUEST, 'file cannot be empty');
-    }
-
-    if (file.size > MAX_ASSET_UPLOAD_BYTES) {
-      return errorResponse(ApiErrors.BAD_REQUEST, 'file is too large (max 25MB)');
-    }
-
-    const fileType = (file.type || '').trim().toLowerCase();
-    if (!isAllowedMimeType(fileType)) {
-      return errorResponse(ApiErrors.BAD_REQUEST, 'unsupported file type');
-    }
+    const contentTypeHeader = request.headers.get('content-type') || '';
+    const isJsonRequest = contentTypeHeader.toLowerCase().includes('application/json');
 
     const serviceClient = getServiceClient();
     await ensureAssetsBucket(serviceClient);
 
-    const safeName = sanitizeFileName(file.name || 'asset');
-    const path = `news/${new Date().getUTCFullYear()}/${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 10)}-${safeName}`;
+    let asset: {
+      id: string;
+      name: string;
+      file_url: string;
+      storage_path: string;
+      file_type: string;
+      file_size: number;
+      uploaded_by: string | null;
+    } | null = null;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await serviceClient.storage
-      .from(NEWS_ASSETS_BUCKET)
-      .upload(path, arrayBuffer, {
-        contentType: fileType,
-        cacheControl: '3600',
-      });
+    if (isJsonRequest) {
+      const body = await getJsonBody(request);
+      const action = typeof body.action === 'string' ? body.action.trim() : '';
 
-    if (uploadError) {
-      return errorResponse(ApiErrors.INTERNAL_ERROR, uploadError.message);
+      if (action === 'create_signed_upload') {
+        const fileName = typeof body.file_name === 'string' ? body.file_name.trim() : '';
+        const providedType = typeof body.file_type === 'string' ? body.file_type : '';
+        const fileSize = typeof body.file_size === 'number' ? body.file_size : Number(body.file_size);
+
+        if (!fileName) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file_name is required');
+        }
+
+        if (!Number.isFinite(fileSize) || fileSize <= 0) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file_size must be a positive number');
+        }
+
+        if (fileSize > MAX_ASSET_UPLOAD_BYTES) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file is too large (max 250MB)');
+        }
+
+        const fileType = resolveMimeType(fileName, providedType);
+        if (!fileType) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'unsupported file type. Use images, videos, PDFs, audio, text, or common office files');
+        }
+
+        const path = createAssetStoragePath(fileName);
+        const { data: signedUpload, error: signedUploadError } = await serviceClient.storage
+          .from(NEWS_ASSETS_BUCKET)
+          .createSignedUploadUrl(path);
+
+        if (signedUploadError || !signedUpload?.token) {
+          return errorResponse(ApiErrors.INTERNAL_ERROR, signedUploadError?.message || 'Failed to create signed upload');
+        }
+
+        return successResponse({
+          file_path: path,
+          token: signedUpload.token,
+          signed_url: signedUpload.signedUrl || null,
+          file_type: fileType,
+          file_size: fileSize,
+          bucket: NEWS_ASSETS_BUCKET,
+        });
+      }
+
+      if (action === 'register_upload') {
+        const name = typeof body.name === 'string' ? body.name.trim() : '';
+        const storagePath = typeof body.storage_path === 'string' ? body.storage_path.trim() : '';
+        const providedType = typeof body.file_type === 'string' ? body.file_type : '';
+        const fileSize = typeof body.file_size === 'number' ? body.file_size : Number(body.file_size);
+
+        if (!name || !storagePath) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'name and storage_path are required');
+        }
+
+        if (!storagePath.startsWith('news/')) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'invalid storage_path');
+        }
+
+        if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_ASSET_UPLOAD_BYTES) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'invalid file_size');
+        }
+
+        const fileType = resolveMimeType(name, providedType);
+        if (!fileType) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'unsupported file type. Use images, videos, PDFs, audio, text, or common office files');
+        }
+
+        const {
+          data: { publicUrl },
+        } = serviceClient.storage.from(NEWS_ASSETS_BUCKET).getPublicUrl(storagePath);
+
+        const { data: inserted, error: insertError } = await supabase
+          .from('news_assets')
+          .insert({
+            name,
+            file_url: publicUrl,
+            storage_path: storagePath,
+            file_type: fileType,
+            file_size: fileSize,
+            uploaded_by: user.id,
+          })
+          .select('*')
+          .single();
+
+        if (insertError || !inserted) {
+          return errorResponse(ApiErrors.INTERNAL_ERROR, insertError?.message || 'Failed to create asset record');
+        }
+
+        asset = inserted;
+      } else {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported action');
+      }
+    } else {
+      const formData = await request.formData();
+      const file = formData.get('file');
+      if (!(file instanceof File)) {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'file is required');
+      }
+
+      if (file.size <= 0) {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'file cannot be empty');
+      }
+
+      if (file.size > MAX_ASSET_UPLOAD_BYTES) {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'file is too large (max 250MB)');
+      }
+
+      const fileType = resolveMimeType(file.name || 'asset', file.type || '');
+      if (!fileType) {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'unsupported file type. Use images, videos, PDFs, audio, text, or common office files');
+      }
+
+      const path = createAssetStoragePath(file.name || 'asset');
+
+      const arrayBuffer = await file.arrayBuffer();
+      const { error: uploadError } = await serviceClient.storage
+        .from(NEWS_ASSETS_BUCKET)
+        .upload(path, arrayBuffer, {
+          contentType: fileType,
+          cacheControl: '3600',
+        });
+
+      if (uploadError) {
+        return errorResponse(ApiErrors.INTERNAL_ERROR, uploadError.message);
+      }
+
+      const {
+        data: { publicUrl },
+      } = serviceClient.storage.from(NEWS_ASSETS_BUCKET).getPublicUrl(path);
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('news_assets')
+        .insert({
+          name: file.name,
+          file_url: publicUrl,
+          storage_path: path,
+          file_type: fileType,
+          file_size: file.size,
+          uploaded_by: user.id,
+        })
+        .select('*')
+        .single();
+
+      if (insertError || !inserted) {
+        await serviceClient.storage.from(NEWS_ASSETS_BUCKET).remove([path]);
+        return errorResponse(ApiErrors.INTERNAL_ERROR, insertError?.message || 'Failed to create asset record');
+      }
+
+      asset = inserted;
     }
 
-    const {
-      data: { publicUrl },
-    } = serviceClient.storage.from(NEWS_ASSETS_BUCKET).getPublicUrl(path);
-
-    const { data: asset, error: insertError } = await supabase
-      .from('news_assets')
-      .insert({
-        name: file.name,
-        file_url: publicUrl,
-        storage_path: path,
-        file_type: fileType,
-        file_size: file.size,
-        uploaded_by: user.id,
-      })
-      .select('*')
-      .single();
-
-    if (insertError || !asset) {
-      await serviceClient.storage.from(NEWS_ASSETS_BUCKET).remove([path]);
-      return errorResponse(ApiErrors.INTERNAL_ERROR, insertError?.message || 'Failed to create asset record');
+    if (!asset) {
+      return errorResponse(ApiErrors.INTERNAL_ERROR, 'Failed to upload asset');
     }
 
     await logActivity(

@@ -26,6 +26,7 @@ const TAG_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
 };
 
 const BLOCK_TAGS = new Set(['p', 'blockquote', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4']);
+const NON_TEXT_CONTENT_TAGS = ['img', 'video', 'audio'];
 
 function hasHtmlTag(value: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(value);
@@ -211,6 +212,19 @@ export function normalizeEditorHtmlForSave(content: string): string {
   }
 
   return `<p>${sanitized}</p>`;
+}
+
+export function hasRenderableNewsContent(content: string): boolean {
+  const sanitized = sanitizeNewsHtml(content);
+  if (!sanitized) return false;
+
+  const text = toSearchableNewsText(sanitized);
+  if (text.trim().length > 0) {
+    return true;
+  }
+
+  const lower = sanitized.toLowerCase();
+  return NON_TEXT_CONTENT_TAGS.some((tag) => lower.includes(`<${tag}`));
 }
 
 export function sanitizeLinkUrl(url: string): string | null {

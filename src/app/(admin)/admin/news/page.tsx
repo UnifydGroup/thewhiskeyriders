@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
 import type { NewsAsset, NewsItem } from '@/lib/news/types';
-import { normalizeEditorHtmlForSave, toEditorHtml, toSearchableNewsText } from '@/lib/news/content';
+import { hasRenderableNewsContent, normalizeEditorHtmlForSave, toEditorHtml } from '@/lib/news/content';
 
 type NewsOptionsPayload = {
   success?: boolean;
@@ -184,13 +184,13 @@ export default function AdminNewsPage() {
   const handleSave = async (statusOverride?: NewsStatus) => {
     const title = form.title.trim();
     const content = normalizeEditorHtmlForSave(form.content);
-    const textContent = toSearchableNewsText(content);
+    const hasContent = hasRenderableNewsContent(content);
     const status = statusOverride || form.status;
     if (statusOverride) {
       setForm((prev) => ({ ...prev, status: statusOverride }));
     }
 
-    if (!title || !textContent) {
+    if (!title || !hasContent) {
       setMessage({ type: 'error', text: 'Title and content are required.' });
       return;
     }
@@ -347,24 +347,67 @@ export default function AdminNewsPage() {
       setUploadingAsset(true);
       setMessage(null);
       const accessToken = await getAccessToken();
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/news/assets', {
+      const signResponse = await fetch('/api/news/assets', {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: formData,
+        body: JSON.stringify({
+          action: 'create_signed_upload',
+          file_name: file.name,
+          file_type: file.type,
+          file_size: file.size,
+        }),
       });
 
-      const payload = (await response.json().catch(() => ({}))) as {
+      const signPayload = (await signResponse.json().catch(() => ({}))) as {
+        success?: boolean;
+        data?: {
+          file_path?: string;
+          token?: string;
+          file_type?: string;
+        };
+        error?: string;
+      };
+
+      if (!signResponse.ok || !signPayload.success || !signPayload.data?.file_path || !signPayload.data?.token) {
+        throw new Error(signPayload.error || 'Failed to prepare upload');
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from('news-assets')
+        .uploadToSignedUrl(signPayload.data.file_path, signPayload.data.token, file, {
+          cacheControl: '3600',
+          contentType: signPayload.data.file_type || file.type || undefined,
+        });
+
+      if (uploadError) {
+        throw new Error(uploadError.message || 'Failed to upload file');
+      }
+
+      const registerResponse = await fetch('/api/news/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          action: 'register_upload',
+          name: file.name,
+          storage_path: signPayload.data.file_path,
+          file_type: signPayload.data.file_type || file.type || 'application/octet-stream',
+          file_size: file.size,
+        }),
+      });
+
+      const payload = (await registerResponse.json().catch(() => ({}))) as {
         success?: boolean;
         data?: NewsAsset;
         error?: string;
       };
 
-      if (!response.ok || !payload.success || !payload.data) {
+      if (!registerResponse.ok || !payload.success || !payload.data) {
         throw new Error(payload.error || 'Failed to upload asset');
       }
 
@@ -680,11 +723,15 @@ export default function AdminNewsPage() {
               <input
                 ref={assetUploadInputRef}
                 type="file"
+                accept="image/*,video/*,audio/*,application/pdf,text/*,application/json,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                 className="hidden"
                 onChange={handleAssetUpload}
               />
             </CardHeader>
             <CardContent className="space-y-3">
+              <p className="text-xs text-brand-cream/55">
+                Supports images, videos, PDF, audio, text and common office files (max 250MB).
+              </p>
               <div className="relative">
                 <Search className="w-4 h-4 text-brand-cream/50 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
