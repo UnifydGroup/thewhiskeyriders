@@ -69,8 +69,11 @@ export default function PhotoUploadDropzone({
   }, []);
 
   const fingerprintFile = useCallback(
-    async (file: File) =>
-      hashArrayBuffer(await file.slice(0, DUPLICATE_FINGERPRINT_BYTES).arrayBuffer()),
+    async (file: File) => {
+      const chunk = await file.slice(0, DUPLICATE_FINGERPRINT_BYTES).arrayBuffer();
+      const hash = await hashArrayBuffer(chunk);
+      return `${file.size}:${hash}`;
+    },
     [DUPLICATE_FINGERPRINT_BYTES, hashArrayBuffer]
   );
 
@@ -87,7 +90,18 @@ export default function PhotoUploadDropzone({
         throw new Error(`Failed to fetch existing media (${response.status})`);
       }
 
-      return hashArrayBuffer(await response.arrayBuffer());
+      const buffer = await response.arrayBuffer();
+      const chunk = buffer.slice(0, Math.min(DUPLICATE_FINGERPRINT_BYTES, buffer.byteLength));
+      const hash = await hashArrayBuffer(chunk);
+      const contentRange = response.headers.get('content-range');
+      const totalFromRange = contentRange?.match(/\/(\d+)$/)?.[1];
+      const contentLength = response.headers.get('content-length');
+      const inferredSize =
+        (totalFromRange ? Number.parseInt(totalFromRange, 10) : Number.NaN) ||
+        (contentLength ? Number.parseInt(contentLength, 10) : Number.NaN) ||
+        buffer.byteLength;
+
+      return `${inferredSize}:${hash}`;
     },
     [DUPLICATE_FINGERPRINT_BYTES, hashArrayBuffer]
   );
@@ -402,7 +416,7 @@ export default function PhotoUploadDropzone({
               .from('photos')
               .uploadToSignedUrl(filePath, token, file, {
                 cacheControl: '3600',
-                contentType: file.type,
+                contentType: file.type || mimeType || undefined,
               });
 
             if (signedUploadError) {

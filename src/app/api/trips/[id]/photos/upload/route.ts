@@ -123,10 +123,6 @@ async function getTripById(
   return trip;
 }
 
-function getFileExtension(file: File) {
-  return getFileExtensionFromParts(file.name, file.type);
-}
-
 function getFileExtensionFromParts(fileName: string, mimeType: string) {
   const fromName = fileName.split('.').pop()?.toLowerCase() || '';
   if (fromName && /^[a-z0-9]+$/.test(fromName)) {
@@ -141,7 +137,7 @@ function getFileExtensionFromParts(fileName: string, mimeType: string) {
   return fromMime && /^[a-z0-9]+$/.test(fromMime) ? fromMime : 'bin';
 }
 
-function getMediaType(mimeType: string): MediaType | null {
+function getMediaType(mimeType: string, fileName = ''): MediaType | null {
   if (mimeType.startsWith('image/')) {
     return 'image';
   }
@@ -150,6 +146,50 @@ function getMediaType(mimeType: string): MediaType | null {
     return 'video';
   }
 
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif', 'bmp', 'svg'].includes(ext)) {
+    return 'image';
+  }
+  if (['mp4', 'mov', 'm4v', 'webm', 'ogg', 'ogv', 'avi', 'mkv'].includes(ext)) {
+    return 'video';
+  }
+
+  return null;
+}
+
+function inferMimeType(fileName: string, mediaType: MediaType | null): string | null {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const byExt: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    avif: 'image/avif',
+    heic: 'image/heic',
+    heif: 'image/heif',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    m4v: 'video/x-m4v',
+    webm: 'video/webm',
+    ogg: 'video/ogg',
+    ogv: 'video/ogg',
+    avi: 'video/x-msvideo',
+    mkv: 'video/x-matroska',
+  };
+
+  if (ext && byExt[ext]) {
+    return byExt[ext];
+  }
+
+  if (mediaType === 'image') {
+    return 'image/jpeg';
+  }
+  if (mediaType === 'video') {
+    return 'video/mp4';
+  }
   return null;
 }
 
@@ -367,9 +407,10 @@ export async function POST(
         for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
           const rawFile = files[fileIndex];
           const name = asString(rawFile.name) || 'unknown-file';
-          const mimeType = asString(rawFile.type);
+          const mimeTypeInput = asString(rawFile.type);
           const size = asNumber(rawFile.size) ?? 0;
-          const mediaType = getMediaType(mimeType);
+          const mediaType = getMediaType(mimeTypeInput, name);
+          const mimeType = mimeTypeInput || inferMimeType(name, mediaType) || '';
 
           if (!mediaType || size <= 0 || size > MAX_MEDIA_UPLOAD_BYTES) {
             failed.push(name);
@@ -388,7 +429,7 @@ export async function POST(
           }
 
           const timestamp = Date.now();
-          const ext = getFileExtensionFromParts(name, mimeType);
+          const ext = getFileExtensionFromParts(name, mimeType || mimeTypeInput);
           const fileName = `${timestamp}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
           const filePath = `trips/${tripId}/${mediaType}s/${fileName}`;
 
@@ -434,12 +475,13 @@ export async function POST(
 
         for (const rawUpload of uploads) {
           const filePath = asString(rawUpload.file_path);
-          const mimeType = asString(rawUpload.mime_type);
+          const mimeTypeInput = asString(rawUpload.mime_type);
           const mediaTypeRaw = asString(rawUpload.media_type);
           const mediaType: MediaType =
             mediaTypeRaw === 'video' || mediaTypeRaw === 'image'
               ? mediaTypeRaw
-              : getMediaType(mimeType || '') || 'image';
+              : getMediaType(mimeTypeInput || '', filePath) || 'image';
+          const mimeType = mimeTypeInput || inferMimeType(filePath, mediaType) || null;
 
           if (!filePath.startsWith(`trips/${tripId}/`)) {
             failed.push(filePath || 'unknown-file');
@@ -458,7 +500,7 @@ export async function POST(
             filePath,
             caption,
             mediaType,
-            mimeType: mimeType || null,
+            mimeType,
           });
 
           if (photoError || !photo) {
@@ -531,7 +573,7 @@ export async function POST(
     const failed: string[] = [];
 
     for (const file of files) {
-      const mediaType = getMediaType(file.type || '');
+      const mediaType = getMediaType(file.type || '', file.name);
       if (!mediaType) {
         failed.push(file.name || 'unknown-file');
         continue;
@@ -542,7 +584,8 @@ export async function POST(
       }
 
       const timestamp = Date.now();
-      const ext = getFileExtension(file);
+      const mimeType = file.type || inferMimeType(file.name, mediaType) || '';
+      const ext = getFileExtensionFromParts(file.name, mimeType || file.type);
       const fileName = `${timestamp}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
       const filePath = `trips/${tripId}/${mediaType}s/${fileName}`;
 
@@ -550,7 +593,7 @@ export async function POST(
       const { error: uploadError } = await adminSupabase.storage
         .from('photos')
         .upload(filePath, buffer, {
-          contentType: file.type,
+          contentType: mimeType || undefined,
           cacheControl: '3600',
         });
 
@@ -566,7 +609,7 @@ export async function POST(
         filePath,
         caption,
         mediaType,
-        mimeType: file.type || null,
+        mimeType: mimeType || null,
       });
 
       if (photoError || !photo) {
