@@ -17,6 +17,30 @@ type Params = Promise<{ id: string }>;
 const DOCUMENT_STORAGE_BUCKETS = ['photos', 'whiskey-riders', 'documents'];
 const MISSING_BUCKET_SEGMENT = '/storage/v1/object/public/documents/';
 const WORKING_BUCKET_SEGMENT = '/storage/v1/object/public/photos/';
+const MAX_DOCUMENT_UPLOAD_BYTES = 250 * 1024 * 1024;
+const MAX_DOCUMENT_UPLOAD_LIMIT = '250MB';
+
+const ALLOWED_MIME_PREFIXES = ['image/', 'text/'];
+const ALLOWED_MIME_EXACT = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  txt: 'text/plain',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -167,18 +191,126 @@ function parseUserIds(value: unknown): string[] {
   return [];
 }
 
-async function uploadDocumentFile(file: File, tripId: string) {
+function parseFileSize(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return 0;
+}
+
+function sanitizeFileName(fileName: string): string {
+  const cleaned = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9.\-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return cleaned || 'document';
+}
+
+function createDocumentStoragePath(tripId: string, fileName: string): string {
+  const safeName = sanitizeFileName(fileName || 'document');
+  return `${tripId}/documents/${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${safeName}`;
+}
+
+function getFileExtension(fileName: string): string {
+  const trimmed = fileName.trim().toLowerCase();
+  const index = trimmed.lastIndexOf('.');
+  if (index < 0 || index === trimmed.length - 1) {
+    return '';
+  }
+  return trimmed.slice(index + 1);
+}
+
+function isAllowedMimeType(mimeType: string): boolean {
+  const normalized = mimeType.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (ALLOWED_MIME_EXACT.has(normalized)) {
+    return true;
+  }
+  return ALLOWED_MIME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function resolveDocumentMimeType(fileName: string, providedMimeType: string): string | null {
+  const normalized = providedMimeType.trim().toLowerCase();
+  if (isAllowedMimeType(normalized)) {
+    return normalized;
+  }
+
+  const extension = getFileExtension(fileName);
+  if (!extension) {
+    return null;
+  }
+
+  const mappedMimeType = EXTENSION_MIME_MAP[extension];
+  if (!mappedMimeType || !isAllowedMimeType(mappedMimeType)) {
+    return null;
+  }
+
+  return mappedMimeType;
+}
+
+function isValidDocumentStoragePath(storagePath: string, tripId: string): boolean {
+  if (!storagePath) {
+    return false;
+  }
+  if (storagePath.includes('..')) {
+    return false;
+  }
+  return storagePath.startsWith(`${tripId}/documents/`);
+}
+
+async function createSignedDocumentUpload(tripId: string, fileName: string) {
+  const storagePath = createDocumentStoragePath(tripId, fileName);
+  let lastError = 'Failed to create signed upload URL';
+
+  for (const bucket of DOCUMENT_STORAGE_BUCKETS) {
+    const { data: signedUpload, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUploadUrl(storagePath);
+
+    if (error || !signedUpload?.token) {
+      if (error?.message) {
+        lastError = error.message;
+      }
+      continue;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+
+    return {
+      bucket,
+      storagePath,
+      token: signedUpload.token,
+      signedUrl: signedUpload.signedUrl || null,
+      publicUrl,
+    };
+  }
+
+  throw new Error(lastError);
+}
+
+async function uploadDocumentFile(file: File, tripId: string, mimeType: string) {
   const fileBuffer = Buffer.from(await file.arrayBuffer());
-  const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const uniquePrefix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const storagePath = `${tripId}/documents/${uniquePrefix}-${safeFileName}`;
-  const contentType = file.type || 'application/octet-stream';
+  const storagePath = createDocumentStoragePath(tripId, file.name);
 
   let uploadErrorMessage = 'Failed to upload document';
 
   for (const bucket of DOCUMENT_STORAGE_BUCKETS) {
     const { error: uploadError } = await supabase.storage.from(bucket).upload(storagePath, fileBuffer, {
-      contentType,
+      contentType: mimeType,
       upsert: false,
     });
 
@@ -192,7 +324,7 @@ async function uploadDocumentFile(file: File, tripId: string) {
     } = supabase.storage.from(bucket).getPublicUrl(storagePath);
 
     if (publicUrl) {
-      return { fileUrl: publicUrl, fileType: contentType };
+      return { fileUrl: publicUrl, fileType: mimeType };
     }
   }
 
@@ -310,10 +442,151 @@ export async function POST(request: NextRequest, props: { params: Params }) {
     let name = '';
     let fileUrl = '';
     let fileType = 'application/octet-stream';
+    let fileSize = 0;
+    let uploadBucket = '';
+    let uploadPath = '';
     let shareWithAll = true;
     let selectedUserIds: string[] = [];
 
-    if (contentType.includes('multipart/form-data')) {
+    if (contentType.includes('application/json')) {
+      const body = await getJsonBody(request);
+      const action = typeof body.action === 'string' ? body.action.trim() : '';
+
+      if (action === 'create_signed_upload') {
+        const fileName = typeof body.file_name === 'string' ? body.file_name.trim() : '';
+        const requestedFileType = typeof body.file_type === 'string' ? body.file_type : '';
+        const requestedFileSize = parseFileSize(body.file_size);
+
+        if (!fileName) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file_name is required');
+        }
+
+        if (!Number.isFinite(requestedFileSize) || requestedFileSize <= 0) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file_size must be a positive number');
+        }
+
+        if (requestedFileSize > MAX_DOCUMENT_UPLOAD_BYTES) {
+          return errorResponse(
+            ApiErrors.BAD_REQUEST,
+            `file is too large (max ${MAX_DOCUMENT_UPLOAD_LIMIT})`
+          );
+        }
+
+        const resolvedFileType = resolveDocumentMimeType(fileName, requestedFileType);
+        if (!resolvedFileType) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported file type');
+        }
+
+        const signedUpload = await createSignedDocumentUpload(tripId, fileName);
+        return successResponse({
+          bucket: signedUpload.bucket,
+          storage_path: signedUpload.storagePath,
+          token: signedUpload.token,
+          signed_url: signedUpload.signedUrl,
+          file_url: signedUpload.publicUrl,
+          file_type: resolvedFileType,
+          file_size: requestedFileSize,
+          max_file_size: MAX_DOCUMENT_UPLOAD_LIMIT,
+        });
+      }
+
+      if (action === 'register_upload') {
+        const providedName =
+          typeof body.name === 'string'
+            ? body.name.trim()
+            : typeof body.file_name === 'string'
+              ? body.file_name.trim()
+              : '';
+        const requestedFileType = typeof body.file_type === 'string' ? body.file_type : '';
+        const requestedFileSize = parseFileSize(body.file_size);
+
+        let storageBucket = typeof body.bucket === 'string' ? body.bucket.trim() : '';
+        let storagePath = typeof body.storage_path === 'string' ? body.storage_path.trim() : '';
+        const providedFileUrl = normalizeDocumentUrl(String(body.file_url || '').trim());
+
+        if ((!storageBucket || !storagePath) && providedFileUrl) {
+          const reference = extractStorageReference(providedFileUrl);
+          if (reference) {
+            storageBucket = storageBucket || reference.bucket;
+            storagePath = storagePath || reference.path;
+          }
+        }
+
+        storagePath = storagePath.replace(/^\/+/, '');
+
+        name = providedName;
+        fileType = resolveDocumentMimeType(providedName, requestedFileType) || fileType;
+        fileSize = requestedFileSize;
+        uploadBucket = storageBucket;
+        uploadPath = storagePath;
+
+        if (!name) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'name is required');
+        }
+
+        if (!uploadBucket || !uploadPath) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'bucket and storage_path are required');
+        }
+
+        if (!DOCUMENT_STORAGE_BUCKETS.includes(uploadBucket)) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'invalid bucket');
+        }
+
+        if (!isValidDocumentStoragePath(uploadPath, tripId)) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'invalid storage_path');
+        }
+
+        if (!Number.isFinite(fileSize) || fileSize <= 0) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'file_size must be a positive number');
+        }
+
+        if (fileSize > MAX_DOCUMENT_UPLOAD_BYTES) {
+          return errorResponse(
+            ApiErrors.BAD_REQUEST,
+            `file is too large (max ${MAX_DOCUMENT_UPLOAD_LIMIT})`
+          );
+        }
+
+        if (!resolveDocumentMimeType(name, requestedFileType)) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported file type');
+        }
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(uploadBucket).getPublicUrl(uploadPath);
+        fileUrl = providedFileUrl || publicUrl;
+
+        if (!fileUrl) {
+          return errorResponse(ApiErrors.INTERNAL_ERROR, 'Failed to resolve file URL');
+        }
+
+        if (body.share_with_all !== undefined) {
+          shareWithAll = parseBoolean(body.share_with_all, true);
+        } else if (body.user_ids || body.user_id) {
+          shareWithAll = false;
+        }
+
+        selectedUserIds = parseUserIds(body.user_ids);
+        if (!selectedUserIds.length && body.user_id) {
+          selectedUserIds = [String(body.user_id)];
+        }
+      } else {
+        name = String(body.name || '').trim();
+        fileUrl = normalizeDocumentUrl(String(body.file_url || '').trim());
+        fileType = String(body.file_type || fileType);
+
+        if (body.share_with_all !== undefined) {
+          shareWithAll = parseBoolean(body.share_with_all, true);
+        } else if (body.user_ids || body.user_id) {
+          shareWithAll = false;
+        }
+
+        selectedUserIds = parseUserIds(body.user_ids);
+        if (!selectedUserIds.length && body.user_id) {
+          selectedUserIds = [String(body.user_id)];
+        }
+      }
+    } else if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
       const file = formData.get('file');
 
@@ -322,30 +595,28 @@ export async function POST(request: NextRequest, props: { params: Params }) {
       selectedUserIds = parseUserIds(formData.get('user_ids'));
 
       if (file instanceof File && file.size > 0) {
-        const uploaded = await uploadDocumentFile(file, tripId);
+        const resolvedFileType = resolveDocumentMimeType(file.name, file.type || '');
+        if (!resolvedFileType) {
+          return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported file type');
+        }
+
+        if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) {
+          return errorResponse(
+            ApiErrors.BAD_REQUEST,
+            `file is too large (max ${MAX_DOCUMENT_UPLOAD_LIMIT})`
+          );
+        }
+
+        const uploaded = await uploadDocumentFile(file, tripId, resolvedFileType);
         fileUrl = uploaded.fileUrl;
         fileType = uploaded.fileType;
+        fileSize = file.size;
         if (!name) {
           name = file.name;
         }
       }
     } else {
-      const body = await getJsonBody(request);
-
-      name = String(body.name || '').trim();
-      fileUrl = normalizeDocumentUrl(String(body.file_url || '').trim());
-      fileType = body.file_type || fileType;
-
-      if (body.share_with_all !== undefined) {
-        shareWithAll = parseBoolean(body.share_with_all, true);
-      } else if (body.user_ids || body.user_id) {
-        shareWithAll = false;
-      }
-
-      selectedUserIds = parseUserIds(body.user_ids);
-      if (!selectedUserIds.length && body.user_id) {
-        selectedUserIds = [String(body.user_id)];
-      }
+      return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported content type');
     }
 
     if (!name || !fileUrl) {
@@ -408,6 +679,9 @@ export async function POST(request: NextRequest, props: { params: Params }) {
       name,
       {
         file_type: fileType,
+        file_size: fileSize || null,
+        bucket: uploadBucket || null,
+        storage_path: uploadPath || null,
         share_with_all: shareWithAll,
         recipient_count: targetUserIds.length,
       },

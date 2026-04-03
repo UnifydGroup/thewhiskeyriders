@@ -47,6 +47,7 @@ const allowedTypes = [
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
+const MAX_DOCUMENT_UPLOAD_BYTES = 250 * 1024 * 1024;
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -201,33 +202,82 @@ export default function DocumentsManagementPage() {
         throw new Error('Unsupported file type');
       }
 
-      if (selectedFile.size > 25 * 1024 * 1024) {
-        throw new Error('File is too large (max 25MB)');
+      if (selectedFile.size > MAX_DOCUMENT_UPLOAD_BYTES) {
+        throw new Error('File is too large (max 250MB)');
       }
 
       if (recipientMode === 'specific' && selectedUserIds.length === 0) {
         throw new Error('Select at least one member');
       }
 
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('name', name.trim());
-      formData.append('share_with_all', String(recipientMode === 'all'));
-      if (recipientMode === 'specific') {
-        formData.append('user_ids', JSON.stringify(selectedUserIds));
-      }
-
-      const response = await fetch(`/api/trips/${tripId}/documents`, {
+      const signResponse = await fetch(`/api/trips/${tripId}/documents`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: formData,
+        body: JSON.stringify({
+          action: 'create_signed_upload',
+          file_name: selectedFile.name,
+          file_type: selectedFile.type || '',
+          file_size: selectedFile.size,
+        }),
       });
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || 'Failed to upload document');
+      const signPayload = await signResponse.json().catch(() => ({}));
+      if (!signResponse.ok || !signPayload.success) {
+        if (signResponse.status === 413) {
+          throw new Error('File is too large for the upload gateway. Please choose a smaller file.');
+        }
+        throw new Error(signPayload.error || 'Failed to prepare upload');
+      }
+
+      const signedData = signPayload.data || {};
+      const bucket = typeof signedData.bucket === 'string' ? signedData.bucket : '';
+      const storagePath = typeof signedData.storage_path === 'string' ? signedData.storage_path : '';
+      const tokenValue = typeof signedData.token === 'string' ? signedData.token : '';
+      const resolvedFileType =
+        typeof signedData.file_type === 'string' && signedData.file_type
+          ? signedData.file_type
+          : selectedFile.type || 'application/octet-stream';
+
+      if (!bucket || !storagePath || !tokenValue) {
+        throw new Error('Upload preparation returned an invalid payload');
+      }
+
+      const { error: signedUploadError } = await supabase.storage
+        .from(bucket)
+        .uploadToSignedUrl(storagePath, tokenValue, selectedFile, {
+          contentType: resolvedFileType,
+          upsert: false,
+        });
+
+      if (signedUploadError) {
+        throw new Error(signedUploadError.message || 'Failed to upload file');
+      }
+
+      const registerResponse = await fetch(`/api/trips/${tripId}/documents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: 'register_upload',
+          name: name.trim(),
+          file_name: selectedFile.name,
+          file_type: resolvedFileType,
+          file_size: selectedFile.size,
+          bucket,
+          storage_path: storagePath,
+          share_with_all: recipientMode === 'all',
+          user_ids: recipientMode === 'specific' ? selectedUserIds : [],
+        }),
+      });
+
+      const registerPayload = await registerResponse.json().catch(() => ({}));
+      if (!registerResponse.ok || !registerPayload.success) {
+        throw new Error(registerPayload.error || 'Failed to save uploaded document');
       }
 
       await fetchDocuments();
@@ -411,7 +461,7 @@ export default function DocumentsManagementPage() {
                         <div>
                           <Upload size={24} className="mx-auto mb-2 opacity-50" />
                           <p className="text-sm">Click to choose a document</p>
-                          <p className="text-xs text-gray-500 mt-1">PDF, images, Word, Excel (max 25MB)</p>
+                          <p className="text-xs text-gray-500 mt-1">PDF, images, Word, Excel (max 250MB)</p>
                         </div>
                       )}
                     </label>
