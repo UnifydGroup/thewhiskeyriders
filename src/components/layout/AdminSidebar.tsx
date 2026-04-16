@@ -13,6 +13,7 @@ import {
   Newspaper,
   ChevronDown,
   Activity,
+  Bell,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -43,6 +44,7 @@ const adminNavItems: AdminNavItem[] = [
   { href: '/admin/trips', label: 'Trips', icon: Bike },
   { href: '/admin/galleries', label: 'Galleries', icon: Image },
   { href: '/admin/news', label: 'News', icon: Newspaper },
+  { href: '/admin/notifications', label: 'Notifications', icon: Bell },
   {
     href: '/admin/members',
     label: 'Members',
@@ -147,7 +149,7 @@ export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
                   {/* Submenu */}
                   {hasSubmenu && isExpanded && (
                     <div className="ml-4 space-y-1 mt-1">
-                      {item.submenu.map((subitem) => {
+                      {item.submenu?.map((subitem) => {
                         const isSubActive = pathname === subitem.href;
                         return (
                           <Link

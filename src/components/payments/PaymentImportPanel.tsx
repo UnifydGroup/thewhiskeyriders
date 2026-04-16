@@ -162,7 +162,8 @@ export default function PaymentImportPanel({
       const sheet = workbook.Sheets[sheetName];
       setParsedSheetName(sheetName);
 
-      const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rawRows: unknown[][] = (XLSX.utils.sheet_to_json as any)(sheet, {
         header: 1,
         raw: true,          // get real JS types: numbers as numbers, Dates as Date
         cellDates: true,

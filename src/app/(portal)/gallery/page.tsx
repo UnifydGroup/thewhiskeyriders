@@ -75,7 +75,7 @@ export default function GalleryPage() {
               coverPhotoUrl: latest.media_type === 'video'
                 ? publicUrl
                 : buildOptimizedPhotoUrl(publicUrl, 'cover'),
-              coverMediaType: latest.media_type === 'video' ? 'video' : 'image',
+              coverMediaType: (latest.media_type === 'video' ? 'video' : 'image') as 'image' | 'video',
             };
           })
         );

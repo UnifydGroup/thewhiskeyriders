@@ -137,6 +137,9 @@ export async function GET(request: NextRequest) {
         query = query.eq('member_id', memberId);
       }
     } else {
+      if (!currentUserId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
       if (memberId && memberId !== currentUserId) {
         return NextResponse.json(
           { error: 'Forbidden' },

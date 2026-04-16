@@ -1,19 +1,20 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
+import type { SupabaseDatabase } from '@/lib/types/database.generated';
 import { NextRequest, NextResponse } from 'next/server';
 
 const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-let _supabaseInstance: ReturnType<typeof createClient> | null = null;
+let _supabaseInstance: ReturnType<typeof createClient<SupabaseDatabase>> | null = null;
 function _getSupabase() {
   if (!_supabaseInstance) {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
-    _supabaseInstance = createClient(_supabaseUrl, key);
+    _supabaseInstance = createClient<SupabaseDatabase>(_supabaseUrl, key);
   }
   return _supabaseInstance;
 }
-const supabase = new Proxy({} as ReturnType<typeof createClient>, {
+const supabase = new Proxy({} as ReturnType<typeof createClient<SupabaseDatabase>>, {
   get: (_t, prop) => (_getSupabase() as any)[prop],
 });
 
@@ -228,8 +229,8 @@ export async function POST(request: NextRequest) {
       trip_id: string;
       payment_date: string;
       amount: number;
-      payment_method: string | null;
-      notes: string | null;
+      payment_method?: string | null;
+      notes?: string | null;
     }> = [];
 
     const unmatched: string[] = [];

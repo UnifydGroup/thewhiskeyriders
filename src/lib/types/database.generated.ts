@@ -140,6 +140,12 @@ export type SupabaseDatabase = {
           { foreignKeyName: 'member_payments_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }
         ];
       };
+      payment_import_log: {
+        Row: { id: string; imported_at: string; replaced: boolean | null; row_count: number; trip_id: string };
+        Insert: { id?: string; imported_at?: string; replaced?: boolean | null; row_count: number; trip_id: string };
+        Update: { id?: string; imported_at?: string; replaced?: boolean | null; row_count?: number; trip_id?: string };
+        Relationships: [{ foreignKeyName: 'payment_import_log_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }];
+      };
       payment_schedule_milestones: {
         Row: {
           accumulated_amount: number;
@@ -265,6 +271,7 @@ export type SupabaseDatabase = {
           first_name: string | null;
           full_name: string | null;
           id: string;
+          member_id: string | null;
           middle_name: string | null;
           nickname: string | null;
           passport_expiry: string | null;
@@ -298,6 +305,7 @@ export type SupabaseDatabase = {
           first_name?: string | null;
           full_name?: string | null;
           id: string;
+          member_id?: string | null;
           middle_name?: string | null;
           nickname?: string | null;
           passport_expiry?: string | null;
@@ -331,6 +339,7 @@ export type SupabaseDatabase = {
           first_name?: string | null;
           full_name?: string | null;
           id?: string;
+          member_id?: string | null;
           middle_name?: string | null;
           nickname?: string | null;
           passport_expiry?: string | null;

@@ -13,11 +13,8 @@ function createAdminClient() {
   return createSupabaseClient(supabaseUrl, serviceRoleKey);
 }
 
-async function photoExistsInTrip(
-  supabase: ReturnType<typeof createSupabaseClient> | Awaited<ReturnType<typeof createClient>>,
-  tripId: string,
-  photoId: string
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function photoExistsInTrip(supabase: any, tripId: string, photoId: string) {
   const { data, error } = await supabase
     .from('photos')
     .select('id, trip_id')
@@ -32,10 +29,8 @@ async function photoExistsInTrip(
   return Boolean(data?.id);
 }
 
-async function getLikeCount(
-  supabase: ReturnType<typeof createSupabaseClient> | Awaited<ReturnType<typeof createClient>>,
-  photoId: string
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getLikeCount(supabase: any, photoId: string) {
   const { count, error } = await supabase
     .from('photo_likes')
     .select('id', { count: 'exact', head: true })

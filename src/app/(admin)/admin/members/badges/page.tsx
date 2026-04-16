@@ -392,7 +392,7 @@ export default function BadgeManagementPage() {
                 value={selectedBadge?.id || ''}
                 onChange={(e) => {
                   const badge = assignableBadges.find((b) => b.id === e.target.value);
-                  setSelectedBadge(badge);
+                  setSelectedBadge(badge ?? null);
                 }}
                 className="w-full bg-brand-black/50 border border-brand-brown/20 rounded px-3 py-2 text-brand-cream text-sm"
                 disabled={!selectedTripForAssignment}

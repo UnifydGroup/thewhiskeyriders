@@ -149,7 +149,7 @@ export default function TripGalleryPage() {
       });
 
       setTrip(tripData as Trip);
-      setPhotos(photosWithUrls);
+      setPhotos(photosWithUrls as Photo[]);
       setErrorMessage(null);
     } catch (err) {
       console.error('Failed to load trip gallery:', err);
