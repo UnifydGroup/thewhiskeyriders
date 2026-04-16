@@ -10,10 +10,14 @@ import {
   BookOpen, ChevronDown, ChevronUp, Info,
 } from 'lucide-react';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
+import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
+import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Category { id: string; name: string; planned_aud: number; color: string; sort_order: number; notes: string | null; spent_aud?: number; remaining_aud?: number; over_budget?: boolean; }
+type BudgetPartBasis = 'per_person' | 'group';
+interface BudgetPart { id: string; name: string; basis: BudgetPartBasis; amount_aud: number; member_count: number; }
 interface Expense {
   id: string; description: string; amount: number; currency: string; amount_aud: number;
   expense_date: string; category: { id: string; name: string; color: string } | null;
@@ -23,6 +27,8 @@ interface Expense {
 }
 interface LedgerRow { id: string; type: 'income' | 'expense'; sub_type: string; date: string; description: string; amount_aud: number; running_balance: number; reconciled: boolean; source: string; category?: any; notes?: string | null; }
 interface MemberPayment { id: string; member_id: string; payment_date: string; amount: number; payment_method: string | null; notes: string | null; profiles?: { full_name: string | null; nickname: string | null }; }
+interface PaymentMilestone { id: string; trip_id: string; milestone_date: string; accumulated_amount: number; description: string; }
+interface MemberPaymentSummary { member_id: string; full_name: string; nickname?: string | null; total_paid: number; payment_count: number; last_payment_date: string | null; }
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
 interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; remaining_aud: number; }
 interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; unreconciled_count: number; }
@@ -36,6 +42,82 @@ const DEFAULT_CATEGORIES = [
   { name: 'Food & Drink', color: '#C9B98A' }, { name: 'Gear & Equipment', color: '#8B6BAE' },
   { name: 'Visas & Insurance', color: '#6BAEAE' }, { name: 'Contingency', color: '#888888' },
 ];
+
+function createBudgetPart(defaultMemberCount: number): BudgetPart {
+  return {
+    id: `part-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    basis: 'per_person',
+    amount_aud: 0,
+    member_count: Math.max(1, defaultMemberCount),
+  };
+}
+
+function normaliseBudgetParts(parts: BudgetPart[], defaultMemberCount: number): BudgetPart[] {
+  const safeDefault = Math.max(1, defaultMemberCount);
+  return parts
+    .map((part) => ({
+      id: part.id || `part-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: (part.name || '').trim(),
+      basis: part.basis === 'group' ? 'group' : 'per_person',
+      amount_aud: Number.isFinite(Number(part.amount_aud)) ? Math.max(0, Number(part.amount_aud)) : 0,
+      member_count: Number.isFinite(Number(part.member_count)) ? Math.max(1, Math.floor(Number(part.member_count))) : safeDefault,
+    }))
+    .filter((part) => part.name.length > 0 || part.amount_aud > 0);
+}
+
+function getBudgetPartTotal(part: BudgetPart) {
+  return part.basis === 'per_person'
+    ? Number(part.amount_aud) * Number(part.member_count)
+    : Number(part.amount_aud);
+}
+
+function getCategoryTotalFromParts(parts: BudgetPart[]) {
+  return parts.reduce((sum, part) => sum + getBudgetPartTotal(part), 0);
+}
+
+function parseCategoryNotes(
+  rawNotes: string | null,
+  plannedAud: number,
+  defaultMemberCount: number
+): { notesText: string; parts: BudgetPart[] } {
+  const fallbackPart: BudgetPart = {
+    id: `part-fallback-${Date.now()}`,
+    name: 'Main',
+    basis: 'group',
+    amount_aud: Number(plannedAud) || 0,
+    member_count: Math.max(1, defaultMemberCount),
+  };
+  if (!rawNotes) {
+    return { notesText: '', parts: [fallbackPart] };
+  }
+
+  try {
+    const parsed = JSON.parse(rawNotes);
+    if (parsed && typeof parsed === 'object') {
+      const partsRaw = Array.isArray((parsed as any).parts) ? (parsed as any).parts : [];
+      const normalised = normaliseBudgetParts(partsRaw as BudgetPart[], defaultMemberCount);
+      return {
+        notesText: typeof (parsed as any).notes_text === 'string'
+          ? (parsed as any).notes_text
+          : '',
+        parts: normalised.length > 0 ? normalised : [fallbackPart],
+      };
+    }
+  } catch {
+    // Backwards compatibility for plain-text notes
+  }
+
+  return { notesText: rawNotes, parts: [fallbackPart] };
+}
+
+function encodeCategoryNotes(notesText: string, parts: BudgetPart[]): string | null {
+  const payload = {
+    notes_text: notesText.trim() || null,
+    parts,
+  };
+  return JSON.stringify(payload);
+}
 
 function fmt(n: number) { return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function fmtSigned(n: number) { return (n >= 0 ? '+' : '') + fmt(n); }
@@ -61,6 +143,8 @@ export default function AdminBudgetPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [memberPayments, setMemberPayments] = useState<MemberPayment[]>([]);
+  const [paymentSchedule, setPaymentSchedule] = useState<PaymentMilestone[]>([]);
+  const [memberPaymentSummary, setMemberPaymentSummary] = useState<MemberPaymentSummary[]>([]);
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [memberBreakdown, setMemberBreakdown] = useState<MemberBreakdown[]>([]);
   const [tripMembers, setTripMembers] = useState<{ id: string; full_name: string | null; nickname: string | null }[]>([]);
@@ -79,12 +163,29 @@ export default function AdminBudgetPage() {
 
   // UI state — income form
   const [showIncomeForm, setShowIncomeForm] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showPaymentImport, setShowPaymentImport] = useState(false);
+  const [showLegacyPaymentSection, setShowLegacyPaymentSection] = useState(true);
+  const [showPlannerIncomeSection, setShowPlannerIncomeSection] = useState(true);
   const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', notes: '' });
+  const [paymentForm, setPaymentForm] = useState({
+    member_id: '',
+    amount: '',
+    payment_date: new Date().toISOString().split('T')[0],
+    payment_method: 'bank_transfer',
+    notes: '',
+  });
+  const [lastImport, setLastImport] = useState<{ imported_at: string; row_count: number } | null>(null);
 
   // UI state — category form
   const [showCatForm, setShowCatForm] = useState(false);
   const [editingCat, setEditingCat] = useState<Category | null>(null);
-  const [catForm, setCatForm] = useState({ name: '', planned_aud: '', color: '#B5621E', notes: '' });
+  const [catForm, setCatForm] = useState({
+    name: '',
+    color: '#B5621E',
+    notes_text: '',
+    parts: [createBudgetPart(1)] as BudgetPart[],
+  });
 
   const showToast = (type: 'success' | 'error', msg: string) => { setToast({ type, msg }); setTimeout(() => setToast(null), 4000); };
 
@@ -109,6 +210,24 @@ export default function AdminBudgetPage() {
       setIncomeEntries(d.income_entries ?? []);
       setMemberBreakdown(d.member_breakdown ?? []);
       if (d.settings) setSettings(d.settings);
+
+      const paymentRes = await fetch(`/api/payments/schedule?trip_id=${tripId}`, { headers: h });
+      if (paymentRes.ok) {
+        const paymentJson = await paymentRes.json();
+        setPaymentSchedule(paymentJson.schedule ?? []);
+        setMemberPaymentSummary(paymentJson.memberPaymentSummary ?? []);
+      } else {
+        setPaymentSchedule([]);
+        setMemberPaymentSummary([]);
+      }
+
+      const logRes = await fetch(`/api/payments/import-log?trip_id=${tripId}`, { headers: h });
+      if (logRes.ok) {
+        const logData = await logRes.json();
+        setLastImport(logData.log ?? null);
+      } else {
+        setLastImport(null);
+      }
     } catch { showToast('error', 'Failed to load budget data'); }
     finally { setLoading(false); }
   }, [tripId, getAuthHeader]);
@@ -234,20 +353,109 @@ export default function AdminBudgetPage() {
     } catch { showToast('error', 'Failed to delete income entry'); }
   };
 
+  const handleSavePayment = async () => {
+    if (!paymentForm.member_id || !paymentForm.amount || !paymentForm.payment_date) {
+      return showToast('error', 'Member, amount and date are required');
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch('/api/payments/member-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: paymentForm.member_id,
+          trip_id: tripId,
+          payment_date: paymentForm.payment_date,
+          amount: parseFloat(paymentForm.amount),
+          payment_method: paymentForm.payment_method || 'bank_transfer',
+          notes: paymentForm.notes || null,
+        }),
+      });
+      if (!res.ok) throw new Error();
+
+      showToast('success', 'Payment recorded');
+      setShowPaymentForm(false);
+      setPaymentForm({
+        member_id: '',
+        amount: '',
+        payment_date: new Date().toISOString().split('T')[0],
+        payment_method: 'bank_transfer',
+        notes: '',
+      });
+      fetchData();
+    } catch {
+      showToast('error', 'Failed to record payment');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Category CRUD ─────────────────────────────────────────────────────────
 
+  const defaultParticipantCount = Math.max(1, overview?.member_count || tripMembers.length || 1);
+
   const openCatForm = (cat?: Category) => {
-    if (cat) { setEditingCat(cat); setCatForm({ name: cat.name, planned_aud: String(cat.planned_aud), color: cat.color, notes: cat.notes ?? '' }); }
-    else { setEditingCat(null); setCatForm({ name: '', planned_aud: '', color: '#B5621E', notes: '' }); }
+    if (cat) {
+      const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
+      setEditingCat(cat);
+      setCatForm({
+        name: cat.name,
+        color: cat.color,
+        notes_text: parsed.notesText,
+        parts: parsed.parts,
+      });
+    } else {
+      setEditingCat(null);
+      setCatForm({
+        name: '',
+        color: '#B5621E',
+        notes_text: '',
+        parts: [createBudgetPart(defaultParticipantCount)],
+      });
+    }
     setShowCatForm(true);
   };
 
+  const updateCatPart = (partId: string, patch: Partial<BudgetPart>) => {
+    setCatForm((prev) => ({
+      ...prev,
+      parts: prev.parts.map((part) => part.id === partId ? { ...part, ...patch } : part),
+    }));
+  };
+
+  const addCatPart = () => {
+    setCatForm((prev) => ({
+      ...prev,
+      parts: [...prev.parts, createBudgetPart(defaultParticipantCount)],
+    }));
+  };
+
+  const removeCatPart = (partId: string) => {
+    setCatForm((prev) => {
+      const remaining = prev.parts.filter((part) => part.id !== partId);
+      return {
+        ...prev,
+        parts: remaining.length > 0 ? remaining : [createBudgetPart(defaultParticipantCount)],
+      };
+    });
+  };
+
   const handleSaveCat = async () => {
-    if (!catForm.name || !catForm.planned_aud) return showToast('error', 'Name and amount required');
+    if (!catForm.name.trim()) return showToast('error', 'Category name is required');
+    const parts = normaliseBudgetParts(catForm.parts, defaultParticipantCount);
+    if (parts.length === 0) return showToast('error', 'Add at least one budget part');
+
+    const planned_aud = getCategoryTotalFromParts(parts);
     setSaving(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const body = JSON.stringify({ name: catForm.name, planned_aud: catForm.planned_aud, color: catForm.color, notes: catForm.notes || null });
+      const body = JSON.stringify({
+        name: catForm.name.trim(),
+        planned_aud,
+        color: catForm.color,
+        notes: encodeCategoryNotes(catForm.notes_text, parts),
+      });
       const url = editingCat ? `/api/trips/${tripId}/budget/categories/${editingCat.id}` : `/api/trips/${tripId}/budget/categories`;
       const res = await fetch(url, { method: editingCat ? 'PUT' : 'POST', headers: h, body });
       if (!res.ok) throw new Error();
@@ -305,6 +513,12 @@ export default function AdminBudgetPage() {
   const unreconciledExpenses = expenses.filter((e) => !e.reconciled && e.source === 'manual');
   const unreconciledIncome = incomeEntries.filter((e) => !e.reconciled);
   const totalUnreconciled = unreconciledExpenses.length + unreconciledIncome.length;
+  const targetAmount = paymentSchedule.length > 0 ? paymentSchedule[paymentSchedule.length - 1].accumulated_amount : 5000;
+  const membersPaidCount = memberPaymentSummary.filter((m) => m.total_paid > 0).length;
+  const today = new Date();
+  const passedMilestones = paymentSchedule.filter((m) => new Date(m.milestone_date) <= today);
+  const expectedByMilestone = passedMilestones.length > 0 ? passedMilestones[passedMilestones.length - 1].accumulated_amount : 0;
+  const nextMilestone = paymentSchedule.find((m) => new Date(m.milestone_date) > today);
 
   if (loading) return (
     <div className="flex items-center justify-center py-24">
@@ -569,36 +783,157 @@ export default function AdminBudgetPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-brand-cream/60 text-sm">Member payments pulled from the payment tracker, plus any manual income entries</p>
+              <p className="text-brand-cream/60 text-sm">Manage member payments and additional income in one place</p>
             </div>
-            <button onClick={() => setShowIncomeForm(!showIncomeForm)} className="flex items-center gap-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black px-4 py-2 rounded-lg text-sm font-semibold">
-              <Plus className="w-4 h-4" /> Add Income Entry
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowPaymentForm(!showPaymentForm);
+                  setShowLegacyPaymentSection(true);
+                  setShowIncomeForm(false);
+                  setShowPaymentImport(false);
+                }}
+                className="flex items-center gap-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black px-4 py-2 rounded-lg text-sm font-semibold"
+              >
+                <Plus className="w-4 h-4" /> Record Payment
+              </button>
+              <button
+                onClick={() => {
+                  setShowPaymentImport(!showPaymentImport);
+                  setShowLegacyPaymentSection(true);
+                  setShowPaymentForm(false);
+                  setShowIncomeForm(false);
+                }}
+                className="flex items-center gap-2 border border-brand-tan/40 hover:border-brand-tan text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10"
+              >
+                <Upload className="w-4 h-4" /> Import Payments
+              </button>
+              <button
+                onClick={() => {
+                  setShowIncomeForm(!showIncomeForm);
+                  setShowPlannerIncomeSection(true);
+                  setShowPaymentForm(false);
+                  setShowPaymentImport(false);
+                }}
+                className="flex items-center gap-2 border border-brand-tan/40 hover:border-brand-tan text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10"
+              >
+                <Plus className="w-4 h-4" /> Add Other Income
+              </button>
+            </div>
           </div>
 
-          {showIncomeForm && (
+          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setShowLegacyPaymentSection((prev) => !prev)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-brand-tan/5 transition-colors"
+            >
+              <div className="text-left">
+                <h3 className="font-semibold text-brand-cream">Legacy Payment Tracker</h3>
+                <p className="text-xs text-brand-cream/40 mt-0.5">Existing tracker controls and milestone status</p>
+              </div>
+              {showLegacyPaymentSection ? <ChevronUp className="w-5 h-5 text-brand-cream/50" /> : <ChevronDown className="w-5 h-5 text-brand-cream/50" />}
+            </button>
+
+            {showLegacyPaymentSection && (
+              <div className="p-4 border-t border-brand-tan/20 space-y-4">
+
+          {lastImport && (
+            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg px-4 py-3">
+              <p className="text-xs text-brand-cream/40 uppercase tracking-wide">Payments last imported</p>
+              <p className="text-sm text-brand-cream">
+                {new Date(lastImport.imported_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} · {lastImport.row_count} rows
+              </p>
+            </div>
+          )}
+
+          {showPaymentImport && (
+            <PaymentImportPanel
+              tripId={tripId}
+              onClose={() => setShowPaymentImport(false)}
+              onImportComplete={() => {
+                setShowPaymentImport(false);
+                fetchData();
+              }}
+            />
+          )}
+
+          {showPaymentForm && (
             <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-lg p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-brand-cream">New Income Entry</h3>
-                <button onClick={() => setShowIncomeForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
+                <h3 className="font-semibold text-brand-cream">Record Member Payment</h3>
+                <button onClick={() => setShowPaymentForm(false)} className="text-brand-cream/40 hover:text-brand-cream">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2"><label className="block text-xs font-medium text-brand-cream/60 mb-1">Description</label>
-                  <input value={incomeForm.description} onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="e.g. Sponsorship from XYZ" /></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD)</label>
-                  <input type="number" min="0" step="0.01" value={incomeForm.amount_aud} onChange={(e) => setIncomeForm({ ...incomeForm, amount_aud: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Date</label>
-                  <input type="date" value={incomeForm.income_date} onChange={(e) => setIncomeForm({ ...incomeForm, income_date: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Category</label>
-                  <select value={incomeForm.category} onChange={(e) => setIncomeForm({ ...incomeForm, category: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan">
-                    <option value="member_payment">Member Payment</option><option value="refund">Refund</option><option value="sponsorship">Sponsorship</option><option value="other">Other</option>
-                  </select></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
-                  <input value={incomeForm.notes} onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Member</label>
+                  <select
+                    value={paymentForm.member_id}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, member_id: e.target.value })}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  >
+                    <option value="">— Select member —</option>
+                    {memberPaymentSummary.length > 0
+                      ? memberPaymentSummary.map((m) => (
+                          <option key={m.member_id} value={m.member_id}>
+                            {getMemberListName(m as any)}
+                          </option>
+                        ))
+                      : tripMembers.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nickname || m.full_name || m.id}
+                          </option>
+                        ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Date</label>
+                  <input
+                    type="date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Method</label>
+                  <select
+                    value={paymentForm.payment_method}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, payment_method: e.target.value })}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  >
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="payid">PayID</option>
+                    <option value="cash">Cash</option>
+                    <option value="credit_card">Credit Card</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
+                  <input
+                    value={paymentForm.notes}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-3 mt-4">
-                <button onClick={() => setShowIncomeForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                <button onClick={handleSaveIncome} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Add Entry'}</button>
+                <button onClick={() => setShowPaymentForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                <button onClick={handleSavePayment} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Record Payment'}</button>
               </div>
             </div>
           )}
@@ -629,30 +964,234 @@ export default function AdminBudgetPage() {
             )}
           </div>
 
-          {/* Manual income entries */}
-          {incomeEntries.length > 0 && (
-            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
-              <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
-                <h3 className="font-semibold text-brand-cream">Other Income</h3>
-                <span className="text-green-400 font-semibold">{fmt(incomeEntries.reduce((s, e) => s + e.amount_aud, 0))}</span>
-              </div>
-              <table className="w-full text-sm">
-                <thead className="bg-brand-black"><tr>{['Date','Description','Category','Amount','Reconciled',''].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
-                <tbody className="divide-y divide-brand-tan/10">
-                  {incomeEntries.map((e) => (
-                    <tr key={e.id} className="hover:bg-brand-tan/5">
-                      <td className="px-4 py-3 text-brand-cream/60">{fmtShort(e.income_date)}</td>
-                      <td className="px-4 py-3 text-brand-cream">{e.description}</td>
-                      <td className="px-4 py-3 text-brand-cream/50 capitalize">{e.category?.replace('_', ' ') || '—'}</td>
-                      <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
-                      <td className="px-4 py-3">{e.reconciled ? <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />Yes</span> : <button onClick={() => handleReconcile('income', e.id, true)} className="text-xs text-amber-400 hover:underline">Mark reconciled</button>}</td>
-                      <td className="px-4 py-3"><button onClick={() => handleDeleteIncome(e.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Legacy Payment Tracker View */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-brand-cream">Payment Tracker Status</h3>
+              <p className="text-xs text-brand-cream/40">Legacy view retained in Financial Manager</p>
             </div>
-          )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
+                <p className="text-sm text-brand-cream/70 mb-1">Total Members</p>
+                <p className="text-3xl font-bold text-brand-cream">
+                  {memberPaymentSummary.length}
+                </p>
+              </div>
+
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
+                <p className="text-sm text-brand-cream/70 mb-1">Members Paid</p>
+                <p className="text-3xl font-bold text-brand-tan">
+                  {membersPaidCount}
+                </p>
+              </div>
+
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
+                <p className="text-sm text-brand-cream/70 mb-1">Target Amount</p>
+                <p className="text-3xl font-bold text-brand-tan">
+                  ${targetAmount.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-brand-black border-b border-brand-tan/20">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Member
+                      </th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Total Paid
+                      </th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Remaining
+                      </th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Payments
+                      </th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Last Payment
+                      </th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
+                        Milestone Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {memberPaymentSummary.map((member) => {
+                      const remaining = Math.max(0, targetAmount - member.total_paid);
+                      const percentPaid = targetAmount > 0 ? (member.total_paid / targetAmount) * 100 : 0;
+                      const isFullyPaid = member.total_paid >= targetAmount;
+                      const isAhead = !isFullyPaid && member.total_paid > expectedByMilestone;
+                      const isOnTrack = !isFullyPaid && member.total_paid >= expectedByMilestone;
+
+                      return (
+                        <tr
+                          key={member.member_id}
+                          className="border-b border-brand-tan/10 hover:bg-brand-dark-grey/50"
+                        >
+                          <td className="px-6 py-4">
+                            <p className="font-medium text-brand-cream">{getMemberDisplayName(member as any)}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="font-semibold text-brand-tan">
+                              ${member.total_paid.toFixed(2)}
+                            </p>
+                            <p className="text-xs text-brand-cream/50 mt-1">{percentPaid.toFixed(0)}%</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className={`font-semibold ${remaining > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                              ${remaining.toFixed(2)}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="text-brand-cream/70">{member.payment_count}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <p className="text-brand-cream/70">
+                              {member.last_payment_date
+                                ? new Date(member.last_payment_date).toLocaleDateString()
+                                : '-'}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4">
+                            {isFullyPaid ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-900/40 text-green-300 rounded-full text-sm font-medium border border-green-500/40 mb-1">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  Paid in Full
+                                </span>
+                              </div>
+                            ) : isAhead ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-blue-900/30 text-blue-400 rounded-full text-sm font-medium border border-blue-600/30 mb-1">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  Ahead
+                                </span>
+                                <p className="text-xs text-blue-400/70 mt-1">
+                                  +${(member.total_paid - expectedByMilestone).toFixed(2)} ahead of schedule
+                                </p>
+                                {nextMilestone && (
+                                  <p className="text-xs text-blue-400/50">
+                                    Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                  </p>
+                                )}
+                              </div>
+                            ) : isOnTrack ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-900/30 text-green-400 rounded-full text-sm font-medium border border-green-600/30 mb-1">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  On Track
+                                </span>
+                                {nextMilestone ? (
+                                  <p className="text-xs text-green-400/70 mt-1">
+                                    Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-green-400/70 mt-1">Final milestone reached</p>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-900/30 text-red-400 rounded-full text-sm font-medium border border-red-600/30 mb-1">
+                                  Behind
+                                </span>
+                                <p className="text-xs text-red-400/70 mt-1">
+                                  ${(expectedByMilestone - member.total_paid).toFixed(2)} overdue
+                                </p>
+                                {nextMilestone && (
+                                  <p className="text-xs text-red-400/50">
+                                    Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setShowPlannerIncomeSection((prev) => !prev)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-brand-tan/5 transition-colors"
+            >
+              <div className="text-left">
+                <h3 className="font-semibold text-brand-cream">Financial Planner Income</h3>
+                <p className="text-xs text-brand-cream/40 mt-0.5">Manual income entries for sponsorships, refunds, and other non-member income</p>
+              </div>
+              {showPlannerIncomeSection ? <ChevronUp className="w-5 h-5 text-brand-cream/50" /> : <ChevronDown className="w-5 h-5 text-brand-cream/50" />}
+            </button>
+
+            {showPlannerIncomeSection && (
+              <div className="p-4 border-t border-brand-tan/20 space-y-4">
+                {showIncomeForm && (
+                  <div className="bg-brand-black/30 border border-brand-tan/30 rounded-lg p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-brand-cream">New Income Entry</h3>
+                      <button onClick={() => setShowIncomeForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="md:col-span-2"><label className="block text-xs font-medium text-brand-cream/60 mb-1">Description</label>
+                        <input value={incomeForm.description} onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="e.g. Sponsorship from XYZ" /></div>
+                      <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD)</label>
+                        <input type="number" min="0" step="0.01" value={incomeForm.amount_aud} onChange={(e) => setIncomeForm({ ...incomeForm, amount_aud: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+                      <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Date</label>
+                        <input type="date" value={incomeForm.income_date} onChange={(e) => setIncomeForm({ ...incomeForm, income_date: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+                      <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Category</label>
+                        <select value={incomeForm.category} onChange={(e) => setIncomeForm({ ...incomeForm, category: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan">
+                          <option value="member_payment">Member Payment</option><option value="refund">Refund</option><option value="sponsorship">Sponsorship</option><option value="other">Other</option>
+                        </select></div>
+                      <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
+                        <input value={incomeForm.notes} onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-4">
+                      <button onClick={() => setShowIncomeForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                      <button onClick={handleSaveIncome} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Add Entry'}</button>
+                    </div>
+                  </div>
+                )}
+
+                {incomeEntries.length > 0 ? (
+                  <div className="bg-brand-black/30 border border-brand-tan/20 rounded-xl overflow-hidden">
+                    <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
+                      <h3 className="font-semibold text-brand-cream">Other Income</h3>
+                      <span className="text-green-400 font-semibold">{fmt(incomeEntries.reduce((s, e) => s + e.amount_aud, 0))}</span>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-brand-black"><tr>{['Date','Description','Category','Amount','Reconciled',''].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+                      <tbody className="divide-y divide-brand-tan/10">
+                        {incomeEntries.map((e) => (
+                          <tr key={e.id} className="hover:bg-brand-tan/5">
+                            <td className="px-4 py-3 text-brand-cream/60">{fmtShort(e.income_date)}</td>
+                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+                            <td className="px-4 py-3 text-brand-cream/50 capitalize">{e.category?.replace('_', ' ') || '—'}</td>
+                            <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
+                            <td className="px-4 py-3">{e.reconciled ? <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />Yes</span> : <button onClick={() => handleReconcile('income', e.id, true)} className="text-xs text-amber-400 hover:underline">Mark reconciled</button>}</td>
+                            <td className="px-4 py-3"><button onClick={() => handleDeleteIncome(e.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="bg-brand-black/30 border border-brand-tan/20 rounded-lg py-8 text-center text-brand-cream/40 text-sm">
+                    No manual income entries yet
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -927,11 +1466,103 @@ export default function AdminBudgetPage() {
                 <h3 className="font-semibold text-brand-cream">{editingCat ? 'Edit' : 'New'} Category</h3>
                 <button onClick={() => setShowCatForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Name</label><input value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Budget (AUD)</label><input type="number" min="0" step="100" value={catForm.planned_aud} onChange={(e) => setCatForm({ ...catForm, planned_aud: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Colour</label><div className="flex gap-2 flex-wrap">{CATEGORY_COLORS.map((c) => <button key={c} onClick={() => setCatForm({ ...catForm, color: c })} className={`w-7 h-7 rounded-full border-2 transition-all ${catForm.color === c ? 'border-white scale-125' : 'border-transparent'}`} style={{ backgroundColor: c }} />)}</div></div>
-                <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><input value={catForm.notes} onChange={(e) => setCatForm({ ...catForm, notes: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Name</label>
+                    <input value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Colour</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {CATEGORY_COLORS.map((c) => (
+                        <button key={c} onClick={() => setCatForm({ ...catForm, color: c })} className={`w-7 h-7 rounded-full border-2 transition-all ${catForm.color === c ? 'border-white scale-125' : 'border-transparent'}`} style={{ backgroundColor: c }} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
+                    <textarea rows={2} value={catForm.notes_text} onChange={(e) => setCatForm({ ...catForm, notes_text: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
+                  </div>
+                </div>
+
+                <div className="border border-brand-tan/20 rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 bg-brand-black/40 border-b border-brand-tan/20 flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-brand-cream text-sm">Budget Parts</p>
+                      <p className="text-xs text-brand-cream/40">Split a category into multiple items (e.g. international + internal flights)</p>
+                    </div>
+                    <button onClick={addCatPart} className="text-xs px-3 py-1.5 rounded border border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10">
+                      <Plus className="w-3.5 h-3.5 inline mr-1" />
+                      Add Part
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-brand-tan/10">
+                    {catForm.parts.map((part) => (
+                      <div key={part.id} className="p-4 space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                          <div className="md:col-span-2">
+                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Part Name</label>
+                            <input
+                              value={part.name}
+                              onChange={(e) => updateCatPart(part.id, { name: e.target.value })}
+                              placeholder="e.g. International flight"
+                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Pricing</label>
+                            <select
+                              value={part.basis}
+                              onChange={(e) => updateCatPart(part.id, { basis: e.target.value as BudgetPartBasis })}
+                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                            >
+                              <option value="per_person">Per Person</option>
+                              <option value="group">Group</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">{part.basis === 'per_person' ? 'Amount per Person' : 'Group Amount'} (AUD)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={part.amount_aud}
+                              onChange={(e) => updateCatPart(part.id, { amount_aud: parseFloat(e.target.value) || 0 })}
+                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Members</label>
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              disabled={part.basis === 'group'}
+                              value={part.member_count}
+                              onChange={(e) => updateCatPart(part.id, { member_count: Math.max(1, parseInt(e.target.value || '1', 10)) })}
+                              className={`w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan ${part.basis === 'group' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-sm">
+                          <p className="text-brand-cream/50">Part total: <span className="text-brand-tan font-semibold">{fmt(getBudgetPartTotal(part))}</span></p>
+                          <button onClick={() => removeCatPart(part.id)} className="text-brand-cream/40 hover:text-red-400 text-xs">
+                            <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                            Remove part
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-brand-black/40 border border-brand-tan/20 rounded-lg px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-brand-cream/60">Category total</span>
+                  <span className="text-lg font-semibold text-brand-tan">{fmt(getCategoryTotalFromParts(normaliseBudgetParts(catForm.parts, defaultParticipantCount)))}</span>
+                </div>
               </div>
               <div className="flex justify-end gap-3 mt-4">
                 <button onClick={() => setShowCatForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
@@ -947,16 +1578,22 @@ export default function AdminBudgetPage() {
               <table className="w-full text-sm">
                 <thead className="bg-brand-black"><tr>{['','Category','Budget','Spent','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-brand-tan/10">
-                  {categories.map((cat) => (
-                    <tr key={cat.id} className="hover:bg-brand-tan/5">
-                      <td className="px-4 py-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} /></td>
-                      <td className="px-4 py-3 font-medium text-brand-cream">{cat.name}</td>
-                      <td className="px-4 py-3 text-brand-cream/70">{fmt(cat.planned_aud)}</td>
-                      <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400' : 'text-brand-cream/70'}>{fmt(cat.spent_aud ?? 0)}</span></td>
-                      <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400 font-semibold' : 'text-green-400'}>{fmt(Math.abs(cat.remaining_aud ?? 0))}{cat.over_budget ? ' over' : ''}</span></td>
-                      <td className="px-4 py-3"><div className="flex gap-1"><button onClick={() => openCatForm(cat)} className="p-1 text-brand-cream/30 hover:text-brand-cream"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleDeleteCat(cat.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></div></td>
-                    </tr>
-                  ))}
+                  {categories.map((cat) => {
+                    const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
+                    return (
+                      <tr key={cat.id} className="hover:bg-brand-tan/5">
+                        <td className="px-4 py-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} /></td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-brand-cream">{cat.name}</p>
+                          <p className="text-xs text-brand-cream/40">{parsed.parts.length} part{parsed.parts.length === 1 ? '' : 's'}</p>
+                        </td>
+                        <td className="px-4 py-3 text-brand-cream/70">{fmt(cat.planned_aud)}</td>
+                        <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400' : 'text-brand-cream/70'}>{fmt(cat.spent_aud ?? 0)}</span></td>
+                        <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400 font-semibold' : 'text-green-400'}>{fmt(Math.abs(cat.remaining_aud ?? 0))}{cat.over_budget ? ' over' : ''}</span></td>
+                        <td className="px-4 py-3"><div className="flex gap-1"><button onClick={() => openCatForm(cat)} className="p-1 text-brand-cream/30 hover:text-brand-cream"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleDeleteCat(cat.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></div></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -972,7 +1609,6 @@ export default function AdminBudgetPage() {
           <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-4">
             <h3 className="font-semibold text-brand-cream">Budget Configuration</h3>
             <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Total Budget (AUD)</label><input type="number" min="0" step="100" value={settings.total_budget_aud} onChange={(e) => setSettings({ ...settings, total_budget_aud: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /><p className="text-xs text-brand-cream/30 mt-1">Used for cost-share calculation per member</p></div>
-            <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">MAD → AUD Exchange Rate</label><input type="number" min="0" step="0.000001" value={settings.exchange_rate_mad_aud} onChange={(e) => setSettings({ ...settings, exchange_rate_mad_aud: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /><p className="text-xs text-brand-cream/30 mt-1">Default rate for MAD expense entries</p></div>
             <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><textarea rows={3} value={settings.notes ?? ''} onChange={(e) => setSettings({ ...settings, notes: e.target.value || null })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
           </div>
 

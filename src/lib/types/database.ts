@@ -254,6 +254,27 @@ export interface TripBudgetSettings {
   updated_at: string;
 }
 
+export interface TripPaymentSettings {
+  id: string;
+  trip_id: string;
+  flights_cost_aud: number;
+  show_payment_options: boolean;
+  monthly_option_title: string;
+  monthly_option_amount_label: string | null;
+  monthly_option_description: string | null;
+  quarterly_option_title: string;
+  quarterly_option_amount_label: string | null;
+  quarterly_option_description: string | null;
+  show_bank_details: boolean;
+  bank_account_name: string | null;
+  bank_bsb: string | null;
+  bank_account_number: string | null;
+  bank_payid: string | null;
+  bank_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TripBudgetCategory {
   id: string;
   trip_id: string;
@@ -517,6 +538,11 @@ export interface Database {
         Row: TripIncomeEntry;
         Insert: Omit<TripIncomeEntry, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<TripIncomeEntry, 'id' | 'created_at' | 'trip_id'>>;
+      };
+      trip_payment_settings: {
+        Row: TripPaymentSettings;
+        Insert: Omit<TripPaymentSettings, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<TripPaymentSettings, 'id' | 'created_at' | 'trip_id'>>;
       };
       activity_logs: {
         Row: ActivityLog;

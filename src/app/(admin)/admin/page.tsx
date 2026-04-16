@@ -212,9 +212,9 @@ export default function AdminDashboardPage() {
                 <DollarSign className="w-6 h-6 text-brand-brown" />
               </div>
             </div>
-            <Link href="/admin/payments/manage">
+            <Link href="/admin/financial-manager">
               <Button variant="outline" size="sm" className="w-full">
-                Review Payments
+                Open Financial Manager
               </Button>
             </Link>
           </CardContent>
@@ -247,7 +247,7 @@ export default function AdminDashboardPage() {
         <CardContent>
           <div className="space-y-3">
             <p className="text-brand-cream/70">
-              Use the navigation menu to manage trips, members, and payments. All changes are logged for audit purposes.
+              Use the navigation menu to manage trips, members, and finances. All changes are logged for audit purposes.
             </p>
           </div>
         </CardContent>

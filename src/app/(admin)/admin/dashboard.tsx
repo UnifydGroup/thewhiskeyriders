@@ -80,7 +80,7 @@ export default function AdminDashboard() {
       label: 'Revenue',
       value: `$${stats?.totalRevenue || 0}`,
       color: 'bg-green-500/10 border-green-500/30',
-      href: '/admin/payments/manage',
+      href: '/admin/financial-manager',
     },
     {
       icon: Camera,
@@ -97,7 +97,7 @@ export default function AdminDashboard() {
       label: 'Pending Payments',
       value: stats?.pendingPayments || 0,
       color: 'text-red-400',
-      href: '/admin/payments/manage',
+      href: '/admin/financial-manager',
     },
     {
       icon: Clock,
@@ -174,10 +174,10 @@ export default function AdminDashboard() {
               Manage Members
             </Button>
           </Link>
-          <Link href="/admin/payments/manage">
+          <Link href="/admin/financial-manager">
             <Button variant="secondary" className="w-full">
               <DollarSign size={18} className="mr-2" />
-              Payments
+              Financial Manager
             </Button>
           </Link>
           <Link href="/admin/galleries">

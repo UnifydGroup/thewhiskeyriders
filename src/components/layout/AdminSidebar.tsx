@@ -56,8 +56,8 @@ const adminNavItems: AdminNavItem[] = [
     ],
   },
   {
-    href: '/admin/payments/manage',
-    label: 'Payments',
+    href: '/admin/financial-manager',
+    label: 'Financial Manager',
     icon: DollarSign,
   },
   { href: '/admin/activity-log', label: 'Activity Log', icon: Activity },
@@ -113,7 +113,10 @@ export function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
           <nav className="flex-1 space-y-2">
             {adminNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href || pathname.startsWith(item.href);
+              const isFinancialManagerActive = item.href === '/admin/financial-manager'
+                && (pathname.startsWith('/admin/financial-manager')
+                  || (/^\/admin\/trips\/[^/]+\/budget$/.test(pathname)));
+              const isActive = isFinancialManagerActive || pathname === item.href || pathname.startsWith(item.href);
               const hasSubmenu = item.submenu && item.submenu.length > 0;
               const isExpanded = expandedItems.includes(item.href);
 

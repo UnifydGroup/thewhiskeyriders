@@ -239,11 +239,8 @@ export default function TripEditorPage() {
         <Link href={`/admin/trips/${tripId}/documents`}>
           <Button variant="secondary">Manage Documents</Button>
         </Link>
-        <Link href={`/admin/trips/${tripId}/payments`}>
-          <Button variant="secondary">Manage Payments</Button>
-        </Link>
-        <Link href={`/admin/trips/${tripId}/budget`}>
-          <Button variant="secondary">Manage Budget</Button>
+        <Link href={`/admin/financial-manager?trip_id=${tripId}`}>
+          <Button variant="secondary">Financial Manager</Button>
         </Link>
         <Link href={`/admin/trips/${tripId}/awards`}>
           <Button variant="secondary">Manage Awards</Button>

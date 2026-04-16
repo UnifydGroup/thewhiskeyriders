@@ -871,6 +871,39 @@ export type SupabaseDatabase = {
           { foreignKeyName: 'trip_income_entries_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }
         ];
       };
+      trip_payment_settings: {
+        Row: {
+          id: string; trip_id: string; flights_cost_aud: number;
+          show_payment_options: boolean; monthly_option_title: string;
+          monthly_option_amount_label: string | null; monthly_option_description: string | null;
+          quarterly_option_title: string; quarterly_option_amount_label: string | null;
+          quarterly_option_description: string | null; show_bank_details: boolean;
+          bank_account_name: string | null; bank_bsb: string | null;
+          bank_account_number: string | null; bank_payid: string | null;
+          bank_notes: string | null; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; trip_id: string; flights_cost_aud?: number;
+          show_payment_options?: boolean; monthly_option_title?: string;
+          monthly_option_amount_label?: string | null; monthly_option_description?: string | null;
+          quarterly_option_title?: string; quarterly_option_amount_label?: string | null;
+          quarterly_option_description?: string | null; show_bank_details?: boolean;
+          bank_account_name?: string | null; bank_bsb?: string | null;
+          bank_account_number?: string | null; bank_payid?: string | null;
+          bank_notes?: string | null; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; trip_id?: string; flights_cost_aud?: number;
+          show_payment_options?: boolean; monthly_option_title?: string;
+          monthly_option_amount_label?: string | null; monthly_option_description?: string | null;
+          quarterly_option_title?: string; quarterly_option_amount_label?: string | null;
+          quarterly_option_description?: string | null; show_bank_details?: boolean;
+          bank_account_name?: string | null; bank_bsb?: string | null;
+          bank_account_number?: string | null; bank_payid?: string | null;
+          bank_notes?: string | null; updated_at?: string;
+        };
+        Relationships: [{ foreignKeyName: 'trip_payment_settings_trip_id_fkey'; columns: ['trip_id']; isOneToOne: true; referencedRelation: 'trips'; referencedColumns: ['id'] }];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
