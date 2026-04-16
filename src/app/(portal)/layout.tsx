@@ -1,0 +1,106 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import { TopBar } from '@/components/layout/TopBar';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { Footer } from '@/components/layout/Footer';
+import { trackClientActivity } from '@/lib/activity/client';
+import { useEffect } from 'react';
+
+export default function PortalLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('');
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        if (pathname === '/gallery' || pathname.startsWith('/gallery/')) {
+          const publicPath = pathname.replace('/gallery', '/public/gallery');
+          router.push(publicPath);
+          return;
+        }
+        router.push('/login');
+      } else {
+        setUserEmail(data.session.user.email || '');
+        // Fetch user role + status from profiles table
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, status')
+          .eq('id', data.session.user.id)
+          .single();
+
+        if (!profile) {
+          await supabase.auth.signOut();
+          router.push('/login');
+          return;
+        }
+
+        if (profile.status !== 'active') {
+          await supabase.auth.signOut();
+          const access = profile.status === 'pending' ? 'pending' : 'inactive';
+          router.push(`/login?access=${access}`);
+          return;
+        }
+
+        setUserRole(profile.role);
+      }
+    };
+    void checkAuth();
+  }, [pathname, router, supabase]);
+
+  const handleLogout = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    await trackClientActivity({
+      action: 'logout',
+      entityType: 'auth',
+      entityId: 'session',
+      entityName: 'Signed out from member portal',
+      changes: {
+        path: window.location.pathname,
+      },
+      accessToken: sessionData.session?.access_token,
+    });
+    await supabase.auth.signOut();
+    router.push('/');
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Top bar */}
+      <TopBar
+        onMenuClick={() => setSidebarOpen(!sidebarOpen)}
+        userEmail={userEmail}
+        onLogout={handleLogout}
+      />
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userRole={userRole}
+        />
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {children}
+          </div>
+          <Footer />
+        </main>
+      </div>
+    </div>
+  );
+}

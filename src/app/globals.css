@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+  --brand-black: #0d0d0d;
+  --brand-dark-grey: #1a1a1a;
+  --brand-brown: #b5621e;
+  --brand-tan: #c9b98a;
+  --brand-cream: #f5f0e8;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@theme {
+  --color-black: #0d0d0d;
+  --color-brand-black: #0d0d0d;
+  --color-brand-dark-grey: #1a1a1a;
+  --color-brand-brown: #b5621e;
+  --color-brand-tan: #c9b98a;
+  --color-brand-cream: #f5f0e8;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-background: #1a1a1a;
+  --color-foreground: #f5f0e8;
+}
+
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply bg-brand-dark-grey text-brand-cream font-sans;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  @apply w-2 h-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-brand-dark-grey;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-brand-brown rounded-full hover:bg-brand-tan;
+}
+
+/* Focus rings */
+:focus-visible {
+  @apply outline-none ring-2 ring-brand-brown ring-offset-2 ring-offset-brand-dark-grey;
+}
+
+/* Utility classes */
+.surface-dark {
+  @apply bg-brand-dark-grey;
+}
+
+.text-accent {
+  @apply text-brand-brown;
+}
+
+.text-secondary-accent {
+  @apply text-brand-tan;
+}
