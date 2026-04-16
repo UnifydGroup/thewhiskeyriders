@@ -125,6 +125,15 @@ export interface NewsAsset {
   created_at: string | null;
 }
 
+export interface NewsEmailDelivery {
+  news_post_id: string;
+  member_id: string;
+  sent_at: string | null;
+  provider_message_id: string | null;
+  error: string | null;
+  created_at: string;
+}
+
 export interface TripKeyDate {
   id: string;
   trip_id: string;
@@ -340,6 +349,7 @@ export interface SiteSettings {
   id: string;
   logo_url: string;
   background_image_url: string;
+  news_email_notifications_enabled: boolean;
   background_media_type: MediaType;
   background_video_url: string | null;
   background_position_x: number;
@@ -453,6 +463,11 @@ export interface Database {
         Row: NewsAsset;
         Insert: Omit<NewsAsset, 'id' | 'created_at'>;
         Update: Partial<Omit<NewsAsset, 'id' | 'created_at'>>;
+      };
+      news_email_deliveries: {
+        Row: NewsEmailDelivery;
+        Insert: Omit<NewsEmailDelivery, 'created_at'> & Partial<Pick<NewsEmailDelivery, 'created_at'>>;
+        Update: Partial<Omit<NewsEmailDelivery, 'created_at'>>;
       };
       trip_key_dates: {
         Row: TripKeyDate;

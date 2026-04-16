@@ -15,6 +15,7 @@ import {
   normalizeIdArray,
   type RawNewsPostRow,
 } from '@/lib/news/server';
+import { dispatchNewsPublicationEmails } from '@/lib/news/email';
 
 const NEWS_ADMIN_ROLES = ['trip_admin', 'admin', 'super_admin'] as const;
 const NEWS_STATUSES = ['draft', 'published', 'archived'] as const;
@@ -63,6 +64,20 @@ function stateFromStatus(status: NewsStatus, fallbackPublishedAt?: string | null
     published_at: fallbackPublishedAt || null,
     archived_at: new Date().toISOString(),
   };
+}
+
+function resolvePortalBaseUrl(request: NextRequest): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) return configured;
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return vercelUrl.startsWith('http://') || vercelUrl.startsWith('https://')
+      ? vercelUrl
+      : `https://${vercelUrl}`;
+  }
+
+  return request.nextUrl.origin;
 }
 
 // GET /api/news/[id] - Get a single news item
@@ -298,6 +313,34 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
       },
       getIpAddress(request)
     );
+
+    const transitionedToPublished =
+      existing.is_published === false &&
+      newsItem.is_published === true &&
+      newsItem.is_archived === false;
+
+    if (transitionedToPublished) {
+      try {
+        const summary = await dispatchNewsPublicationEmails({
+          newsItem,
+          baseUrl: resolvePortalBaseUrl(request),
+        });
+
+        console.info('[news-email] publish transition dispatch complete', {
+          news_post_id: newsId,
+          attempted: summary.attempted,
+          sent: summary.sent,
+          failed: summary.failed,
+          skipped_reason: summary.skippedReason || null,
+          enabled: summary.enabled,
+        });
+      } catch (emailError: unknown) {
+        console.error('[news-email] publish transition dispatch failed', {
+          news_post_id: newsId,
+          error: emailError instanceof Error ? emailError.message : emailError,
+        });
+      }
+    }
 
     return successResponse(newsItem);
   } catch (error: unknown) {

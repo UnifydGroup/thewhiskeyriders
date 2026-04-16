@@ -1,67 +1,30 @@
-'use server';
-
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createServerClient } from '@/lib/supabase/server';
-import type { SupabaseDatabase } from '@/lib/types/database.generated';
+import {
+  verifyRole,
+  errorResponse,
+  ApiErrors,
+  isUserTripMember,
+  supabase,
+} from '@/lib/api/helpers';
 
-type DbClient = ReturnType<typeof createSupabaseClient<SupabaseDatabase>>;
-
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-let serviceRoleSupabase: DbClient | null = null;
-
-function getServiceRoleClient(): DbClient | null {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) return null;
-
-  if (!serviceRoleSupabase) {
-    serviceRoleSupabase = createSupabaseClient<SupabaseDatabase>(supabaseUrl, key);
-  }
-
-  return serviceRoleSupabase;
-}
-
-async function getSupabaseForRequest(): Promise<{
-  supabase: DbClient;
-  usingServiceRole: boolean;
-}> {
-  const serviceRoleClient = getServiceRoleClient();
-  if (serviceRoleClient) {
-    return { supabase: serviceRoleClient, usingServiceRole: true };
-  }
-
-  const sessionClient = await createServerClient();
-  const {
-    data: { user },
-    error,
-  } = await sessionClient.auth.getUser();
-
-  if (error || !user) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  return { supabase: sessionClient as unknown as DbClient, usingServiceRole: false };
-}
-
-interface PaymentMilestone {
+type PaymentMilestone = {
   id: string;
   trip_id: string;
   milestone_date: string;
   accumulated_amount: number;
   description: string | null;
-}
+};
 
-interface MemberPaymentSummary {
+type MemberPaymentSummary = {
   member_id: string;
   full_name: string;
   nickname?: string | null;
   total_paid: number;
   payment_count: number;
   last_payment_date: string | null;
-}
+};
 
-interface PaymentSummaryRow {
+type PaymentSummaryRow = {
   member_id: string;
   amount: number;
   payment_date: string;
@@ -69,20 +32,47 @@ interface PaymentSummaryRow {
     full_name: string | null;
     nickname: string | null;
   } | null;
-}
+};
 
-interface TripMemberRow {
+type TripMemberRow = {
   user_id: string;
   profiles: {
     id: string;
     full_name: string | null;
     nickname: string | null;
   } | null;
-}
+};
+
+const DEFAULT_PAYMENT_SETTINGS = {
+  flights_cost_aud: 0,
+  show_payment_options: false,
+  monthly_option_title: 'Monthly Option',
+  monthly_option_amount_label: null,
+  monthly_option_description: null,
+  quarterly_option_title: 'Quarterly Option',
+  quarterly_option_amount_label: null,
+  quarterly_option_description: null,
+  show_bank_details: false,
+  bank_account_name: null,
+  bank_bsb: null,
+  bank_account_number: null,
+  bank_payid: null,
+  bank_notes: null,
+};
 
 export async function GET(request: NextRequest) {
   try {
-    const { supabase, usingServiceRole } = await getSupabaseForRequest();
+    const { authenticated, profile } = await verifyRole(request, [
+      'member',
+      'trip_admin',
+      'admin',
+      'super_admin',
+    ]);
+
+    if (!authenticated || !profile) {
+      return errorResponse(ApiErrors.UNAUTHORIZED);
+    }
+
     const { searchParams } = new URL(request.url);
     const tripId = searchParams.get('trip_id');
 
@@ -93,7 +83,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch payment schedule milestones
+    if (profile.role === 'member') {
+      const isMember = await isUserTripMember(profile.id, tripId);
+      if (!isMember) {
+        return errorResponse(ApiErrors.FORBIDDEN);
+      }
+    }
+
+    const isAdmin = ['trip_admin', 'admin', 'super_admin'].includes(profile.role);
+
     const { data: milestones, error: milestonesError } = await supabase
       .from('payment_schedule_milestones')
       .select('*')
@@ -108,11 +106,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: paymentSettings } = await supabase
+      .from('trip_payment_settings')
+      .select('*')
+      .eq('trip_id', tripId)
+      .maybeSingle();
+
     const paymentSummaryMap = new Map<string, MemberPaymentSummary>();
 
-    // Member portal only needs schedule; payment summaries are for admin management.
-    // Skip this extra aggregation when no service role key is configured.
-    if (usingServiceRole) {
+    if (isAdmin) {
       const { data: memberPayments, error: paymentsError } = await supabase
         .from('member_payments')
         .select(`
@@ -142,7 +144,7 @@ export async function GET(request: NextRequest) {
             paymentSummaryMap.set(memberId, {
               member_id: memberId,
               full_name: fullName,
-              nickname: nickname,
+              nickname,
               total_paid: 0,
               payment_count: 0,
               last_payment_date: null,
@@ -158,19 +160,13 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Fetch all trip members to show who hasn't paid
-      const { data: tripMembers, error: membersError } = await supabase
+      const { data: tripMembers } = await supabase
         .from('trip_members')
         .select('user_id, profiles!user_id(id, full_name, nickname)')
         .eq('trip_id', tripId);
 
-      if (membersError) {
-        console.error('Error fetching trip members:', membersError);
-      }
-
       const allMemberSummaries = Array.from(paymentSummaryMap.values());
 
-      // Add members with no payments
       if (tripMembers) {
         for (const tripMember of tripMembers as TripMemberRow[]) {
           const userId = tripMember.user_id;
@@ -187,30 +183,40 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      const typedMilestones = (milestones || []) as PaymentMilestone[];
       return NextResponse.json({
-        schedule: milestones as PaymentMilestone[],
+        schedule: typedMilestones,
         memberPaymentSummary: allMemberSummaries,
-        totalTarget: milestones && milestones.length > 0
-          ? milestones[milestones.length - 1].accumulated_amount
-          : 5000,
+        totalTarget:
+          typedMilestones.length > 0
+            ? typedMilestones[typedMilestones.length - 1].accumulated_amount
+            : 0,
+        paymentSettings: paymentSettings
+          ? {
+              ...DEFAULT_PAYMENT_SETTINGS,
+              ...paymentSettings,
+            }
+          : DEFAULT_PAYMENT_SETTINGS,
       });
     }
 
+    const typedMilestones = (milestones || []) as PaymentMilestone[];
+
     return NextResponse.json({
-      schedule: milestones as PaymentMilestone[],
+      schedule: typedMilestones,
       memberPaymentSummary: [],
-      totalTarget: milestones && milestones.length > 0
-        ? milestones[milestones.length - 1].accumulated_amount
-        : 5000,
+      totalTarget:
+        typedMilestones.length > 0
+          ? typedMilestones[typedMilestones.length - 1].accumulated_amount
+          : 0,
+      paymentSettings: paymentSettings
+        ? {
+            ...DEFAULT_PAYMENT_SETTINGS,
+            ...paymentSettings,
+          }
+        : DEFAULT_PAYMENT_SETTINGS,
     });
   } catch (error) {
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     console.error('Payment schedule API error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },

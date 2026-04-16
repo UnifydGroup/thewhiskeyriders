@@ -481,6 +481,36 @@ export type SupabaseDatabase = {
           { foreignKeyName: 'news_assets_uploaded_by_fkey'; columns: ['uploaded_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] }
         ];
       };
+      news_email_deliveries: {
+        Row: {
+          created_at: string;
+          error: string | null;
+          member_id: string;
+          news_post_id: string;
+          provider_message_id: string | null;
+          sent_at: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          error?: string | null;
+          member_id: string;
+          news_post_id: string;
+          provider_message_id?: string | null;
+          sent_at?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          error?: string | null;
+          member_id?: string;
+          news_post_id?: string;
+          provider_message_id?: string | null;
+          sent_at?: string | null;
+        };
+        Relationships: [
+          { foreignKeyName: 'news_email_deliveries_member_id_fkey'; columns: ['member_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'news_email_deliveries_news_post_id_fkey'; columns: ['news_post_id']; isOneToOne: false; referencedRelation: 'news_posts'; referencedColumns: ['id'] }
+        ];
+      };
       trip_documents: {
         Row: { created_at: string | null; file_type: string; file_url: string; id: string; is_admin_upload: boolean; name: string; trip_id: string; uploaded_by: string | null; user_id: string | null };
         Insert: { created_at?: string | null; file_type?: string; file_url: string; id?: string; is_admin_upload?: boolean; name: string; trip_id: string; uploaded_by?: string | null; user_id?: string | null };
@@ -610,6 +640,7 @@ export type SupabaseDatabase = {
           id: string;
           logo_url: string;
           background_image_url: string;
+          news_email_notifications_enabled: boolean;
           background_media_type: 'image' | 'video';
           background_video_url: string | null;
           background_position_x: number;
@@ -623,6 +654,7 @@ export type SupabaseDatabase = {
           id?: string;
           logo_url: string;
           background_image_url: string;
+          news_email_notifications_enabled?: boolean;
           background_media_type?: 'image' | 'video';
           background_video_url?: string | null;
           background_position_x?: number;
@@ -636,6 +668,7 @@ export type SupabaseDatabase = {
           id?: string;
           logo_url?: string;
           background_image_url?: string;
+          news_email_notifications_enabled?: boolean;
           background_media_type?: 'image' | 'video';
           background_video_url?: string | null;
           background_position_x?: number;

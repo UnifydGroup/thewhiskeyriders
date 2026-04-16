@@ -25,7 +25,7 @@ const SUPPORTED_BACKGROUND_MIME_TYPES = new Set([
   'image/svg+xml',
 ]);
 const SITE_SETTINGS_SELECT =
-  'id, logo_url, background_image_url, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity';
+  'id, logo_url, background_image_url, news_email_notifications_enabled, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -67,6 +67,9 @@ const toFriendlyErrorMessage = (err: unknown, action: 'load' | 'save' | 'upload'
   if (rawMessage.includes('background_media_type') || rawMessage.includes('background_video_url')) {
     return 'Landing background media columns are missing. Run migration `migrations/add_media_support_for_photos_and_landing_background.sql` and try again.';
   }
+  if (rawMessage.includes('news_email_notifications_enabled')) {
+    return 'News email settings are not initialized yet. Run migration `migrations/add_news_email_notifications.sql`, then refresh.';
+  }
 
   if (action === 'load') return `Failed to load settings. ${rawMessage}`;
   if (action === 'save') return `Failed to save settings. ${rawMessage}`;
@@ -101,6 +104,7 @@ interface PortalSettings {
   notify_on_member_joined: boolean;
   notify_on_document_shared: boolean;
   notify_on_award_created: boolean;
+  news_email_notifications_enabled: boolean;
   password_expiry_days: number;
   password_min_length: number;
   require_2fa_for_admins: boolean;
@@ -124,6 +128,7 @@ interface PortalSettings {
 type SiteSettingsRow = {
   id: string;
   logo_url: string;
+  news_email_notifications_enabled: boolean;
   background_media_type: BackgroundMediaType;
   background_image_url: string;
   background_video_url: string | null;
@@ -154,6 +159,7 @@ const DEFAULT_SETTINGS: PortalSettings = {
   notify_on_member_joined: true,
   notify_on_document_shared: true,
   notify_on_award_created: true,
+  news_email_notifications_enabled: true,
 
   // Security
   password_expiry_days: 90,
@@ -216,6 +222,7 @@ export default function SettingsPage() {
       const loaded: PortalSettings = {
         ...DEFAULT_SETTINGS,
         logo_url: data?.logo_url || DEFAULT_LOGO_URL,
+        news_email_notifications_enabled: data?.news_email_notifications_enabled !== false,
         background_media_type: data?.background_media_type === 'video' ? 'video' : 'image',
         background_image_url: data?.background_image_url || DEFAULT_BACKGROUND_URL,
         background_video_url: data?.background_video_url || '',
@@ -263,6 +270,7 @@ export default function SettingsPage() {
 
       const payload = {
         logo_url: settings.logo_url || DEFAULT_LOGO_URL,
+        news_email_notifications_enabled: settings.news_email_notifications_enabled,
         background_media_type: settings.background_media_type || DEFAULT_BACKGROUND_MEDIA_TYPE,
         background_image_url: settings.background_image_url || DEFAULT_BACKGROUND_URL,
         background_video_url: settings.background_video_url || null,
@@ -337,6 +345,8 @@ export default function SettingsPage() {
       const nextSettings: PortalSettings = {
         ...settings,
         logo_url: persisted?.logo_url || payload.logo_url,
+        news_email_notifications_enabled:
+          persisted?.news_email_notifications_enabled ?? payload.news_email_notifications_enabled,
         background_media_type: persisted?.background_media_type || payload.background_media_type,
         background_image_url: persisted?.background_image_url || payload.background_image_url,
         background_video_url: persisted?.background_video_url || payload.background_video_url || '',
@@ -629,6 +639,11 @@ export default function SettingsPage() {
               { key: 'notify_on_member_joined', label: 'Member Joined', description: 'Notify when a member joins' },
               { key: 'notify_on_document_shared', label: 'Document Shared', description: 'Notify when documents are shared' },
               { key: 'notify_on_award_created', label: 'Award Created', description: 'Notify when an award is created' },
+              {
+                key: 'news_email_notifications_enabled',
+                label: 'News Email Notifications',
+                description: 'Send member emails whenever a news post is published',
+              },
             ].map((item) => (
               <label key={item.key} className="flex items-center gap-3 p-3 hover:bg-gray-800/50 rounded cursor-pointer">
                 <input

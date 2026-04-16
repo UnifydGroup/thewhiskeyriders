@@ -1,14 +1,51 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Calendar, DollarSign, AlertCircle, Banknote } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { DollarSign, AlertCircle, Banknote } from 'lucide-react';
 
 interface PaymentMilestone {
   id: string;
   trip_id: string;
   milestone_date: string;
   accumulated_amount: number;
-  description: string;
+  description: string | null;
+}
+
+interface TripPaymentSettings {
+  flights_cost_aud: number;
+  show_payment_options: boolean;
+  monthly_option_title: string;
+  monthly_option_amount_label: string | null;
+  monthly_option_description: string | null;
+  quarterly_option_title: string;
+  quarterly_option_amount_label: string | null;
+  quarterly_option_description: string | null;
+  show_bank_details: boolean;
+  bank_account_name: string | null;
+  bank_bsb: string | null;
+  bank_account_number: string | null;
+  bank_payid: string | null;
+  bank_notes: string | null;
+}
+type PaymentSourceType = 'bank_account' | 'paypal';
+interface PayPalWallet {
+  id: string;
+  currency: string;
+  label: string;
+  email: string;
+  notes: string;
+}
+interface PaymentSource {
+  id: string;
+  type: PaymentSourceType;
+  name: string;
+  member_portal_enabled: boolean;
+  account_name: string;
+  bsb: string;
+  account_number: string;
+  payid: string;
+  notes: string;
+  wallets: PayPalWallet[];
 }
 
 interface PaymentScheduleSectionProps {
@@ -17,12 +54,84 @@ interface PaymentScheduleSectionProps {
   showPaymentInfo?: boolean;
 }
 
+const DEFAULT_PAYMENT_SETTINGS: TripPaymentSettings = {
+  flights_cost_aud: 0,
+  show_payment_options: false,
+  monthly_option_title: 'Monthly Option',
+  monthly_option_amount_label: null,
+  monthly_option_description: null,
+  quarterly_option_title: 'Quarterly Option',
+  quarterly_option_amount_label: null,
+  quarterly_option_description: null,
+  show_bank_details: false,
+  bank_account_name: null,
+  bank_bsb: null,
+  bank_account_number: null,
+  bank_payid: null,
+  bank_notes: null,
+};
+
+function normaliseWallet(wallet: Partial<PayPalWallet>): PayPalWallet {
+  return {
+    id: wallet.id || `wallet-${Math.random().toString(36).slice(2, 8)}`,
+    currency: typeof wallet.currency === 'string' && wallet.currency.trim() ? wallet.currency.trim().toUpperCase() : 'AUD',
+    label: typeof wallet.label === 'string' ? wallet.label : '',
+    email: typeof wallet.email === 'string' ? wallet.email : '',
+    notes: typeof wallet.notes === 'string' ? wallet.notes : '',
+  };
+}
+
+function normalisePaymentSources(rawSources: unknown): PaymentSource[] {
+  if (!Array.isArray(rawSources)) return [];
+  return rawSources
+    .map((raw) => {
+      const source = raw && typeof raw === 'object' ? (raw as Partial<PaymentSource>) : null;
+      if (!source) return null;
+      const type: PaymentSourceType = source.type === 'paypal' ? 'paypal' : 'bank_account';
+      return {
+        id: source.id || `source-${Math.random().toString(36).slice(2, 8)}`,
+        type,
+        name: typeof source.name === 'string' ? source.name : (type === 'paypal' ? 'PayPal' : 'Bank Account'),
+        member_portal_enabled: source.member_portal_enabled === true,
+        account_name: typeof source.account_name === 'string' ? source.account_name : '',
+        bsb: typeof source.bsb === 'string' ? source.bsb : '',
+        account_number: typeof source.account_number === 'string' ? source.account_number : '',
+        payid: typeof source.payid === 'string' ? source.payid : '',
+        notes: typeof source.notes === 'string' ? source.notes : '',
+        wallets: Array.isArray(source.wallets) ? source.wallets.map((wallet) => normaliseWallet(wallet as Partial<PayPalWallet>)) : [],
+      };
+    })
+    .filter((source): source is PaymentSource => source !== null);
+}
+
+function parsePaymentSourcePayload(rawBankNotes: string | null): { note: string | null; sources: PaymentSource[] } {
+  if (!rawBankNotes) return { note: null, sources: [] };
+
+  try {
+    const parsed = JSON.parse(rawBankNotes) as {
+      version?: number;
+      note?: unknown;
+      sources?: unknown;
+    };
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.sources)) {
+      return {
+        note: typeof parsed.note === 'string' ? parsed.note : null,
+        sources: normalisePaymentSources(parsed.sources),
+      };
+    }
+  } catch {
+    // Legacy notes are plain text.
+  }
+
+  return { note: rawBankNotes, sources: [] };
+}
+
 export default function PaymentScheduleSection({
   tripId,
-  tripName,
   showPaymentInfo = true,
 }: PaymentScheduleSectionProps) {
   const [schedule, setSchedule] = useState<PaymentMilestone[]>([]);
+  const [paymentSettings, setPaymentSettings] = useState<TripPaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +143,7 @@ export default function PaymentScheduleSection({
         if (!res.ok) throw new Error('Failed to fetch schedule');
         const data = await res.json();
         setSchedule(data.schedule || []);
+        setPaymentSettings({ ...DEFAULT_PAYMENT_SETTINGS, ...(data.paymentSettings || {}) });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -71,14 +181,47 @@ export default function PaymentScheduleSection({
     return null;
   }
 
-  const scheduleTargetAmount = schedule[schedule.length - 1]?.accumulated_amount || 5000;
-  const isMorocco2027 = (tripName || '').toLowerCase().includes('morocco 2027');
-  const flightsCost = isMorocco2027 ? 2500 : 0;
+  const scheduleTargetAmount = schedule[schedule.length - 1]?.accumulated_amount || 0;
+  const flightsCost = Number(paymentSettings.flights_cost_aud || 0);
   const totalTripCost = scheduleTargetAmount + flightsCost;
+
+  const showMonthlyOption = Boolean(
+    paymentSettings.monthly_option_amount_label || paymentSettings.monthly_option_description
+  );
+  const showQuarterlyOption = Boolean(
+    paymentSettings.quarterly_option_amount_label || paymentSettings.quarterly_option_description
+  );
+  const parsedPaymentSources = parsePaymentSourcePayload(paymentSettings.bank_notes);
+  const bankSources = parsedPaymentSources.sources.filter((source) => source.type === 'bank_account');
+  const selectedMemberPortalSource = bankSources.find((source) => source.member_portal_enabled) || bankSources[0] || null;
+  const memberPortalSources = selectedMemberPortalSource ? [selectedMemberPortalSource] : [];
+  const hasMemberPortalSourceDetails = memberPortalSources.some((source) =>
+    Boolean(
+      source.account_name ||
+      source.bsb ||
+      source.account_number ||
+      source.payid ||
+      source.notes
+    )
+  );
+  const fallbackLegacyBankDetails = memberPortalSources.length === 0
+    ? {
+        name: paymentSettings.bank_account_name,
+        bsb: paymentSettings.bank_bsb,
+        account_number: paymentSettings.bank_account_number,
+        payid: paymentSettings.bank_payid,
+      }
+    : null;
+  const hasLegacyBankDetails = Boolean(
+    fallbackLegacyBankDetails?.name ||
+    fallbackLegacyBankDetails?.bsb ||
+    fallbackLegacyBankDetails?.account_number ||
+    fallbackLegacyBankDetails?.payid
+  );
+  const hasBankDetails = hasMemberPortalSourceDetails || hasLegacyBankDetails || parsedPaymentSources.note;
 
   return (
     <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg overflow-hidden">
-      {/* Header */}
       <div className="bg-gradient-to-r from-brand-tan/10 to-brand-tan/5 border-b border-brand-tan/30 p-6">
         <div className="flex items-center gap-3 mb-2">
           <DollarSign className="w-6 h-6 text-brand-tan" />
@@ -90,7 +233,7 @@ export default function PaymentScheduleSection({
         </p>
         {flightsCost > 0 && (
           <p className="text-sm text-brand-cream/70 mt-1">
-            Payment schedule target (member deposits):{' '}
+            Payment schedule target:{' '}
             <span className="font-semibold text-brand-tan">${scheduleTargetAmount.toFixed(2)}</span>
             {' '}+ Flights:{' '}
             <span className="font-semibold text-brand-tan">${flightsCost.toFixed(2)}</span>
@@ -99,34 +242,44 @@ export default function PaymentScheduleSection({
       </div>
 
       <div className="p-6 space-y-6">
-        {/* Payment Options */}
-        {showPaymentInfo && (
+        {showPaymentInfo && paymentSettings.show_payment_options && (showMonthlyOption || showQuarterlyOption) && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="bg-gradient-to-br from-brand-cream/10 to-brand-cream/5 rounded-lg p-4 border border-brand-cream/30 hover:border-brand-cream/50 transition-colors">
-              <div className="flex items-start gap-3">
-                <Banknote className="w-5 h-5 text-brand-cream mt-1 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-brand-cream">Monthly Option</p>
-                  <p className="text-sm text-brand-tan mt-1 font-semibold">$250 per month</p>
-                  <p className="text-xs text-brand-cream/60 mt-2">Initial $500 deposit, then 19 × $250</p>
+            {showMonthlyOption && (
+              <div className="bg-gradient-to-br from-brand-cream/10 to-brand-cream/5 rounded-lg p-4 border border-brand-cream/30 hover:border-brand-cream/50 transition-colors">
+                <div className="flex items-start gap-3">
+                  <Banknote className="w-5 h-5 text-brand-cream mt-1 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold text-brand-cream">{paymentSettings.monthly_option_title || 'Monthly Option'}</p>
+                    {paymentSettings.monthly_option_amount_label && (
+                      <p className="text-sm text-brand-tan mt-1 font-semibold">{paymentSettings.monthly_option_amount_label}</p>
+                    )}
+                    {paymentSettings.monthly_option_description && (
+                      <p className="text-xs text-brand-cream/60 mt-2">{paymentSettings.monthly_option_description}</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="bg-gradient-to-br from-brand-tan/10 to-brand-tan/5 rounded-lg p-4 border border-brand-tan/30 hover:border-brand-tan/50 transition-colors">
-              <div className="flex items-start gap-3">
-                <Banknote className="w-5 h-5 text-brand-tan mt-1 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-brand-cream">Quarterly Option</p>
-                  <p className="text-sm text-brand-tan mt-1 font-semibold">$750 per quarter</p>
-                  <p className="text-xs text-brand-cream/60 mt-2">Initial $500 deposit, then 6 × $750</p>
+            {showQuarterlyOption && (
+              <div className="bg-gradient-to-br from-brand-tan/10 to-brand-tan/5 rounded-lg p-4 border border-brand-tan/30 hover:border-brand-tan/50 transition-colors">
+                <div className="flex items-start gap-3">
+                  <Banknote className="w-5 h-5 text-brand-tan mt-1 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold text-brand-cream">{paymentSettings.quarterly_option_title || 'Quarterly Option'}</p>
+                    {paymentSettings.quarterly_option_amount_label && (
+                      <p className="text-sm text-brand-tan mt-1 font-semibold">{paymentSettings.quarterly_option_amount_label}</p>
+                    )}
+                    {paymentSettings.quarterly_option_description && (
+                      <p className="text-xs text-brand-cream/60 mt-2">{paymentSettings.quarterly_option_description}</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Timeline */}
         <div className="space-y-0">
           <h4 className="font-semibold text-brand-cream mb-4">Payment Milestones</h4>
           <div className="space-y-3">
@@ -136,7 +289,6 @@ export default function PaymentScheduleSection({
 
               return (
                 <div key={milestone.id} className="flex gap-4">
-                  {/* Timeline line */}
                   <div className="flex flex-col items-center">
                     <div className="w-4 h-4 bg-brand-tan rounded-full border-4 border-brand-dark-grey shadow-lg shadow-brand-tan/30"></div>
                     {!isLastMilestone && (
@@ -144,7 +296,6 @@ export default function PaymentScheduleSection({
                     )}
                   </div>
 
-                  {/* Content */}
                   <div className="pb-4 flex-1">
                     <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-4 hover:border-brand-tan/40 transition-colors">
                       <div className="flex items-start justify-between">
@@ -156,14 +307,12 @@ export default function PaymentScheduleSection({
                               day: 'numeric',
                             })}
                           </p>
-                          <p className="text-sm text-brand-cream/70 mt-1">
-                            {milestone.description}
-                          </p>
+                          {milestone.description && (
+                            <p className="text-sm text-brand-cream/70 mt-1">{milestone.description}</p>
+                          )}
                         </div>
                         <div className="text-right">
-                          <p className="text-lg font-bold text-brand-tan">
-                            ${milestone.accumulated_amount.toFixed(2)}
-                          </p>
+                          <p className="text-lg font-bold text-brand-tan">${milestone.accumulated_amount.toFixed(2)}</p>
                           <p className="text-xs text-brand-cream/50 mt-1">Accumulated</p>
                         </div>
                       </div>
@@ -175,23 +324,85 @@ export default function PaymentScheduleSection({
           </div>
         </div>
 
-        {/* Bank Details */}
-        {showPaymentInfo && (
+        {showPaymentInfo && paymentSettings.show_bank_details && hasBankDetails && (
           <div className="bg-gradient-to-r from-brand-tan/10 to-brand-tan/5 rounded-lg p-4 border border-brand-tan/30 mt-6">
-            <h4 className="font-semibold text-brand-cream mb-3">Bank Details</h4>
-            <div className="text-sm text-brand-cream/80 space-y-2 font-mono">
-              <p>
-                <span className="font-semibold text-brand-tan">Account Name:</span> Andreas Gloor
-              </p>
-              <p>
-                <span className="font-semibold text-brand-tan">BSB #:</span> 732 728
-              </p>
-              <p>
-                <span className="font-semibold text-brand-tan">Account #:</span> 524337
-              </p>
-              <p>
-                <span className="font-semibold text-brand-tan">PayID:</span> 0409 651 993
-              </p>
+            <h4 className="font-semibold text-brand-cream mb-3">Payment Account</h4>
+            <div className="space-y-3 text-sm text-brand-cream/80">
+              {memberPortalSources.length > 0 ? (
+                memberPortalSources.map((source) => (
+                  <div key={source.id} className="bg-brand-black/20 border border-brand-tan/20 rounded-lg p-3">
+                    <p className="font-semibold text-brand-tan mb-2">{source.name || (source.type === 'paypal' ? 'PayPal' : 'Bank Account')}</p>
+                    {source.type === 'paypal' ? (
+                      <div className="space-y-2">
+                        {source.wallets.map((wallet) => (
+                          <div key={wallet.id} className="text-xs text-brand-cream/80 border border-brand-tan/10 rounded p-2">
+                            <p>
+                              <span className="font-semibold text-brand-tan">Wallet:</span> {wallet.label || 'Wallet'} ({wallet.currency || 'AUD'})
+                            </p>
+                            {wallet.email && (
+                              <p>
+                                <span className="font-semibold text-brand-tan">PayPal:</span> {wallet.email}
+                              </p>
+                            )}
+                            {wallet.notes && <p className="text-brand-cream/70">{wallet.notes}</p>}
+                          </div>
+                        ))}
+                        {source.notes && <p className="text-brand-cream/70">{source.notes}</p>}
+                      </div>
+                    ) : (
+                      <div className="font-mono text-xs space-y-1">
+                        {source.account_name && (
+                          <p>
+                            <span className="font-semibold text-brand-tan">Account Name:</span> {source.account_name}
+                          </p>
+                        )}
+                        {source.bsb && (
+                          <p>
+                            <span className="font-semibold text-brand-tan">BSB #:</span> {source.bsb}
+                          </p>
+                        )}
+                        {source.account_number && (
+                          <p>
+                            <span className="font-semibold text-brand-tan">Account #:</span> {source.account_number}
+                          </p>
+                        )}
+                        {source.payid && (
+                          <p>
+                            <span className="font-semibold text-brand-tan">PayID:</span> {source.payid}
+                          </p>
+                        )}
+                        {source.notes && <p className="text-brand-cream/70">{source.notes}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-brand-cream/80 space-y-2 font-mono">
+                  {fallbackLegacyBankDetails?.name && (
+                    <p>
+                      <span className="font-semibold text-brand-tan">Account Name:</span> {fallbackLegacyBankDetails.name}
+                    </p>
+                  )}
+                  {fallbackLegacyBankDetails?.bsb && (
+                    <p>
+                      <span className="font-semibold text-brand-tan">BSB #:</span> {fallbackLegacyBankDetails.bsb}
+                    </p>
+                  )}
+                  {fallbackLegacyBankDetails?.account_number && (
+                    <p>
+                      <span className="font-semibold text-brand-tan">Account #:</span> {fallbackLegacyBankDetails.account_number}
+                    </p>
+                  )}
+                  {fallbackLegacyBankDetails?.payid && (
+                    <p>
+                      <span className="font-semibold text-brand-tan">PayID:</span> {fallbackLegacyBankDetails.payid}
+                    </p>
+                  )}
+                </div>
+              )}
+              {parsedPaymentSources.note && (
+                <p className="text-brand-cream/70">{parsedPaymentSources.note}</p>
+              )}
             </div>
           </div>
         )}

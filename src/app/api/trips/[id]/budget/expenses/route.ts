@@ -46,8 +46,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       amount,
       currency = 'AUD',
       exchange_rate = 1.0,
+      amount_aud,
+      amount_aud_overridden,
       expense_date,
       paid_by,
+      paid_by_type,
+      paid_by_label,
+      source,
+      reconciled,
       receipt_url,
       notes,
     } = body;
@@ -56,8 +62,37 @@ export async function POST(request: NextRequest, { params }: Params) {
       return errorResponse({ code: 'VALIDATION_ERROR', message: 'description, amount, and expense_date are required', status: 400 });
     }
 
-    // Calculate AUD amount
-    const amount_aud = currency === 'AUD' ? Number(amount) : Number(amount) * Number(exchange_rate);
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'amount must be a positive number', status: 400 });
+    }
+
+    const normalizedCurrency = String(currency || 'AUD').toUpperCase();
+    const parsedRate = normalizedCurrency === 'AUD' ? 1 : Number(exchange_rate);
+    if (!Number.isFinite(parsedRate) || parsedRate <= 0) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'exchange_rate must be a positive number', status: 400 });
+    }
+
+    const hasAudOverride = amount_aud !== undefined && amount_aud !== null && String(amount_aud).trim() !== '';
+    const computedAud = normalizedCurrency === 'AUD' ? parsedAmount : parsedAmount * parsedRate;
+    const parsedAmountAud = hasAudOverride ? Number(amount_aud) : computedAud;
+    if (!Number.isFinite(parsedAmountAud) || parsedAmountAud <= 0) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'amount_aud must be a positive number', status: 400 });
+    }
+
+    const normalizedPaidByType = paid_by_type === 'member' || paid_by_type === 'external'
+      ? paid_by_type
+      : 'group_kitty';
+
+    if (normalizedPaidByType === 'member' && !paid_by) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'paid_by member is required when paid_by_type is member', status: 400 });
+    }
+
+    const normalizedPaidBy = normalizedPaidByType === 'member' ? (paid_by ?? null) : null;
+    const normalizedPaidByLabel = normalizedPaidByType === 'external' ? (paid_by_label ?? null) : null;
+
+    const normalizedSource = source === 'import' ? 'import' : 'manual';
+    const normalizedReconciled = normalizedSource === 'import' ? true : reconciled === true;
 
     const { data, error } = await supabase
       .from('trip_expenses')
@@ -65,12 +100,18 @@ export async function POST(request: NextRequest, { params }: Params) {
         trip_id: tripId,
         category_id: category_id ?? null,
         description,
-        amount: Number(amount),
-        currency,
-        amount_aud,
-        exchange_rate: Number(exchange_rate),
+        amount: parsedAmount,
+        currency: normalizedCurrency,
+        amount_aud: parsedAmountAud,
+        amount_aud_overridden: hasAudOverride ? amount_aud_overridden === true : false,
+        exchange_rate: parsedRate,
         expense_date,
-        paid_by: paid_by ?? null,
+        paid_by: normalizedPaidBy,
+        paid_by_type: normalizedPaidByType,
+        paid_by_label: normalizedPaidByLabel,
+        source: normalizedSource,
+        reconciled: normalizedReconciled,
+        reconciled_at: normalizedReconciled ? new Date().toISOString() : null,
         receipt_url: receipt_url ?? null,
         notes: notes ?? null,
         created_by: profile?.id ?? null,

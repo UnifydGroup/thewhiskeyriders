@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Calendar, DollarSign, CheckCircle2, AlertCircle, TrendingUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Calendar, CheckCircle2, AlertCircle, TrendingUp } from 'lucide-react';
 
 interface PaymentMilestone {
   id: string;
   trip_id: string;
   milestone_date: string;
   accumulated_amount: number;
-  description: string;
+  description: string | null;
 }
 
 interface MemberPayment {
@@ -36,6 +36,7 @@ export default function PaymentProgressCard({
   const [schedule, setSchedule] = useState<PaymentMilestone[]>([]);
   const [memberPayments, setMemberPayments] = useState<MemberPayment[]>([]);
   const [totalPaid, setTotalPaid] = useState(0);
+  const [targetAmount, setTargetAmount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +50,7 @@ export default function PaymentProgressCard({
         if (!scheduleRes.ok) throw new Error('Failed to fetch schedule');
         const scheduleData = await scheduleRes.json();
         setSchedule(scheduleData.schedule || []);
+        setTargetAmount(Number(scheduleData.totalTarget || 0));
 
         // Fetch member payments
         const paymentsRes = await fetch(
@@ -98,8 +100,7 @@ export default function PaymentProgressCard({
     );
   }
 
-  const targetAmount = schedule.length > 0 ? schedule[schedule.length - 1].accumulated_amount : 5000;
-  const progressPercentage = (totalPaid / targetAmount) * 100;
+  const progressPercentage = targetAmount > 0 ? (totalPaid / targetAmount) * 100 : 0;
   const nextMilestone = schedule.find((m) => m.accumulated_amount > totalPaid);
 
   return (
@@ -180,7 +181,7 @@ export default function PaymentProgressCard({
       <div className="space-y-3 pt-4 border-t border-brand-tan/20">
         <h4 className="font-semibold text-brand-cream">Payment Schedule</h4>
         <div className="space-y-2 max-h-64 overflow-y-auto">
-          {schedule.map((milestone, index) => {
+          {schedule.map((milestone) => {
             const isPaid = totalPaid >= milestone.accumulated_amount;
             return (
               <div

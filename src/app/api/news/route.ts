@@ -17,6 +17,7 @@ import {
   resolveTaggedNewsIds,
   type RawNewsPostRow,
 } from '@/lib/news/server';
+import { dispatchNewsPublicationEmails } from '@/lib/news/email';
 
 const NEWS_ADMIN_ROLES = ['trip_admin', 'admin', 'super_admin'] as const;
 const NEWS_STATUSES = ['draft', 'published', 'archived'] as const;
@@ -82,6 +83,20 @@ function stateFromStatus(status: NewsStatus, fallbackPublishedAt?: string | null
     published_at: fallbackPublishedAt || null,
     archived_at: new Date().toISOString(),
   };
+}
+
+function resolvePortalBaseUrl(request: NextRequest): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) return configured;
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return vercelUrl.startsWith('http://') || vercelUrl.startsWith('https://')
+      ? vercelUrl
+      : `https://${vercelUrl}`;
+  }
+
+  return request.nextUrl.origin;
 }
 
 async function getMemberTripIds(memberId: string): Promise<string[]> {
@@ -449,6 +464,29 @@ export async function POST(request: NextRequest) {
       },
       getIpAddress(request)
     );
+
+    if (requestedStatus === 'published' && newsItem) {
+      try {
+        const summary = await dispatchNewsPublicationEmails({
+          newsItem,
+          baseUrl: resolvePortalBaseUrl(request),
+        });
+
+        console.info('[news-email] publish dispatch complete', {
+          news_post_id: created.id,
+          attempted: summary.attempted,
+          sent: summary.sent,
+          failed: summary.failed,
+          skipped_reason: summary.skippedReason || null,
+          enabled: summary.enabled,
+        });
+      } catch (emailError: unknown) {
+        console.error('[news-email] publish dispatch failed', {
+          news_post_id: created.id,
+          error: emailError instanceof Error ? emailError.message : emailError,
+        });
+      }
+    }
 
     return successResponse(newsItem, 201);
   } catch (error: unknown) {

@@ -18,7 +18,8 @@ interface BudgetOverview {
   total_budget_aud: number;
   total_planned_aud: number;
   total_spent_aud: number;
-  total_collected_aud: number;
+  total_collected_aud?: number;
+  total_collected_from_members_aud?: number;
   budget_remaining_aud: number;
   collection_gap_aud: number;
   member_count: number;
@@ -88,13 +89,16 @@ export default function MemberBudgetView({ tripId }: Props) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
         <EyeOff className="w-10 h-10 text-brand-cream/20" />
-        <p className="text-brand-cream/50 font-medium">Budget information isn't available yet</p>
+        <p className="text-brand-cream/50 font-medium">Budget information isn&apos;t available yet</p>
         <p className="text-sm text-brand-cream/30">The organisers will make this visible when ready</p>
       </div>
     );
   }
 
   const { overview, categories, member_payments, visibility, settings } = data;
+  const totalCollected = overview
+    ? (overview.total_collected_aud ?? overview.total_collected_from_members_aud ?? 0)
+    : 0;
 
   // The current user's own row
   const myPayment = member_payments.find((m) => m.is_current_user);
@@ -167,7 +171,7 @@ export default function MemberBudgetView({ tripId }: Props) {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {[
               { label: 'Total Budget', value: fmt(overview.total_budget_aud) },
-              { label: 'Collected', value: fmt(overview.total_collected_aud) },
+              { label: 'Collected', value: fmt(totalCollected) },
               { label: 'Spent', value: fmt(overview.total_spent_aud) },
             ].map(({ label, value }) => (
               <div key={label} className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-4">
@@ -184,7 +188,7 @@ export default function MemberBudgetView({ tripId }: Props) {
                 <span className="text-brand-cream/70">Collection progress</span>
                 <span className="text-brand-tan font-semibold">
                   {overview.total_budget_aud > 0
-                    ? Math.round((overview.total_collected_aud / overview.total_budget_aud) * 100)
+                    ? Math.round((totalCollected / overview.total_budget_aud) * 100)
                     : 0}%
                 </span>
               </div>
@@ -193,13 +197,13 @@ export default function MemberBudgetView({ tripId }: Props) {
                   className="h-full bg-brand-tan rounded-full"
                   style={{
                     width: `${Math.min(100, overview.total_budget_aud > 0
-                      ? (overview.total_collected_aud / overview.total_budget_aud) * 100
+                      ? (totalCollected / overview.total_budget_aud) * 100
                       : 0)}%`,
                   }}
                 />
               </div>
               <p className="text-xs text-brand-cream/40 mt-1.5">
-                {fmt(overview.total_collected_aud)} of {fmt(overview.total_budget_aud)} collected
+                {fmt(totalCollected)} of {fmt(overview.total_budget_aud)} collected
               </p>
             </div>
 

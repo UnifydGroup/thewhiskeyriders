@@ -1,63 +1,56 @@
-'use server';
-
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createServerClient } from '@/lib/supabase/server';
-import type { SupabaseDatabase } from '@/lib/types/database.generated';
-
-type DbClient = ReturnType<typeof createSupabaseClient<SupabaseDatabase>>;
-
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
-let serviceRoleSupabase: DbClient | null = null;
-
-function getServiceRoleClient(): DbClient | null {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) return null;
-
-  if (!serviceRoleSupabase) {
-    serviceRoleSupabase = createSupabaseClient<SupabaseDatabase>(supabaseUrl, key);
-  }
-
-  return serviceRoleSupabase;
-}
-
-async function getSupabaseForRequest(): Promise<{
-  supabase: DbClient;
-  usingServiceRole: boolean;
-  currentUserId: string | null;
-}> {
-  const serviceRoleClient = getServiceRoleClient();
-  if (serviceRoleClient) {
-    return { supabase: serviceRoleClient, usingServiceRole: true, currentUserId: null };
-  }
-
-  const sessionClient = await createServerClient();
-  const {
-    data: { user },
-    error,
-  } = await sessionClient.auth.getUser();
-
-  if (error || !user) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  return {
-    supabase: sessionClient as unknown as DbClient,
-    usingServiceRole: false,
-    currentUserId: user.id,
-  };
-}
+import {
+  verifyRole,
+  errorResponse,
+  ApiErrors,
+  isUserTripMember,
+  supabase,
+} from '@/lib/api/helpers';
 
 export async function POST(request: NextRequest) {
   try {
-    const { supabase } = await getSupabaseForRequest();
+    const { authenticated, authorized } = await verifyRole(request, [
+      'trip_admin',
+      'admin',
+      'super_admin',
+    ]);
+
+    if (!authenticated) {
+      return errorResponse(ApiErrors.UNAUTHORIZED);
+    }
+
+    if (!authorized) {
+      return errorResponse(ApiErrors.FORBIDDEN);
+    }
+
     const body = await request.json();
     const { member_id, trip_id, payment_date, amount, payment_method, notes } = body;
 
-    if (!member_id || !trip_id || !payment_date || !amount) {
+    if (!member_id || !trip_id || !payment_date || amount === undefined || amount === null) {
       return NextResponse.json(
         { error: 'Missing required fields: member_id, trip_id, payment_date, amount' },
+        { status: 400 }
+      );
+    }
+
+    const parsedAmount = Number(amount);
+    if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      return NextResponse.json(
+        { error: 'amount must be a positive number' },
+        { status: 400 }
+      );
+    }
+
+    const { data: membership } = await supabase
+      .from('trip_members')
+      .select('id')
+      .eq('trip_id', trip_id)
+      .eq('user_id', member_id)
+      .maybeSingle();
+
+    if (!membership) {
+      return NextResponse.json(
+        { error: 'Selected member is not on this trip' },
         { status: 400 }
       );
     }
@@ -69,12 +62,13 @@ export async function POST(request: NextRequest) {
           member_id,
           trip_id,
           payment_date,
-          amount: parseFloat(amount),
+          amount: parsedAmount,
           payment_method: payment_method || null,
           notes: notes || null,
         },
       ])
-      .select();
+      .select()
+      .single();
 
     if (error) {
       console.error('Error recording payment:', error);
@@ -86,17 +80,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: data[0],
+      data,
     });
   } catch (error) {
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    console.error('Member payment API error:', error);
+    console.error('Member payment POST API error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -106,7 +93,17 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { supabase, usingServiceRole, currentUserId } = await getSupabaseForRequest();
+    const { authenticated, profile } = await verifyRole(request, [
+      'member',
+      'trip_admin',
+      'admin',
+      'super_admin',
+    ]);
+
+    if (!authenticated || !profile) {
+      return errorResponse(ApiErrors.UNAUTHORIZED);
+    }
+
     const { searchParams } = new URL(request.url);
     const tripId = searchParams.get('trip_id');
     const memberId = searchParams.get('member_id');
@@ -116,6 +113,15 @@ export async function GET(request: NextRequest) {
         { error: 'trip_id is required' },
         { status: 400 }
       );
+    }
+
+    const isAdmin = ['trip_admin', 'admin', 'super_admin'].includes(profile.role);
+
+    if (!isAdmin) {
+      const isMember = await isUserTripMember(profile.id, tripId);
+      if (!isMember) {
+        return errorResponse(ApiErrors.FORBIDDEN);
+      }
     }
 
     let query = supabase
@@ -128,26 +134,21 @@ export async function GET(request: NextRequest) {
         amount,
         payment_method,
         notes,
-        created_at
+        created_at,
+        updated_at
       `)
       .eq('trip_id', tripId);
 
-    if (usingServiceRole) {
+    if (isAdmin) {
       if (memberId) {
         query = query.eq('member_id', memberId);
       }
     } else {
-      if (!currentUserId) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      if (memberId && memberId !== currentUserId) {
-        return NextResponse.json(
-          { error: 'Forbidden' },
-          { status: 403 }
-        );
+      if (memberId && memberId !== profile.id) {
+        return errorResponse(ApiErrors.FORBIDDEN);
       }
 
-      query = query.eq('member_id', currentUserId);
+      query = query.eq('member_id', profile.id);
     }
 
     const { data, error } = await query.order('payment_date', { ascending: false });
@@ -164,13 +165,6 @@ export async function GET(request: NextRequest) {
       payments: data || [],
     });
   } catch (error) {
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     console.error('Get payments API error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
