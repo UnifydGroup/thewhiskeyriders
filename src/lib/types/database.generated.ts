@@ -1,5 +1,6 @@
 // AUTO-GENERATED — do not edit manually.
 // Regenerate with: npx supabase gen types typescript --project-id xhapsqyyjrdwczquanxd > src/lib/types/database.generated.ts
+// Last regenerated: 2026-04-16
 
 export type Json =
   | string
@@ -767,6 +768,99 @@ export type SupabaseDatabase = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      trip_budget_settings: {
+        Row: {
+          id: string; trip_id: string; total_budget_aud: number;
+          show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean;
+          exchange_rate_mad_aud: number; notes: string | null; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; trip_id: string; total_budget_aud?: number;
+          show_group_budget_to_members?: boolean; show_individual_breakdown_to_members?: boolean;
+          exchange_rate_mad_aud?: number; notes?: string | null; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; trip_id?: string; total_budget_aud?: number;
+          show_group_budget_to_members?: boolean; show_individual_breakdown_to_members?: boolean;
+          exchange_rate_mad_aud?: number; notes?: string | null; updated_at?: string;
+        };
+        Relationships: [{ foreignKeyName: 'trip_budget_settings_trip_id_fkey'; columns: ['trip_id']; isOneToOne: true; referencedRelation: 'trips'; referencedColumns: ['id'] }];
+      };
+      trip_budget_categories: {
+        Row: {
+          id: string; trip_id: string; name: string; planned_aud: number;
+          color: string; sort_order: number; notes: string | null; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; trip_id: string; name: string; planned_aud?: number;
+          color?: string; sort_order?: number; notes?: string | null; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; trip_id?: string; name?: string; planned_aud?: number;
+          color?: string; sort_order?: number; notes?: string | null; updated_at?: string;
+        };
+        Relationships: [{ foreignKeyName: 'trip_budget_categories_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }];
+      };
+      trip_expenses: {
+        Row: {
+          id: string; trip_id: string; category_id: string | null; description: string;
+          amount: number; currency: string; amount_aud: number; amount_aud_overridden: boolean;
+          exchange_rate: number; expense_date: string; paid_by: string | null;
+          paid_by_type: string; paid_by_label: string | null; source: string;
+          reconciled: boolean; reconciled_at: string | null; reconcile_notes: string | null;
+          receipt_url: string | null; notes: string | null; created_by: string | null;
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; trip_id: string; category_id?: string | null; description: string;
+          amount: number; currency?: string; amount_aud: number; amount_aud_overridden?: boolean;
+          exchange_rate?: number; expense_date: string; paid_by?: string | null;
+          paid_by_type?: string; paid_by_label?: string | null; source?: string;
+          reconciled?: boolean; reconciled_at?: string | null; reconcile_notes?: string | null;
+          receipt_url?: string | null; notes?: string | null; created_by?: string | null;
+          created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; trip_id?: string; category_id?: string | null; description?: string;
+          amount?: number; currency?: string; amount_aud?: number; amount_aud_overridden?: boolean;
+          exchange_rate?: number; expense_date?: string; paid_by?: string | null;
+          paid_by_type?: string; paid_by_label?: string | null; source?: string;
+          reconciled?: boolean; reconciled_at?: string | null; reconcile_notes?: string | null;
+          receipt_url?: string | null; notes?: string | null; updated_at?: string;
+        };
+        Relationships: [
+          { foreignKeyName: 'trip_expenses_category_id_fkey'; columns: ['category_id']; isOneToOne: false; referencedRelation: 'trip_budget_categories'; referencedColumns: ['id'] },
+          { foreignKeyName: 'trip_expenses_paid_by_fkey'; columns: ['paid_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'trip_expenses_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }
+        ];
+      };
+      trip_income_entries: {
+        Row: {
+          id: string; trip_id: string; description: string; amount_aud: number;
+          income_date: string; source: string; reconciled: boolean;
+          reconciled_at: string | null; reconcile_notes: string | null;
+          category: string | null; member_id: string | null; notes: string | null;
+          created_by: string | null; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; trip_id: string; description: string; amount_aud: number;
+          income_date: string; source?: string; reconciled?: boolean;
+          reconciled_at?: string | null; reconcile_notes?: string | null;
+          category?: string | null; member_id?: string | null; notes?: string | null;
+          created_by?: string | null; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          id?: string; trip_id?: string; description?: string; amount_aud?: number;
+          income_date?: string; source?: string; reconciled?: boolean;
+          reconciled_at?: string | null; reconcile_notes?: string | null;
+          category?: string | null; member_id?: string | null; notes?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          { foreignKeyName: 'trip_income_entries_member_id_fkey'; columns: ['member_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'trip_income_entries_trip_id_fkey'; columns: ['trip_id']; isOneToOne: false; referencedRelation: 'trips'; referencedColumns: ['id'] }
+        ];
       };
     };
     Views: { [_ in never]: never };

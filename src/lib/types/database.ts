@@ -240,6 +240,81 @@ export interface UserBadge {
   awarded_by: string | null;
 }
 
+// ── Budget Tool ───────────────────────────────────────────────────────────────
+
+export interface TripBudgetSettings {
+  id: string;
+  trip_id: string;
+  total_budget_aud: number;
+  show_group_budget_to_members: boolean;
+  show_individual_breakdown_to_members: boolean;
+  exchange_rate_mad_aud: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TripBudgetCategory {
+  id: string;
+  trip_id: string;
+  name: string;
+  planned_aud: number;
+  color: string;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ExpenseCurrency = 'AUD' | 'MAD' | 'USD' | 'EUR';
+export type ExpenseSource = 'manual' | 'import';
+export type ExpensePaidByType = 'group_kitty' | 'member' | 'external';
+
+export interface TripExpense {
+  id: string;
+  trip_id: string;
+  category_id: string | null;
+  description: string;
+  amount: number;
+  currency: ExpenseCurrency;
+  amount_aud: number;
+  amount_aud_overridden: boolean;
+  exchange_rate: number;
+  expense_date: string;
+  paid_by: string | null;
+  paid_by_type: ExpensePaidByType;
+  paid_by_label: string | null;
+  source: ExpenseSource;
+  reconciled: boolean;
+  reconciled_at: string | null;
+  reconcile_notes: string | null;
+  receipt_url: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TripIncomeEntry {
+  id: string;
+  trip_id: string;
+  description: string;
+  amount_aud: number;
+  income_date: string;
+  source: ExpenseSource;
+  reconciled: boolean;
+  reconciled_at: string | null;
+  reconcile_notes: string | null;
+  category: string | null;
+  member_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface SiteSettings {
   id: string;
   logo_url: string;
@@ -422,6 +497,26 @@ export interface Database {
         Row: UserBadge;
         Insert: Omit<UserBadge, 'id'>;
         Update: Partial<Omit<UserBadge, 'id'>>;
+      };
+      trip_budget_settings: {
+        Row: TripBudgetSettings;
+        Insert: Omit<TripBudgetSettings, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<TripBudgetSettings, 'id' | 'created_at' | 'trip_id'>>;
+      };
+      trip_budget_categories: {
+        Row: TripBudgetCategory;
+        Insert: Omit<TripBudgetCategory, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<TripBudgetCategory, 'id' | 'created_at' | 'trip_id'>>;
+      };
+      trip_expenses: {
+        Row: TripExpense;
+        Insert: Omit<TripExpense, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<TripExpense, 'id' | 'created_at' | 'trip_id'>>;
+      };
+      trip_income_entries: {
+        Row: TripIncomeEntry;
+        Insert: Omit<TripIncomeEntry, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<TripIncomeEntry, 'id' | 'created_at' | 'trip_id'>>;
       };
       activity_logs: {
         Row: ActivityLog;
