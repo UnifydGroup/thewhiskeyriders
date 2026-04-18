@@ -8,7 +8,7 @@ import {
   TrendingUp, Settings, LayoutGrid, Eye, EyeOff,
   RefreshCw, Upload, ArrowDownCircle, ArrowUpCircle, AlertTriangle,
   BookOpen, ChevronDown, ChevronUp, Info, Wallet, Repeat, ArrowLeftRight,
-  Building2, Landmark,
+  Building2, Landmark, Search,
 } from 'lucide-react';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
@@ -511,6 +511,9 @@ export default function AdminBudgetPage() {
   // UI state — recurring income generator
   const [showRecurringForm, setShowRecurringForm] = useState(false);
   const [recurringForm, setRecurringForm] = useState({ description: 'Westpac Life Interest', amount_aud: '', start_date: new Date().toISOString().split('T')[0], months: '3', category: 'interest', account_source_id: '' });
+
+  // UI state — expense search/filter
+  const [expenseSearch, setExpenseSearch] = useState('');
 
   // UI state — bank CSV import
   const [showBankImport, setShowBankImport] = useState(false);
@@ -3290,55 +3293,89 @@ export default function AdminBudgetPage() {
             </div>
           )}
 
-	          {expenses.length === 0 && !showExpForm && !showExpImport ? (
-	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg py-12 text-center text-brand-cream/40">No expenses recorded yet</div>
-	          ) : expenses.length > 0 && (
-	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
-	              <div className="overflow-x-auto">
-		                <table className="w-full min-w-[1080px] text-sm">
-		                  <thead className="bg-brand-black">
-		                    <tr>{['Date','Description','Category','Paid by','Account','Amount','AUD','Source',''].map((h) => <th key={h} className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
-		                  </thead>
-		                  <tbody className="divide-y divide-brand-tan/10">
-		                    {expenses.map((exp) => (
-	                      <tr key={exp.id} className={`hover:bg-brand-tan/5 ${!exp.reconciled && exp.source === 'manual' ? 'border-l-2 border-amber-500/40' : ''}`}>
-	                        <td className="px-3 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(exp.expense_date)}</td>
-	                        <td className="px-3 py-3 text-brand-cream max-w-[160px]">
-	                          <p className="truncate font-medium">{exp.description}</p>
-	                          {exp.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(exp.notes)}</p>}
-	                        </td>
-	                        <td className="px-3 py-3">
-	                          {exp.category ? <span className="flex items-center gap-1.5 text-xs"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: exp.category.color }} />{exp.category.name}</span> : <span className="text-brand-cream/30 text-xs">—</span>}
-	                        </td>
-		                        <td className="px-3 py-3 text-xs text-brand-cream/60 capitalize">
-		                          {exp.paid_by_type === 'group_kitty' ? '🏦 Kitty' : exp.paid_by_type === 'member' ? (exp.payer?.nickname || exp.payer?.full_name || 'Member') : (exp.paid_by_label || 'External')}
-		                        </td>
-		                        <td className="px-3 py-3 text-brand-cream/50 text-xs">
-		                          {(() => {
-		                            const expenseNote = parseTransactionNote(exp.notes);
-		                            return expenseNote.account_source_id ? (accountNameById.get(expenseNote.account_source_id) || 'Unknown') : 'Unassigned';
-		                          })()}
-		                        </td>
-		                        <td className="px-3 py-3 text-brand-cream/70 text-xs whitespace-nowrap">{exp.amount.toLocaleString()} {exp.currency}</td>
-	                        <td className="px-3 py-3 font-semibold text-brand-tan whitespace-nowrap">{fmt(exp.amount_aud)}</td>
-	                        <td className="px-3 py-3">
-	                          <span className={`text-xs px-2 py-0.5 rounded-full border ${exp.source === 'import' ? 'bg-blue-900/20 text-blue-400 border-blue-600/30' : exp.reconciled ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-amber-900/20 text-amber-400 border-amber-600/30'}`}>
-	                            {exp.source === 'import' ? 'Imported' : exp.reconciled ? 'Reconciled' : 'Unreconciled'}
-	                          </span>
-	                        </td>
-	                        <td className="px-3 py-3">
-	                          <div className="flex items-center gap-1">
-	                            <button onClick={() => openExpForm(exp)} className="p-1 text-brand-cream/30 hover:text-brand-cream rounded"><Edit2 className="w-3.5 h-3.5" /></button>
-	                            <button onClick={() => handleDeleteExp(exp.id)} className="p-1 text-brand-cream/30 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
-	                          </div>
-	                        </td>
-	                      </tr>
-	                    ))}
-	                  </tbody>
-	                </table>
-	              </div>
-	            </div>
-	          )}
+          {expenses.length === 0 && !showExpForm && !showExpImport ? (
+            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg py-12 text-center text-brand-cream/40">No expenses recorded yet</div>
+          ) : expenses.length > 0 && (() => {
+            const filteredExpenses = expenseSearch.trim()
+              ? expenses.filter((e) => {
+                  const q = expenseSearch.toLowerCase();
+                  return (
+                    e.description?.toLowerCase().includes(q) ||
+                    e.category?.name?.toLowerCase().includes(q) ||
+                    e.paid_by_label?.toLowerCase().includes(q) ||
+                    getAccountDisplayName(parseTransactionNote(e.notes).account_source_id).toLowerCase().includes(q)
+                  );
+                })
+              : expenses;
+            const expTotal = filteredExpenses.reduce((s, e) => s + Number(e.amount_aud || 0), 0);
+            return (
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-brand-tan/10 flex items-center gap-3">
+                  <Search className="w-4 h-4 text-brand-cream/30 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={expenseSearch}
+                    onChange={(e) => setExpenseSearch(e.target.value)}
+                    placeholder="Filter by description, category, account…"
+                    className="flex-1 bg-transparent text-sm text-brand-cream placeholder:text-brand-cream/30 focus:outline-none"
+                  />
+                  {expenseSearch && (
+                    <button onClick={() => setExpenseSearch('')} className="text-brand-cream/40 hover:text-brand-cream text-xs">Clear</button>
+                  )}
+                  <span className="text-xs text-brand-cream/30 whitespace-nowrap">{filteredExpenses.length} of {expenses.length}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1080px] text-sm">
+                    <thead className="bg-brand-black">
+                      <tr>{['Date','Description','Category','Paid by','Account','Amount','AUD','Source',''].map((h) => <th key={h} className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-brand-tan/10">
+                      {filteredExpenses.map((exp) => (
+                        <tr key={exp.id} className={`hover:bg-brand-tan/5 ${!exp.reconciled && exp.source === 'manual' ? 'border-l-2 border-amber-500/40' : ''}`}>
+                          <td className="px-3 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(exp.expense_date)}</td>
+                          <td className="px-3 py-3 text-brand-cream max-w-[160px]">
+                            <p className="truncate font-medium">{exp.description}</p>
+                            {exp.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(exp.notes)}</p>}
+                          </td>
+                          <td className="px-3 py-3">
+                            {exp.category ? <span className="flex items-center gap-1.5 text-xs"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: exp.category.color }} />{exp.category.name}</span> : <span className="text-brand-cream/30 text-xs">—</span>}
+                          </td>
+                          <td className="px-3 py-3 text-xs text-brand-cream/60 capitalize">
+                            {exp.paid_by_type === 'group_kitty' ? '🏦 Kitty' : exp.paid_by_type === 'member' ? (exp.payer?.nickname || exp.payer?.full_name || 'Member') : (exp.paid_by_label || 'External')}
+                          </td>
+                          <td className="px-3 py-3 text-brand-cream/50 text-xs">
+                            {getAccountDisplayName(parseTransactionNote(exp.notes).account_source_id)}
+                          </td>
+                          <td className="px-3 py-3 text-brand-cream/70 text-xs whitespace-nowrap">{exp.amount.toLocaleString()} {exp.currency}</td>
+                          <td className="px-3 py-3 font-semibold text-brand-tan whitespace-nowrap">{fmt(exp.amount_aud)}</td>
+                          <td className="px-3 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${exp.source === 'import' ? 'bg-blue-900/20 text-blue-400 border-blue-600/30' : exp.reconciled ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-amber-900/20 text-amber-400 border-amber-600/30'}`}>
+                              {exp.source === 'import' ? 'Imported' : exp.reconciled ? 'Reconciled' : 'Unreconciled'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => openExpForm(exp)} className="p-1 text-brand-cream/30 hover:text-brand-cream rounded"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => handleDeleteExp(exp.id)} className="p-1 text-brand-cream/30 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-brand-black/40 border-t border-brand-tan/20">
+                      <tr>
+                        <td colSpan={6} className="px-3 py-3 text-xs text-brand-cream/40">
+                          {filteredExpenses.length} expense{filteredExpenses.length === 1 ? '' : 's'}{expenseSearch ? ' (filtered)' : ''}
+                        </td>
+                        <td className="px-3 py-3 font-bold text-brand-tan whitespace-nowrap">{fmt(expTotal)}</td>
+                        <td colSpan={2} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3411,9 +3448,25 @@ export default function AdminBudgetPage() {
 
 	              {unreconciledIncome.length > 0 && (
 	                <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
-	                  <div className="px-5 py-3 border-b border-brand-tan/20">
-	                    <h3 className="font-semibold text-brand-cream">Unreconciled Income <span className="text-amber-400 ml-2">{unreconciledIncome.length}</span></h3>
-	                  </div>
+                  <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
+                    <h3 className="font-semibold text-brand-cream">Unreconciled Income <span className="text-amber-400 ml-2">{unreconciledIncome.length}</span></h3>
+                    <button
+                      onClick={async () => {
+                        let successCount = 0;
+                        for (const e of unreconciledIncome) {
+                          if (await handleReconcile('income', e.id, true)) successCount++;
+                        }
+                        if (successCount === unreconciledIncome.length) {
+                          showToast('success', 'All income marked reconciled');
+                        } else if (successCount > 0) {
+                          showToast('success', `${successCount} of ${unreconciledIncome.length} marked reconciled`);
+                        }
+                      }}
+                      className="text-xs text-brand-tan hover:underline"
+                    >
+                      Mark all reconciled
+                    </button>
+                  </div>
 	                  <div className="overflow-x-auto">
 	                    <table className="w-full min-w-[700px] text-sm">
 	                      <thead className="bg-brand-black"><tr>{['Date','Description','Amount','Action'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
