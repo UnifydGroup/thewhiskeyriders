@@ -122,6 +122,13 @@ const DEFAULT_PAYMENT_SETTINGS: TripPaymentSettings = {
   payment_sources: [],
 };
 
+// Stable account IDs — never change these values; they are persisted in expense/income notes JSON
+const BUDGET_ACCOUNTS: { id: string; name: string; accountType: 'bank_account' | 'paypal' }[] = [
+  { id: 'westpac_choice', name: 'Westpac Choice (524337)', accountType: 'bank_account' },
+  { id: 'westpac_life',   name: 'Westpac Life (253840)',   accountType: 'bank_account' },
+  { id: 'paypal',         name: 'PayPal',                   accountType: 'paypal' },
+];
+
 function createPaymentSource(
   type: PaymentSourceType,
   override: Partial<PaymentSource> = {}
@@ -540,12 +547,8 @@ export default function AdminBudgetPage() {
       description: '',
     });
   };
-  const getDefaultInternalAccountId = () => {
-    const bankSources = paymentSettings.payment_sources.filter((source) => source.type === 'bank_account');
-    const memberPortalAccountId = getMemberPortalAccountId(paymentSettings.payment_sources);
-    const preferredInternalSource = bankSources.find((source) => source.id !== memberPortalAccountId) || bankSources[0];
-    return preferredInternalSource?.id || '';
-  };
+  // Always returns a stable account ID for new transactions (Westpac Choice = primary operational account)
+  const getDefaultInternalAccountId = () => 'westpac_choice';
 
   const getAuthHeader = useCallback(async (): Promise<Record<string, string>> => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1564,32 +1567,16 @@ export default function AdminBudgetPage() {
     const fallbackRemaining = Number(cat.planned_aud || 0) - Number(cat.spent_aud || 0);
     return sum + Number(cat.remaining_aud ?? fallbackRemaining);
   }, 0);
-  const memberPortalAccountId = getMemberPortalAccountId(paymentSettings.payment_sources);
-  const accountOptions: AccountOption[] = paymentSettings.payment_sources.flatMap((source) => {
-    const sourceName = source.name || (source.type === 'paypal' ? 'PayPal' : 'Bank Account');
-    const baseOption: AccountOption = {
-      id: source.id,
-      name: sourceName,
-      accountType: source.type === 'paypal' ? 'paypal' : 'bank_account',
-      sourceType: source.type,
-      sourceId: source.id,
-      isMemberPortalSource: source.type === 'bank_account' && source.member_portal_enabled === true,
-    };
-    if (source.type !== 'paypal') return [baseOption];
-    const walletOptions = source.wallets.map((wallet) => {
-      const walletLabel = wallet.label?.trim() || `${wallet.currency || 'AUD'} Wallet`;
-      const walletCurrency = wallet.currency?.trim().toUpperCase() || 'AUD';
-      return {
-        id: `${source.id}::wallet::${wallet.id}`,
-        name: `${sourceName} · ${walletLabel} (${walletCurrency})`,
-        accountType: 'paypal_wallet' as const,
-        sourceType: source.type,
-        sourceId: source.id,
-        isMemberPortalSource: false,
-      };
-    });
-    return [baseOption, ...walletOptions];
-  });
+  // Use stable account IDs so stored notes always resolve correctly regardless of page load
+  const memberPortalAccountId = 'westpac_choice';
+  const accountOptions: AccountOption[] = BUDGET_ACCOUNTS.map((acct) => ({
+    id: acct.id,
+    name: acct.name,
+    accountType: acct.accountType,
+    sourceType: acct.accountType === 'paypal' ? 'paypal' : 'bank_account',
+    sourceId: acct.id,
+    isMemberPortalSource: acct.id === 'westpac_choice',
+  }));
   const accountNameById = new Map(accountOptions.map((option) => [option.id, option.name]));
   const accountFlowMap = new Map<string, { option: AccountOption | null; name: string; inflow: number; outflow: number }>();
   accountOptions.forEach((option) => {
@@ -1670,6 +1657,8 @@ export default function AdminBudgetPage() {
   };
   const getAccountDisplayName = (accountId: string | null | undefined) => {
     if (!accountId) return 'Unassigned';
+    const stable = BUDGET_ACCOUNTS.find((a) => a.id === accountId);
+    if (stable) return stable.name;
     return accountNameById.get(accountId) || 'Unknown';
   };
   const membersPaidCount = memberPaymentSummary.filter((m) => m.total_paid > 0).length;

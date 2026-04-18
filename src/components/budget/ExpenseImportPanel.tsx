@@ -86,12 +86,14 @@ export default function ExpenseImportPanel({ tripId, defaultExchangeRate, onClos
       const col = (name: string) => {
         const aliases: Record<string, string[]> = {
           date: ['date', 'expense date', 'payment date', 'transaction date'],
-          description: ['description', 'desc', 'details', 'memo', 'narration', 'name'],
-          amount: ['amount', 'cost', 'total', 'value', 'debit'],
+          description: ['description', 'desc', 'details', 'memo', 'narration'],
+          name: ['name'],
+          amount: ['amount', 'cost', 'total', 'value', 'debit', 'gross'],
           currency: ['currency', 'ccy'],
           amount_aud: ['amount aud', 'aud amount', 'aud'],
           exchange_rate: ['rate', 'exchange rate', 'fx rate'],
-          category: ['category', 'cat', 'type'],
+          category: ['category', 'cat'],
+          type: ['type', 'transaction type'],
           paid_by: ['paid by', 'payer', 'paid_by'],
           notes: ['notes', 'note', 'comments', 'remarks'],
         };
@@ -102,12 +104,30 @@ export default function ExpenseImportPanel({ tripId, defaultExchangeRate, onClos
         return -1;
       };
 
-      const parsed: ParsedRow[] = dataRows.map((row) => {
+      // Detect PayPal CSV: has 'gross' column (amounts are negative for expenses)
+      const isPayPalCsv = headers.includes('gross');
+
+      type RawParsedRow = ParsedRow & { isInflow: boolean };
+
+      const parsed: ParsedRow[] = dataRows.map((row): RawParsedRow => {
         const get = (name: string) => {
           const idx = col(name);
           return idx >= 0 ? row[idx] : undefined;
         };
-        const amountRaw = parseFloat(String(get('amount') ?? '').replace(/[^0-9.\-]/g, ''));
+
+        // Build description with fallback chain: Description → Name → Type (for PayPal system transactions)
+        const rawDesc = String(get('description') ?? '').trim();
+        const rawName = String(get('name') ?? '').trim();
+        const rawType = String(get('type') ?? '').trim();
+        const rawCat  = String(get('category') ?? '').trim();
+        const description = rawDesc || rawName || rawType || rawCat || '';
+
+        // PayPal uses 'Gross' column with negative amounts for outgoing payments;
+        // inflows (positive gross) are skipped — they belong in the income tab, not expenses
+        const grossRaw = parseFloat(String(get('amount') ?? '').replace(/[^0-9.\-]/g, ''));
+        const isInflow = isPayPalCsv && grossRaw > 0;
+        const amountRaw = isPayPalCsv ? Math.abs(grossRaw) : grossRaw;
+
         const currency = String(get('currency') ?? 'AUD').toUpperCase() || 'AUD';
         const exchangeRate = parseFloat(String(get('exchange_rate') ?? '')) || (currency === 'MAD' ? defaultExchangeRate : 1);
         const amountAudRaw = get('amount_aud');
@@ -117,16 +137,21 @@ export default function ExpenseImportPanel({ tripId, defaultExchangeRate, onClos
 
         return {
           date: parseDate(get('date')),
-          description: String(get('description') ?? '').trim(),
+          description,
           amount: amountRaw,
           currency,
           exchange_rate: exchangeRate,
           amount_aud,
-          category: String(get('category') ?? '').trim() || undefined,
+          // For PayPal: store Type as category if no explicit category column
+          category: rawCat || (isPayPalCsv ? rawType : undefined) || undefined,
           paid_by: String(get('paid_by') ?? '').trim() || undefined,
           notes: String(get('notes') ?? '').trim() || undefined,
+          isInflow,
         };
-      }).filter((r) => r.description || r.amount);
+      })
+      .filter((r) => !r.isInflow)  // skip PayPal inflows (received payments belong in income tab)
+      .filter((r) => r.description || r.amount)
+      .map(({ isInflow: _, ...rest }): ParsedRow => rest);
 
       // Send to API for preview
       const headers_auth = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
