@@ -66,6 +66,7 @@ const emptyForm = {
   status: 'draft' as NewsStatus,
   is_global: false,
   tag_all_members: false,
+  send_email_notification: true,
   trip_ids: [] as string[],
   member_ids: [] as string[],
 };
@@ -215,6 +216,7 @@ export default function AdminNewsPage() {
           status,
           is_global: form.is_global,
           tag_all_members: form.tag_all_members,
+          send_email_notification: form.send_email_notification,
           trip_ids: form.is_global ? [] : form.trip_ids,
           member_ids: form.tag_all_members ? [] : form.member_ids,
         }),
@@ -259,6 +261,7 @@ export default function AdminNewsPage() {
       status,
       is_global: item.is_global,
       tag_all_members: item.tag_all_members,
+      send_email_notification: item.send_email_notification !== false,
       trip_ids: item.trip_tags.map((trip) => trip.id),
       member_ids: item.member_tags.map((member) => member.id),
     });
@@ -670,6 +673,37 @@ export default function AdminNewsPage() {
                     This update is targeted to every member account.
                   </p>
                 )}
+              </div>
+
+              <div className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 px-4 py-3">
+                <label className="inline-flex items-center gap-3 cursor-pointer w-full">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-brand-cream/90">Email notification on publish</p>
+                    <p className="text-xs text-brand-cream/55 mt-0.5">
+                      When enabled, members tagged in this post receive an email the moment it is published.
+                      Requires Resend API key to be configured.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={form.send_email_notification}
+                    onClick={() =>
+                      setForm((prev) => ({ ...prev, send_email_notification: !prev.send_email_notification }))
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors focus:outline-none ${
+                      form.send_email_notification
+                        ? 'border-brand-brown bg-brand-brown'
+                        : 'border-brand-brown/30 bg-brand-dark-grey'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg transition-transform mt-0.5 ${
+                        form.send_email_notification ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </label>
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">

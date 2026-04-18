@@ -11,6 +11,7 @@ export const NEWS_POST_SELECT = `
   archived_at,
   is_global,
   tag_all_members,
+  send_email_notification,
   published_at,
   created_at,
   updated_at,
@@ -32,6 +33,7 @@ export type RawNewsPostRow = {
   archived_at: string | null;
   is_global: boolean;
   tag_all_members: boolean;
+  send_email_notification: boolean;
   published_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -163,6 +165,7 @@ export async function hydrateNewsItems(rows: RawNewsPostRow[]): Promise<NewsItem
     archived_at: row.archived_at,
     is_global: row.is_global,
     tag_all_members: row.tag_all_members,
+    send_email_notification: row.send_email_notification !== false,
     published_at: row.published_at,
     created_at: row.created_at,
     updated_at: row.updated_at,

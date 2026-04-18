@@ -28,6 +28,7 @@ export interface NewsItem {
   archived_at: string | null;
   is_global: boolean;
   tag_all_members: boolean;
+  send_email_notification: boolean;
   published_at: string | null;
   created_at: string | null;
   updated_at: string | null;

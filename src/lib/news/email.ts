@@ -332,6 +332,16 @@ export async function dispatchNewsPublicationEmails(
     };
   }
 
+  if (args.newsItem.send_email_notification === false) {
+    return {
+      enabled: true,
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+      skippedReason: 'Email notifications disabled for this post',
+    };
+  }
+
   const enabled = await isNewsEmailEnabled();
   if (!enabled) {
     return {

@@ -183,6 +183,10 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
       typeof body.tag_all_members === 'boolean'
         ? body.tag_all_members
         : null;
+    const nextSendEmailNotification =
+      typeof body.send_email_notification === 'boolean'
+        ? body.send_email_notification
+        : null;
 
     if (nextIsGlobal !== null) {
       updatePayload.is_global = nextIsGlobal;
@@ -190,6 +194,10 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
 
     if (nextTagAllMembers !== null) {
       updatePayload.tag_all_members = nextTagAllMembers;
+    }
+
+    if (nextSendEmailNotification !== null) {
+      updatePayload.send_email_notification = nextSendEmailNotification;
     }
 
     let parsedStatus: NewsStatus | null = null;

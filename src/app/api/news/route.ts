@@ -379,6 +379,7 @@ export async function POST(request: NextRequest) {
     const requestedMemberIds = normalizeIdArray(body.member_ids);
     const isGlobal = body.is_global === true;
     const tagAllMembers = body.tag_all_members === true;
+    const sendEmailNotification = body.send_email_notification !== false;
     const tripIds = isGlobal ? [] : requestedTripIds;
     const memberIds = tagAllMembers ? [] : requestedMemberIds;
 
@@ -412,6 +413,7 @@ export async function POST(request: NextRequest) {
         published_at: state.published_at,
         is_global: isGlobal,
         tag_all_members: tagAllMembers,
+        send_email_notification: sendEmailNotification,
       })
       .select(NEWS_POST_SELECT)
       .single();

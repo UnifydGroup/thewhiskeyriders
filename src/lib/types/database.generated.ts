@@ -368,6 +368,7 @@ export type SupabaseDatabase = {
           is_global: boolean;
           is_published: boolean;
           published_at: string | null;
+          send_email_notification: boolean;
           tag_all_members: boolean;
           title: string;
           updated_at: string | null;
@@ -382,6 +383,7 @@ export type SupabaseDatabase = {
           is_global?: boolean;
           is_published?: boolean;
           published_at?: string | null;
+          send_email_notification?: boolean;
           tag_all_members?: boolean;
           title: string;
           updated_at?: string | null;
@@ -396,6 +398,7 @@ export type SupabaseDatabase = {
           is_global?: boolean;
           is_published?: boolean;
           published_at?: string | null;
+          send_email_notification?: boolean;
           tag_all_members?: boolean;
           title?: string;
           updated_at?: string | null;

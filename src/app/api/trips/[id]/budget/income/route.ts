@@ -105,3 +105,52 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return errorResponse(ApiErrors.INTERNAL_ERROR);
   }
 }
+
+// PUT /api/trips/[id]/budget/income?entryId=xxx — update a manual income entry
+export async function PUT(request: NextRequest, { params }: Params) {
+  try {
+    const { id: tripId } = await params;
+    const { authenticated, authorized } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
+    if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
+    if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
+
+    const entryId = new URL(request.url).searchParams.get('entryId');
+    if (!entryId) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'entryId required', status: 400 });
+    }
+
+    const body = await getJsonBody(request);
+    const updateData: Record<string, unknown> = {};
+
+    if (body.description !== undefined) updateData.description = body.description;
+    if (body.amount_aud !== undefined) updateData.amount_aud = Number(body.amount_aud);
+    if (body.income_date !== undefined) updateData.income_date = body.income_date;
+    if (body.category !== undefined) updateData.category = body.category ?? 'other';
+    if (body.member_id !== undefined) updateData.member_id = body.member_id || null;
+    if (body.notes !== undefined) updateData.notes = body.notes || null;
+    if (body.reconciled !== undefined) {
+      const reconciled = body.reconciled === true;
+      updateData.reconciled = reconciled;
+      updateData.reconciled_at = reconciled ? new Date().toISOString() : null;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: 'No update fields provided', status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from('trip_income_entries')
+      .update(updateData)
+      .eq('id', entryId)
+      .eq('trip_id', tripId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return successResponse(data);
+  } catch (err) {
+    console.error('PUT budget/income error:', err);
+    return errorResponse(ApiErrors.INTERNAL_ERROR);
+  }
+}
