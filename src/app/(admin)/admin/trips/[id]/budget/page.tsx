@@ -8,8 +8,9 @@ import {
   TrendingUp, Settings, LayoutGrid, Eye, EyeOff,
   RefreshCw, Upload, ArrowDownCircle, ArrowUpCircle, AlertTriangle,
   BookOpen, ChevronDown, ChevronUp, Info, Wallet, Repeat, ArrowLeftRight,
-  Building2, Landmark, Search,
+  Building2, Landmark, Search, Download,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
@@ -309,7 +310,7 @@ function parseCategoryNotes(
   rawNotes: string | null,
   plannedAud: number,
   defaultMemberCount: number
-): { notesText: string; parts: BudgetPart[] } {
+): { notesText: string; parts: BudgetPart[]; committed_aud: number } {
   const fallbackPart: BudgetPart = {
     id: `part-fallback-${Date.now()}`,
     name: 'Main',
@@ -318,13 +319,13 @@ function parseCategoryNotes(
     member_count: Math.max(1, defaultMemberCount),
   };
   if (!rawNotes) {
-    return { notesText: '', parts: [fallbackPart] };
+    return { notesText: '', parts: [fallbackPart], committed_aud: 0 };
   }
 
   try {
     const parsed = JSON.parse(rawNotes);
     if (parsed && typeof parsed === 'object') {
-      const parsedNotes = parsed as ParsedCategoryNotes;
+      const parsedNotes = parsed as ParsedCategoryNotes & { committed_aud?: unknown };
       const partsRaw = Array.isArray(parsedNotes.parts) ? parsedNotes.parts : [];
       const normalised = normaliseBudgetParts(partsRaw as BudgetPart[], defaultMemberCount);
       return {
@@ -332,21 +333,31 @@ function parseCategoryNotes(
           ? parsedNotes.notes_text
           : '',
         parts: normalised.length > 0 ? normalised : [fallbackPart],
+        committed_aud: typeof parsedNotes.committed_aud === 'number' ? parsedNotes.committed_aud : 0,
       };
     }
   } catch {
     // Backwards compatibility for plain-text notes
   }
 
-  return { notesText: rawNotes, parts: [fallbackPart] };
+  return { notesText: rawNotes, parts: [fallbackPart], committed_aud: 0 };
 }
 
-function encodeCategoryNotes(notesText: string, parts: BudgetPart[]): string | null {
+function encodeCategoryNotes(notesText: string, parts: BudgetPart[], committedAud: number): string | null {
   const payload = {
     notes_text: notesText.trim() || null,
     parts,
+    committed_aud: committedAud || null,
   };
   return JSON.stringify(payload);
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
 }
 
 function fmt(n: number) { return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
@@ -505,6 +516,7 @@ export default function AdminBudgetPage() {
 
   // UI state — account balances (cash position)
   const [accountBalances, setAccountBalances] = useState<AccountBalances>({ westpac_choice: 0, westpac_life: 0, paypal: 0, balance_date: new Date().toISOString().split('T')[0] });
+  const [interestRatePa, setInterestRatePa] = useState(0); // annual % rate e.g. 4.5
   const [editingBalances, setEditingBalances] = useState(false);
   const [balanceForm, setBalanceForm] = useState<AccountBalances>({ westpac_choice: 0, westpac_life: 0, paypal: 0, balance_date: new Date().toISOString().split('T')[0] });
 
@@ -514,11 +526,14 @@ export default function AdminBudgetPage() {
 
   // UI state — expense search/filter
   const [expenseSearch, setExpenseSearch] = useState('');
+  const [ledgerDateFrom, setLedgerDateFrom] = useState('');
+  const [ledgerDateTo, setLedgerDateTo] = useState('');
+  const [ledgerAccountFilter, setLedgerAccountFilter] = useState('');
 
   // UI state — bank CSV import
   const [showBankImport, setShowBankImport] = useState(false);
   const [bankCsvText, setBankCsvText] = useState('');
-  const [bankCsvRows, setBankCsvRows] = useState<{ date: string; description: string; debit: number; credit: number; selected: boolean; type: 'income' | 'expense' | 'skip' }[]>([]);
+  const [bankCsvRows, setBankCsvRows] = useState<{ date: string; description: string; debit: number; credit: number; selected: boolean; type: 'income' | 'expense' | 'skip'; category_id: string }[]>([]);
 
   // UI state — category form
   const [showCatForm, setShowCatForm] = useState(false);
@@ -527,6 +542,7 @@ export default function AdminBudgetPage() {
     name: '',
     color: '#B5621E',
     notes_text: '',
+    committed_aud: '0',
     parts: [createBudgetPart(1)] as BudgetPart[],
   });
 
@@ -589,6 +605,9 @@ export default function AdminBudgetPage() {
               };
               setAccountBalances(balances);
               setBalanceForm(balances);
+            }
+            if (parsed?.interest_rate_pa !== undefined) {
+              setInterestRatePa(Number(parsed.interest_rate_pa) || 0);
             }
           } catch { /* ignore */ }
         }
@@ -1325,6 +1344,7 @@ export default function AdminBudgetPage() {
         name: cat.name,
         color: cat.color,
         notes_text: parsed.notesText,
+        committed_aud: String(parsed.committed_aud || ''),
         parts: parsed.parts,
       });
     } else {
@@ -1333,6 +1353,7 @@ export default function AdminBudgetPage() {
         name: '',
         color: '#B5621E',
         notes_text: '',
+        committed_aud: '0',
         parts: [createBudgetPart(defaultParticipantCount)],
       });
     }
@@ -1376,7 +1397,7 @@ export default function AdminBudgetPage() {
         name: catForm.name.trim(),
         planned_aud,
         color: catForm.color,
-        notes: encodeCategoryNotes(catForm.notes_text, parts),
+        notes: encodeCategoryNotes(catForm.notes_text, parts, parseFloat(catForm.committed_aud) || 0),
       });
       const url = editingCat ? `/api/trips/${tripId}/budget/categories/${editingCat.id}` : `/api/trips/${tripId}/budget/categories`;
       const res = await fetch(url, { method: editingCat ? 'PUT' : 'POST', headers: h, body });
@@ -1460,6 +1481,21 @@ export default function AdminBudgetPage() {
     finally { setSaving(false); }
   };
 
+  const handleSaveInterestRate = async (rate: number) => {
+    try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
+      let existingNotes: Record<string, unknown> = {};
+      if (settings.notes) { try { existingNotes = JSON.parse(settings.notes); } catch { /* ignore */ } }
+      const updatedNotes = JSON.stringify({ ...existingNotes, interest_rate_pa: rate });
+      const updatedSettings = { ...settings, notes: updatedNotes };
+      const res = await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify(updatedSettings) });
+      if (!res.ok) throw new Error();
+      setInterestRatePa(rate);
+      setSettings((prev) => ({ ...prev, notes: updatedNotes }));
+      showToast('success', 'Interest rate saved');
+    } catch { showToast('error', 'Failed to save interest rate'); }
+  };
+
   const handleGenerateRecurring = async () => {
     const amount = parseFloat(recurringForm.amount_aud);
     const months = parseInt(recurringForm.months);
@@ -1524,7 +1560,7 @@ export default function AdminBudgetPage() {
       }
       if (!date || (!debit && !credit)) return null;
       const type: 'income' | 'expense' | 'skip' = credit > 0 ? 'income' : 'expense';
-      return { date, description, debit, credit, selected: true, type };
+      return { date, description, debit, credit, selected: true, type, category_id: '' };
     }).filter((r): r is NonNullable<typeof r> => r !== null);
     setBankCsvRows(rows);
   };
@@ -1542,7 +1578,7 @@ export default function AdminBudgetPage() {
           const res = await fetch(`/api/trips/${tripId}/budget/income`, { method: 'POST', headers: h, body });
           if (res.ok) created++;
         } else {
-          const body = JSON.stringify({ description: row.description, amount: row.debit, currency: 'AUD', amount_aud: row.debit, exchange_rate: 1, amount_aud_overridden: false, expense_date: row.date, category_id: null, paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null, notes: null, source: 'bank_import', reconciled: true });
+          const body = JSON.stringify({ description: row.description, amount: row.debit, currency: 'AUD', amount_aud: row.debit, exchange_rate: 1, amount_aud_overridden: false, expense_date: row.date, category_id: row.category_id || null, paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null, notes: null, source: 'bank_import', reconciled: true });
           const res = await fetch(`/api/trips/${tripId}/budget/expenses`, { method: 'POST', headers: h, body });
           if (res.ok) created++;
         }
@@ -1901,7 +1937,7 @@ export default function AdminBudgetPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-brand-black">
-                  <tr>{['Account','Type','Inflow','Outflow','Net','Member Portal'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                  <tr>{['Account','Type','Inflow','Outflow','Net','Vs Balance','Member Portal'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-brand-tan/10">
                   {accountFlowSummary.map((row) => (
@@ -1913,6 +1949,23 @@ export default function AdminBudgetPage() {
                       <td className="px-4 py-3 font-semibold">
                         <span className={row.net >= 0 ? 'text-brand-tan' : 'text-red-400'}>{fmt(row.net)}</span>
                       </td>
+                      <td className="px-4 py-3 font-semibold">
+                        {(() => {
+                          if (row.isUnassigned) return <span className="text-brand-cream/20 text-xs">—</span>;
+                          const acctId = row.id;
+                          const balanceValue = acctId === 'westpac_choice' ? accountBalances.westpac_choice
+                            : acctId === 'westpac_life' ? accountBalances.westpac_life
+                            : acctId === 'paypal' ? accountBalances.paypal
+                            : null;
+                          if (balanceValue === null) return <span className="text-brand-cream/20 text-xs">—</span>;
+                          const variance = balanceValue - row.net;
+                          return (
+                            <span className={Math.abs(variance) < 1 ? 'text-green-400 text-xs' : Math.abs(variance) < 100 ? 'text-amber-400 text-xs' : 'text-red-400 text-xs'}>
+                              {variance >= 0 ? '+' : ''}{fmt(variance)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         {row.isMemberPortalSource
                           ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-400 border border-green-600/30">Shown to members</span>
@@ -1923,6 +1976,7 @@ export default function AdminBudgetPage() {
                 </tbody>
               </table>
             </div>
+            <p className="px-5 py-2 text-xs text-brand-cream/30 border-t border-brand-tan/10">Vs Balance compares the entered account balance against ledger net (inflow − outflow). Near zero = records match.</p>
           </div>
 
           {/* Category breakdown */}
@@ -1949,6 +2003,12 @@ export default function AdminBudgetPage() {
                         <div className="w-full h-1.5 bg-brand-black rounded-full overflow-hidden">
                           <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: cat.over_budget ? '#ef4444' : cat.color }} />
                         </div>
+                        {(() => {
+                          const committed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount).committed_aud;
+                          return committed > 0 ? (
+                            <p className="text-[10px] text-amber-400/60 mt-0.5">+{fmt(committed)} committed</p>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
                   );
@@ -1984,6 +2044,45 @@ export default function AdminBudgetPage() {
               </div>
             </div>
           )}
+
+          {/* Monthly Income vs Expenses Chart */}
+          {ledger.length > 0 && (() => {
+            // Group ledger rows by month (YYYY-MM)
+            const monthMap = new Map<string, { income: number; expenses: number }>();
+            ledger.forEach((row) => {
+              const month = row.date.slice(0, 7); // YYYY-MM
+              if (!monthMap.has(month)) monthMap.set(month, { income: 0, expenses: 0 });
+              const m = monthMap.get(month)!;
+              if (row.type === 'income') m.income += Number(row.amount_aud || 0);
+              else m.expenses += Math.abs(Number(row.amount_aud || 0));
+            });
+            const chartData = Array.from(monthMap.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([month, vals]) => ({
+                month: new Date(month + '-01').toLocaleDateString('en-AU', { month: 'short', year: '2-digit' }),
+                Income: Math.round(vals.income),
+                Expenses: Math.round(vals.expenses),
+              }));
+            if (chartData.length === 0) return null;
+            return (
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-5">
+                <h3 className="font-semibold text-brand-cream mb-4">Monthly Income vs Expenses</h3>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={chartData} barGap={4} barCategoryGap="30%">
+                    <XAxis dataKey="month" tick={{ fill: '#C9B98A80', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fill: '#C9B98A60', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      formatter={(val) => [`$${Number(val).toLocaleString('en-AU', { minimumFractionDigits: 0 })}`]}
+                      contentStyle={{ background: '#1a1a1a', border: '1px solid #C9B98A30', borderRadius: 8, color: '#C9B98A' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12, color: '#C9B98A80' }} />
+                    <Bar dataKey="Income" fill="#4ade80" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="Expenses" fill="#f87171" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2110,6 +2209,45 @@ export default function AdminBudgetPage() {
             </div>
           </div>
 
+          {/* Interest income projection */}
+          {interestRatePa > 0 && (
+            <div className="bg-brand-dark-grey border border-amber-600/20 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp className="w-4 h-4 text-amber-400" />
+                <h3 className="font-semibold text-brand-cream">Interest Income Projection</h3>
+                <span className="text-xs text-amber-400/60">at {interestRatePa}% p.a. on Westpac Life</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Monthly', months: 1 },
+                  { label: '3 Months', months: 3 },
+                  { label: '6 Months', months: 6 },
+                  { label: '12 Months', months: 12 },
+                ].map(({ label, months }) => (
+                  <div key={label} className="rounded-lg bg-amber-900/10 border border-amber-600/20 px-4 py-3 text-center">
+                    <p className="text-xs text-brand-cream/40 mb-1">{label}</p>
+                    <p className="font-bold text-amber-300">{fmt(accountBalances.westpac_life * (interestRatePa / 100) / 12 * months)}</p>
+                  </div>
+                ))}
+              </div>
+              {(() => {
+                const totalInterestEarned = incomeEntries.filter((e) => e.category === 'interest').reduce((s, e) => s + e.amount_aud, 0);
+                const tripStart = new Date('2025-07-01');
+                const todayDate = new Date();
+                const monthsElapsed = Math.max(0, (todayDate.getFullYear() - tripStart.getFullYear()) * 12 + todayDate.getMonth() - tripStart.getMonth());
+                const projected = accountBalances.westpac_life * (interestRatePa / 100) / 12 * monthsElapsed;
+                const variance = totalInterestEarned - projected;
+                return totalInterestEarned > 0 ? (
+                  <div className="mt-3 pt-3 border-t border-amber-600/20 flex items-center gap-4 text-xs text-brand-cream/50">
+                    <span>Earned to date: <span className="text-amber-300 font-medium">{fmt(totalInterestEarned)}</span></span>
+                    <span>Expected ({monthsElapsed}mo): <span className="text-amber-300/70 font-medium">{fmt(projected)}</span></span>
+                    <span className={`font-medium ${variance >= 0 ? 'text-green-400' : 'text-red-400'}`}>{variance >= 0 ? '+' : ''}{fmt(variance)} vs expected</span>
+                  </div>
+                ) : null;
+              })()}
+            </div>
+          )}
+
           {/* Interest income section */}
           {incomeEntries.filter((e) => e.category === 'interest').length > 0 && (
             <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
@@ -2144,30 +2282,56 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'ledger' && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-brand-cream/50">
-              <Info className="w-4 h-4" />
-              Chronological view of all income and expenses with running balance
+          <div className="flex items-center gap-2 text-sm text-brand-cream/50">
+            <Info className="w-4 h-4" />
+            Chronological view of all income and expenses with running balance
+          </div>
+          <div className="space-y-3">
+            {/* Row 1: quick actions */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={() => toggleLedgerActionMode('transfer')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'transfer' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}>Transfer</button>
+                <button onClick={() => toggleLedgerActionMode('interest')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'interest' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}>Interest</button>
+                <button onClick={() => toggleLedgerActionMode('fx')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'fx' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}>Currency Change</button>
+              </div>
+              <button
+                onClick={() => {
+                  const filtered = ledger.filter((row) => {
+                    if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
+                    if (ledgerDateTo && row.date > ledgerDateTo) return false;
+                    if (ledgerAccountFilter) {
+                      const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                      if (acctId !== ledgerAccountFilter) return false;
+                    }
+                    return true;
+                  });
+                  downloadCsv('whiskey-riders-ledger.csv', [
+                    ['Date','Description','Type','Sub-type','Account','Amount AUD','Running Balance','Reconciled'],
+                    ...filtered.map((r) => [
+                      r.date, r.description, r.type, r.sub_type,
+                      getAccountDisplayName(getTransactionAccountId(r.notes, r.sub_type === 'member_payment' ? memberPortalAccountId : null)),
+                      String(r.amount_aud), String(r.running_balance), r.reconciled ? 'Yes' : 'No',
+                    ]),
+                  ]);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-brand-tan/30 rounded-lg text-xs text-brand-cream/70 hover:text-brand-cream hover:border-brand-tan/60"
+              >
+                <Download className="w-3.5 h-3.5" /> Export CSV
+              </button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => toggleLedgerActionMode('transfer')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'transfer' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}
-              >
-                Transfer
-              </button>
-              <button
-                onClick={() => toggleLedgerActionMode('interest')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'interest' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}
-              >
-                Interest
-              </button>
-              <button
-                onClick={() => toggleLedgerActionMode('fx')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${ledgerActionMode === 'fx' ? 'bg-brand-tan text-brand-black border-brand-tan' : 'border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10'}`}
-              >
-                Currency Change
-              </button>
+            {/* Row 2: filters */}
+            <div className="flex flex-wrap items-center gap-3 p-3 bg-brand-black/30 rounded-lg border border-brand-tan/10">
+              <span className="text-xs text-brand-cream/40 font-medium">Filter:</span>
+              <input type="date" value={ledgerDateFrom} onChange={(e) => setLedgerDateFrom(e.target.value)} className="px-2 py-1 bg-brand-black border border-brand-tan/20 rounded text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan" />
+              <span className="text-xs text-brand-cream/30">to</span>
+              <input type="date" value={ledgerDateTo} onChange={(e) => setLedgerDateTo(e.target.value)} className="px-2 py-1 bg-brand-black border border-brand-tan/20 rounded text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan" />
+              <select value={ledgerAccountFilter} onChange={(e) => setLedgerAccountFilter(e.target.value)} className="px-2 py-1 bg-brand-black border border-brand-tan/20 rounded text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan">
+                <option value="">All accounts</option>
+                {accountOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              {(ledgerDateFrom || ledgerDateTo || ledgerAccountFilter) && (
+                <button onClick={() => { setLedgerDateFrom(''); setLedgerDateTo(''); setLedgerAccountFilter(''); }} className="text-xs text-brand-tan hover:underline">Clear filters</button>
+              )}
             </div>
           </div>
 
@@ -2455,44 +2619,81 @@ export default function AdminBudgetPage() {
                     <tr>{['Date','Description','Type','Account','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
-                    {ledger.map((row, i) => {
-                      const fallbackAccountId = row.sub_type === 'member_payment' ? memberPortalAccountId : null;
-                      const accountId = getTransactionAccountId(row.notes, fallbackAccountId);
-                      return (
-                        <tr key={`${row.id}-${i}`} className={`hover:bg-brand-tan/5 ${!row.reconciled && row.source === 'manual' ? 'border-l-2 border-amber-500/50' : ''}`}>
-                          <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(row.date)}</td>
-                          <td className="px-4 py-3 text-brand-cream max-w-[220px]">
-                            <p className="truncate">{row.description}</p>
-                            {row.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(row.notes)}</p>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${row.type === 'income' ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-red-900/20 text-red-400 border-red-600/30'}`}>
-                              {row.type === 'income' ? '↓' : '↑'} {row.type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">{getAccountDisplayName(accountId)}</td>
-                          <td className="px-4 py-3 font-semibold whitespace-nowrap">
-                            <span className={row.amount_aud >= 0 ? 'text-green-400' : 'text-red-400'}>{fmtSigned(row.amount_aud)}</span>
-                          </td>
-                          <td className="px-4 py-3 font-semibold whitespace-nowrap">
-                            <span className={row.running_balance >= 0 ? 'text-brand-cream' : 'text-red-400'}>{fmt(row.running_balance)}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            {row.reconciled
-                              ? <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="w-3.5 h-3.5" />Reconciled</span>
-                              : row.source === 'manual'
-                                ? <button onClick={() => handleReconcile(row.type === 'income' ? 'income' : 'expense', row.id, true)} className="text-xs text-amber-400 hover:underline flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />Mark reconciled</button>
-                                : <span className="text-xs text-brand-cream/30">—</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button onClick={() => openLedgerEditor(row)} className="p-1 text-brand-cream/30 hover:text-brand-tan rounded" title="Edit transaction">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {(() => {
+                      const filteredLedger = ledger.filter((row) => {
+                        if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
+                        if (ledgerDateTo && row.date > ledgerDateTo) return false;
+                        if (ledgerAccountFilter) {
+                          const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                          if (acctId !== ledgerAccountFilter) return false;
+                        }
+                        return true;
+                      });
+                      return filteredLedger.map((row, i) => {
+                        const fallbackAccountId = row.sub_type === 'member_payment' ? memberPortalAccountId : null;
+                        const accountId = getTransactionAccountId(row.notes, fallbackAccountId);
+                        return (
+                          <tr key={`${row.id}-${i}`} className={`hover:bg-brand-tan/5 ${!row.reconciled && row.source === 'manual' ? 'border-l-2 border-amber-500/50' : ''}`}>
+                            <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(row.date)}</td>
+                            <td className="px-4 py-3 text-brand-cream max-w-[220px]">
+                              <p className="truncate">{row.description}</p>
+                              {row.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(row.notes)}</p>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${row.type === 'income' ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-red-900/20 text-red-400 border-red-600/30'}`}>
+                                {row.type === 'income' ? '↓' : '↑'} {row.type}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">{getAccountDisplayName(accountId)}</td>
+                            <td className="px-4 py-3 font-semibold whitespace-nowrap">
+                              <span className={row.amount_aud >= 0 ? 'text-green-400' : 'text-red-400'}>{fmtSigned(row.amount_aud)}</span>
+                            </td>
+                            <td className="px-4 py-3 font-semibold whitespace-nowrap">
+                              <span className={row.running_balance >= 0 ? 'text-brand-cream' : 'text-red-400'}>{fmt(row.running_balance)}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {row.reconciled
+                                ? <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="w-3.5 h-3.5" />Reconciled</span>
+                                : row.source === 'manual'
+                                  ? <button onClick={() => handleReconcile(row.type === 'income' ? 'income' : 'expense', row.id, true)} className="text-xs text-amber-400 hover:underline flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />Mark reconciled</button>
+                                  : <span className="text-xs text-brand-cream/30">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button onClick={() => openLedgerEditor(row)} className="p-1 text-brand-cream/30 hover:text-brand-tan rounded" title="Edit transaction">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
+                  <tfoot className="bg-brand-black/40 border-t border-brand-tan/20">
+                    <tr>
+                      <td colSpan={4} className="px-4 py-2 text-xs text-brand-cream/40">{(() => {
+                        const filteredLedger = ledger.filter((row) => {
+                          if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
+                          if (ledgerDateTo && row.date > ledgerDateTo) return false;
+                          if (ledgerAccountFilter) {
+                            const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                            if (acctId !== ledgerAccountFilter) return false;
+                          }
+                          return true;
+                        });
+                        return `${filteredLedger.length} rows${(ledgerDateFrom || ledgerDateTo || ledgerAccountFilter) ? ' (filtered)' : ''}`;
+                      })()}</td>
+                      <td className="px-4 py-2 font-bold text-green-400 text-sm">{fmt(ledger.filter((row) => {
+                        if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
+                        if (ledgerDateTo && row.date > ledgerDateTo) return false;
+                        if (ledgerAccountFilter) {
+                          const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                          if (acctId !== ledgerAccountFilter) return false;
+                        }
+                        return row.type === 'income';
+                      }).reduce((s, r) => s + r.amount_aud, 0))}</td>
+                      <td colSpan={3} />
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
@@ -2708,6 +2909,38 @@ export default function AdminBudgetPage() {
               <h3 className="font-semibold text-brand-cream">Payment Tracker Status</h3>
               <p className="text-xs text-brand-cream/40">Legacy view retained in Financial Manager</p>
             </div>
+
+            {/* Member payment summary cards */}
+            {memberPaymentSummary.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
+                {memberPaymentSummary.map((m) => {
+                  const breakdown = memberBreakdown.find((b) => b.user_id === m.member_id);
+                  const share = breakdown?.cost_share_aud ?? 0;
+                  const paid = m.total_paid;
+                  const remaining = share > 0 ? share - paid : 0;
+                  const pct = share > 0 ? Math.min(100, (paid / share) * 100) : 0;
+                  const isPaid = remaining <= 0;
+                  return (
+                    <div key={m.member_id} className={`rounded-lg border p-3 ${isPaid ? 'border-green-600/30 bg-green-900/10' : 'border-brand-tan/20 bg-brand-dark-grey'}`}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <p className="font-semibold text-brand-cream text-sm">{m.nickname || m.full_name}</p>
+                        {isPaid
+                          ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-900/30 text-green-400 border border-green-600/30 whitespace-nowrap">Paid ✓</span>
+                          : <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-900/30 text-amber-400 border border-amber-600/30 whitespace-nowrap">{m.payment_count} payment{m.payment_count === 1 ? '' : 's'}</span>}
+                      </div>
+                      <p className="text-lg font-bold text-brand-tan">{fmt(paid)}</p>
+                      {share > 0 && <p className="text-xs text-brand-cream/40 mb-2">of {fmt(share)} target{remaining > 0 ? ` · ${fmt(remaining)} remaining` : ''}</p>}
+                      {share > 0 && (
+                        <div className="w-full h-1.5 bg-brand-black rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${isPaid ? 'bg-green-500' : 'bg-brand-tan'}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      )}
+                      {m.last_payment_date && <p className="text-[10px] text-brand-cream/25 mt-1.5">Last: {fmtShort(m.last_payment_date)}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
@@ -3081,6 +3314,23 @@ export default function AdminBudgetPage() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <p className="text-brand-cream/60 text-sm">Log and manage all trip expenses</p>
             <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  downloadCsv('whiskey-riders-expenses.csv', [
+                    ['Date','Description','Category','Paid By','Account','Amount','Currency','AUD','Source','Reconciled'],
+                    ...expenses.map((e) => [
+                      e.expense_date, e.description, e.category?.name || '',
+                      e.paid_by_type === 'group_kitty' ? 'Group Kitty' : e.paid_by_type === 'member' ? (e.payer?.nickname || e.payer?.full_name || 'Member') : (e.paid_by_label || 'External'),
+                      getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
+                      String(e.amount), e.currency, String(e.amount_aud),
+                      e.source, e.reconciled ? 'Yes' : 'No',
+                    ]),
+                  ]);
+                }}
+                className="flex items-center gap-2 border border-brand-tan/20 text-brand-cream/50 hover:text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10"
+              >
+                <Download className="w-4 h-4" /> Export
+              </button>
               <button onClick={() => { setShowBankImport(!showBankImport); setShowExpImport(false); setShowExpForm(false); setBankCsvRows([]); setBankCsvText(''); }} className="flex items-center gap-2 border border-blue-600/40 hover:border-blue-400 text-blue-400 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-900/20">
                 <Landmark className="w-4 h-4" /> Import Bank CSV
               </button>
@@ -3125,9 +3375,23 @@ export default function AdminBudgetPage() {
                       <button onClick={() => setBankCsvRows((prev) => prev.map((r) => ({ ...r, selected: false })))} className="text-xs text-brand-cream/50 hover:underline">Deselect all</button>
                     </div>
                   </div>
+                  <div className="flex items-center gap-3 p-2 bg-brand-black/30 rounded-lg border border-brand-tan/10">
+                    <span className="text-xs text-brand-cream/50 flex-shrink-0">Assign category to all selected:</span>
+                    <select
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        setBankCsvRows((prev) => prev.map((r) => r.selected ? { ...r, category_id: e.target.value } : r));
+                      }}
+                      className="flex-1 px-2 py-1 bg-brand-black border border-brand-tan/20 rounded text-xs text-brand-cream focus:outline-none"
+                      defaultValue=""
+                    >
+                      <option value="">— Select to bulk-assign —</option>
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
                   <div className="overflow-x-auto rounded-lg border border-brand-tan/20">
                     <table className="w-full text-xs">
-                      <thead className="bg-brand-black"><tr>{['Import', 'Date', 'Description', 'Debit', 'Credit', 'Type'].map((h) => <th key={h} className="px-3 py-2 text-left text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+                      <thead className="bg-brand-black"><tr>{['Import', 'Date', 'Description', 'Debit', 'Credit', 'Type', 'Category'].map((h) => <th key={h} className="px-3 py-2 text-left text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
                       <tbody className="divide-y divide-brand-tan/10">
                         {bankCsvRows.map((row, i) => (
                           <tr key={i} className={`hover:bg-brand-tan/5 ${!row.selected ? 'opacity-40' : ''}`}>
@@ -3141,6 +3405,12 @@ export default function AdminBudgetPage() {
                                 <option value="expense">Expense</option>
                                 <option value="income">Income</option>
                                 <option value="skip">Skip</option>
+                              </select>
+                            </td>
+                            <td className="px-3 py-2">
+                              <select value={row.category_id} onChange={(e) => setBankCsvRows((prev) => prev.map((r, j) => j === i ? { ...r, category_id: e.target.value } : r))} className="bg-brand-black border border-brand-tan/20 rounded px-1 py-0.5 text-brand-cream/80">
+                                <option value="">—</option>
+                                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             </td>
                           </tr>
@@ -3530,6 +3800,20 @@ export default function AdminBudgetPage() {
                     <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
                     <textarea rows={2} value={catForm.notes_text} onChange={(e) => setCatForm({ ...catForm, notes_text: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
                   </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Committed / Forecast (AUD)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={catForm.committed_aud}
+                        onChange={(e) => setCatForm({ ...catForm, committed_aud: e.target.value })}
+                        className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                        placeholder="Booked but not yet paid (deposits, confirmed bookings)"
+                      />
+                    </div>
+                    <p className="text-xs text-brand-cream/30 mt-1">Booked / confirmed commitments not yet paid — shown alongside actual spend</p>
+                  </div>
                 </div>
 
                 <div className="border border-brand-tan/20 rounded-lg overflow-hidden">
@@ -3623,7 +3907,7 @@ export default function AdminBudgetPage() {
 	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
 	              <div className="overflow-x-auto">
 	                <table className="w-full min-w-[900px] text-sm">
-	                  <thead className="bg-brand-black"><tr>{['','Category','Budget (Group)','Budget (Per Person)','Spent','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+	                  <thead className="bg-brand-black"><tr>{['','Category','Budget (Group)','Budget (Per Person)','Spent','Committed','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
 	                  <tbody className="divide-y divide-brand-tan/10">
 	                    {categories.map((cat) => {
 	                      const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
@@ -3637,6 +3921,12 @@ export default function AdminBudgetPage() {
 	                          <td className="px-4 py-3 text-brand-cream/70">{fmt(cat.planned_aud)}</td>
 	                          <td className="px-4 py-3 text-brand-cream/60">{fmt(cat.planned_aud / participantCount)}</td>
 	                          <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400' : 'text-brand-cream/70'}>{fmt(cat.spent_aud ?? 0)}</span></td>
+	                          <td className="px-4 py-3 text-amber-300/70">
+	                            {(() => {
+	                              const committed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount).committed_aud;
+	                              return committed > 0 ? fmt(committed) : <span className="text-brand-cream/20">—</span>;
+	                            })()}
+	                          </td>
 	                          <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400 font-semibold' : 'text-green-400'}>{fmt(Math.abs(cat.remaining_aud ?? 0))}{cat.over_budget ? ' over' : ''}</span></td>
 	                          <td className="px-4 py-3"><div className="flex gap-1"><button onClick={() => openCatForm(cat)} className="p-1 text-brand-cream/30 hover:text-brand-cream"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleDeleteCat(cat.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></div></td>
 	                        </tr>
@@ -3650,6 +3940,7 @@ export default function AdminBudgetPage() {
 	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categoriesBudgetTotal)}</td>
 	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categoriesBudgetTotal / participantCount)}</td>
 	                      <td className="px-4 py-3 font-semibold text-brand-cream">{fmt(categoriesSpentTotal)}</td>
+	                      <td className="px-4 py-3 font-semibold text-amber-300/70">{fmt(categories.reduce((s, c) => s + parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).committed_aud, 0))}</td>
 	                      <td className="px-4 py-3 font-semibold">
 	                        <span className={categoriesRemainingTotal < 0 ? 'text-red-400' : 'text-green-400'}>
 	                          {fmt(categoriesRemainingTotal)}
@@ -3684,6 +3975,27 @@ export default function AdminBudgetPage() {
                   Per person ({participantCount} members): <span className="text-brand-tan font-semibold">{fmt((settings.total_budget_aud || 0) / participantCount)}</span>
                 </div>
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-brand-cream/60 mb-1">Westpac Life Savings Rate (% per year)</label>
+              <div className="flex gap-3 items-center">
+                <div className="relative flex-1 max-w-[200px]">
+                  <input
+                    type="number" min="0" max="20" step="0.01"
+                    value={interestRatePa || ''}
+                    onChange={(e) => setInterestRatePa(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    placeholder="e.g. 4.50"
+                  />
+                  <span className="absolute right-3 top-2 text-brand-cream/40 text-sm">%</span>
+                </div>
+                <button onClick={() => handleSaveInterestRate(interestRatePa)} className="px-3 py-2 bg-brand-tan/20 border border-brand-tan/30 rounded-lg text-brand-tan text-sm font-semibold hover:bg-brand-tan/30">Save</button>
+              </div>
+              {interestRatePa > 0 && accountBalances.westpac_life > 0 && (
+                <p className="text-xs text-amber-400/70 mt-1">
+                  Projected monthly interest: ~{fmt(accountBalances.westpac_life * (interestRatePa / 100) / 12)} at current balance
+                </p>
+              )}
             </div>
             <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><textarea rows={3} value={settings.notes ?? ''} onChange={(e) => setSettings({ ...settings, notes: e.target.value || null })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
           </div>
