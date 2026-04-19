@@ -519,6 +519,7 @@ export default function AdminBudgetPage() {
   const [interestRatePa, setInterestRatePa] = useState(0); // annual % rate e.g. 4.5
   const [editingBalances, setEditingBalances] = useState(false);
   const [balanceForm, setBalanceForm] = useState<AccountBalances>({ westpac_choice: 0, westpac_life: 0, paypal: 0, balance_date: new Date().toISOString().split('T')[0] });
+  const [settingsNotesText, setSettingsNotesText] = useState(''); // free-text notes separate from JSON blob
 
   // UI state — recurring income generator
   const [showRecurringForm, setShowRecurringForm] = useState(false);
@@ -591,7 +592,7 @@ export default function AdminBudgetPage() {
       setMemberBreakdown(d.member_breakdown ?? []);
       if (d.settings) {
         setSettings(d.settings);
-        // Load account balances from settings.notes
+        // Load account balances, interest rate, and free-text notes from settings.notes JSON blob
         if (d.settings.notes) {
           try {
             const parsed = JSON.parse(d.settings.notes);
@@ -609,7 +610,13 @@ export default function AdminBudgetPage() {
             if (parsed?.interest_rate_pa !== undefined) {
               setInterestRatePa(Number(parsed.interest_rate_pa) || 0);
             }
-          } catch { /* ignore */ }
+            if (typeof parsed?.notes_text === 'string') {
+              setSettingsNotesText(parsed.notes_text);
+            }
+          } catch {
+            // notes is plain text (legacy), treat it as the free-text note
+            setSettingsNotesText(d.settings.notes);
+          }
         }
       }
 
@@ -1451,12 +1458,29 @@ export default function AdminBudgetPage() {
 
   // ── Settings ──────────────────────────────────────────────────────────────
 
+  // Build a merged settings.notes JSON blob, preserving all stored fields
+  const buildNotesBlob = (overrides: Record<string, unknown> = {}): string => {
+    let existing: Record<string, unknown> = {};
+    if (settings.notes) { try { existing = JSON.parse(settings.notes); } catch { /* ignore */ } }
+    return JSON.stringify({
+      ...existing,
+      account_balances: accountBalances,
+      interest_rate_pa: interestRatePa,
+      notes_text: settingsNotesText,
+      ...overrides,
+    });
+  };
+
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify(settings) });
+      // Always merge notes into JSON blob — never overwrite with raw textarea value
+      const updatedNotes = buildNotesBlob();
+      const updatedSettings = { ...settings, notes: updatedNotes };
+      const res = await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify(updatedSettings) });
       if (!res.ok) throw new Error();
+      setSettings((prev) => ({ ...prev, notes: updatedNotes }));
       showToast('success', 'Settings saved'); fetchData();
     } catch { showToast('error', 'Failed to save settings'); }
     finally { setSaving(false); }
@@ -1466,10 +1490,7 @@ export default function AdminBudgetPage() {
     setSaving(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      // Merge into settings.notes preserving other data
-      let existingNotes: Record<string, unknown> = {};
-      if (settings.notes) { try { existingNotes = JSON.parse(settings.notes); } catch { /* ignore */ } }
-      const updatedNotes = JSON.stringify({ ...existingNotes, account_balances: balanceForm });
+      const updatedNotes = buildNotesBlob({ account_balances: balanceForm });
       const updatedSettings = { ...settings, notes: updatedNotes };
       const res = await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify(updatedSettings) });
       if (!res.ok) throw new Error();
@@ -1484,9 +1505,7 @@ export default function AdminBudgetPage() {
   const handleSaveInterestRate = async (rate: number) => {
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      let existingNotes: Record<string, unknown> = {};
-      if (settings.notes) { try { existingNotes = JSON.parse(settings.notes); } catch { /* ignore */ } }
-      const updatedNotes = JSON.stringify({ ...existingNotes, interest_rate_pa: rate });
+      const updatedNotes = buildNotesBlob({ interest_rate_pa: rate });
       const updatedSettings = { ...settings, notes: updatedNotes };
       const res = await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify(updatedSettings) });
       if (!res.ok) throw new Error();
@@ -3997,7 +4016,7 @@ export default function AdminBudgetPage() {
                 </p>
               )}
             </div>
-            <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><textarea rows={3} value={settings.notes ?? ''} onChange={(e) => setSettings({ ...settings, notes: e.target.value || null })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+            <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><textarea rows={3} value={settingsNotesText} onChange={(e) => setSettingsNotesText(e.target.value)} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="Any general notes about this trip's budget…" /></div>
           </div>
 
           <div className="bg-brand-black/30 border border-brand-tan/20 rounded-lg p-5 space-y-5">
