@@ -521,6 +521,10 @@ export default function AdminBudgetPage() {
   const [balanceForm, setBalanceForm] = useState<AccountBalances>({ westpac_choice: 0, westpac_life: 0, paypal: 0, balance_date: new Date().toISOString().split('T')[0] });
   const [settingsNotesText, setSettingsNotesText] = useState(''); // free-text notes separate from JSON blob
 
+  // Bank import state
+  const [bankImportAccount, setBankImportAccount] = useState('westpac_choice');
+  const [bankImportClosingBalance, setBankImportClosingBalance] = useState('');
+
   // UI state — recurring income generator
   const [showRecurringForm, setShowRecurringForm] = useState(false);
   const [recurringForm, setRecurringForm] = useState({ description: 'Westpac Life Interest', amount_aud: '', start_date: new Date().toISOString().split('T')[0], months: '3', category: 'interest', account_source_id: '' });
@@ -1456,6 +1460,46 @@ export default function AdminBudgetPage() {
     return false;
   };
 
+  // Assign an account to an existing expense or income entry
+  const handleAssignAccount = async (type: 'expense' | 'income', id: string, accountId: string) => {
+    try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
+      if (type === 'expense') {
+        const exp = expenses.find((e) => e.id === id);
+        if (!exp) return;
+        const existing = parseTransactionNote(exp.notes);
+        const newNotes = encodeTransactionNote(existing.text || '', accountId);
+        const res = await fetch(`/api/trips/${tripId}/budget/expenses/${id}`, {
+          method: 'PUT', headers: h,
+          body: JSON.stringify({
+            description: exp.description, amount: exp.amount_aud, currency: 'AUD',
+            amount_aud: exp.amount_aud, exchange_rate: 1, amount_aud_overridden: false,
+            expense_date: exp.expense_date, category_id: exp.category?.id || null,
+            paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null,
+            notes: newNotes, source: exp.source, reconciled: exp.reconciled,
+          }),
+        });
+        if (res.ok) { showToast('success', 'Account assigned'); fetchData(); }
+        else throw new Error();
+      } else {
+        const inc = incomeEntries.find((e) => e.id === id);
+        if (!inc) return;
+        const existing = parseTransactionNote(inc.notes);
+        const newNotes = encodeTransactionNote(existing.text || '', accountId);
+        const res = await fetch(`/api/trips/${tripId}/budget/income/${id}`, {
+          method: 'PUT', headers: h,
+          body: JSON.stringify({
+            description: inc.description, amount_aud: inc.amount_aud,
+            income_date: inc.income_date, category: inc.category,
+            notes: newNotes, reconciled: inc.reconciled,
+          }),
+        });
+        if (res.ok) { showToast('success', 'Account assigned'); fetchData(); }
+        else throw new Error();
+      }
+    } catch { showToast('error', 'Failed to assign account'); }
+  };
+
   // ── Settings ──────────────────────────────────────────────────────────────
 
   // Build a merged settings.notes JSON blob, preserving all stored fields
@@ -1591,21 +1635,37 @@ export default function AdminBudgetPage() {
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
       let created = 0;
+      // Tag every imported row with the selected account so they appear in the right account column
+      const accountNotes = encodeTransactionNote('', bankImportAccount);
       for (const row of toImport) {
         if (row.type === 'income') {
-          const body = JSON.stringify({ description: row.description, amount_aud: row.credit, income_date: row.date, category: 'other', notes: null });
+          const body = JSON.stringify({ description: row.description, amount_aud: row.credit, income_date: row.date, category: 'other', notes: accountNotes });
           const res = await fetch(`/api/trips/${tripId}/budget/income`, { method: 'POST', headers: h, body });
           if (res.ok) created++;
         } else {
-          const body = JSON.stringify({ description: row.description, amount: row.debit, currency: 'AUD', amount_aud: row.debit, exchange_rate: 1, amount_aud_overridden: false, expense_date: row.date, category_id: row.category_id || null, paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null, notes: null, source: 'bank_import', reconciled: true });
+          const body = JSON.stringify({ description: row.description, amount: row.debit, currency: 'AUD', amount_aud: row.debit, exchange_rate: 1, amount_aud_overridden: false, expense_date: row.date, category_id: row.category_id || null, paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null, notes: accountNotes, source: 'bank_import', reconciled: true });
           const res = await fetch(`/api/trips/${tripId}/budget/expenses`, { method: 'POST', headers: h, body });
           if (res.ok) created++;
         }
       }
-      showToast('success', `Imported ${created} bank transactions`);
+      // If a closing balance was entered, update the account balance for that account
+      const closingBalance = bankImportClosingBalance ? parseFloat(bankImportClosingBalance) : NaN;
+      if (!isNaN(closingBalance)) {
+        const today = new Date().toISOString().split('T')[0];
+        const newBalances: AccountBalances = { ...accountBalances, [bankImportAccount]: closingBalance, balance_date: today };
+        let existingNotes: Record<string, unknown> = {};
+        if (settings.notes) { try { existingNotes = JSON.parse(settings.notes); } catch { /* ignore */ } }
+        const updatedNotes = JSON.stringify({ ...existingNotes, account_balances: newBalances, interest_rate_pa: interestRatePa, notes_text: settingsNotesText });
+        await fetch(`/api/trips/${tripId}/budget/settings`, { method: 'PUT', headers: h, body: JSON.stringify({ ...settings, notes: updatedNotes }) });
+        setAccountBalances(newBalances);
+        setBalanceForm(newBalances);
+        setSettings((prev) => ({ ...prev, notes: updatedNotes }));
+      }
+      showToast('success', `Imported ${created} bank transaction${created !== 1 ? 's' : ''}${!isNaN(closingBalance) ? ' and updated account balance' : ''}`);
       setShowBankImport(false);
       setBankCsvText('');
       setBankCsvRows([]);
+      setBankImportClosingBalance('');
       fetchData();
     } catch { showToast('error', 'Failed to import bank rows'); }
     finally { setSaving(false); }
@@ -1615,7 +1675,10 @@ export default function AdminBudgetPage() {
 
   const unreconciledExpenses = expenses.filter((e) => !e.reconciled && e.source === 'manual');
   const unreconciledIncome = incomeEntries.filter((e) => !e.reconciled);
-  const totalUnreconciled = unreconciledExpenses.length + unreconciledIncome.length;
+  // Any transaction with no account assigned needs attention regardless of reconciled status
+  const unassignedExpenses = expenses.filter((e) => !parseTransactionNote(e.notes).account_source_id);
+  const unassignedIncome = incomeEntries.filter((e) => !parseTransactionNote(e.notes).account_source_id);
+  const totalUnreconciled = unreconciledExpenses.length + unreconciledIncome.length + unassignedExpenses.length + unassignedIncome.length;
   const participantCount = Math.max(1, overview?.member_count || tripMembers.length || 1);
   const targetAmount = paymentSchedule.length > 0 ? paymentSchedule[paymentSchedule.length - 1].accumulated_amount : 0;
   const totalBudgetPerPersonAud = (overview?.total_budget_aud || 0) / participantCount;
@@ -3350,7 +3413,7 @@ export default function AdminBudgetPage() {
               >
                 <Download className="w-4 h-4" /> Export
               </button>
-              <button onClick={() => { setShowBankImport(!showBankImport); setShowExpImport(false); setShowExpForm(false); setBankCsvRows([]); setBankCsvText(''); }} className="flex items-center gap-2 border border-blue-600/40 hover:border-blue-400 text-blue-400 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-900/20">
+              <button onClick={() => { setShowBankImport(!showBankImport); setShowExpImport(false); setShowExpForm(false); setBankCsvRows([]); setBankCsvText(''); setBankImportClosingBalance(''); }} className="flex items-center gap-2 border border-blue-600/40 hover:border-blue-400 text-blue-400 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-900/20">
                 <Landmark className="w-4 h-4" /> Import Bank CSV
               </button>
               <button onClick={() => { setShowExpImport(!showExpImport); setShowExpForm(false); setShowBankImport(false); }} className="flex items-center gap-2 border border-brand-tan/40 hover:border-brand-tan text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10">
@@ -3367,9 +3430,34 @@ export default function AdminBudgetPage() {
             <div className="bg-brand-dark-grey border border-blue-600/30 rounded-xl p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2"><Landmark className="w-5 h-5 text-blue-400" /><h3 className="font-semibold text-brand-cream">Import Bank Statement (CSV)</h3></div>
-                <button onClick={() => { setShowBankImport(false); setBankCsvText(''); setBankCsvRows([]); }} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
+                <button onClick={() => { setShowBankImport(false); setBankCsvText(''); setBankCsvRows([]); setBankImportClosingBalance(''); }} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
               </div>
-              <p className="text-xs text-brand-cream/50">Paste your Westpac CSV export below (Date, Amount, Balance, Description format). Credits become income entries; debits become expense entries. Review and deselect rows you don't want to import.</p>
+              <p className="text-xs text-brand-cream/50">Paste your CSV export below (Westpac format: Date, Amount, Balance, Description). Credits become income entries; debits become expenses. Select the account this statement belongs to, then paste and parse.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Account (this statement is from)</label>
+                  <select
+                    value={bankImportAccount}
+                    onChange={(e) => setBankImportAccount(e.target.value)}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Closing Balance from Statement (optional)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={bankImportClosingBalance}
+                      onChange={(e) => setBankImportClosingBalance(e.target.value)}
+                      className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g. 8481.28 — updates account balance on import"
+                    />
+                  </div>
+                </div>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-brand-cream/60 mb-1">CSV Data</label>
                 <textarea
@@ -3438,7 +3526,7 @@ export default function AdminBudgetPage() {
                     </table>
                   </div>
                   <div className="flex justify-end gap-3">
-                    <button onClick={() => { setBankCsvRows([]); setBankCsvText(''); }} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Clear</button>
+                    <button onClick={() => { setBankCsvRows([]); setBankCsvText(''); setBankImportClosingBalance(''); }} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Clear</button>
                     <button onClick={handleImportBankRows} disabled={saving || bankCsvRows.filter((r) => r.selected && r.type !== 'skip').length === 0} className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Importing…' : `Import ${bankCsvRows.filter((r) => r.selected && r.type !== 'skip').length} rows`}</button>
                   </div>
                 </div>
@@ -3678,7 +3766,7 @@ export default function AdminBudgetPage() {
             <div>
               <p className="font-semibold text-amber-400">Reconciliation Check</p>
               <p className="text-sm text-amber-400/70 mt-0.5">
-                Manual entries are flagged until you confirm they match your records (Excel export, bank statement, etc.). Imported rows are auto-reconciled.
+                Transactions without an account assigned cannot be reconciled. Manual entries are flagged until confirmed against your bank statement. Imported rows are auto-reconciled once an account is set.
               </p>
             </div>
           </div>
@@ -3687,14 +3775,70 @@ export default function AdminBudgetPage() {
             <div className="bg-brand-dark-grey border border-green-600/30 rounded-lg py-12 text-center">
               <CheckCircle2 className="w-10 h-10 text-green-400 mx-auto mb-3" />
               <p className="font-semibold text-green-400">All transactions reconciled</p>
-              <p className="text-sm text-brand-cream/40 mt-1">No outstanding items to review</p>
+              <p className="text-sm text-brand-cream/40 mt-1">Every entry has an account assigned and has been confirmed</p>
             </div>
           ) : (
             <>
+              {/* ── Unassigned Transactions (no account) ── */}
+              {(unassignedExpenses.length > 0 || unassignedIncome.length > 0) && (
+                <div className="bg-brand-dark-grey border border-red-600/30 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-red-600/20 flex items-center gap-3">
+                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    <h3 className="font-semibold text-red-400">No Account Assigned <span className="ml-2">{unassignedExpenses.length + unassignedIncome.length}</span></h3>
+                    <span className="text-xs text-brand-cream/40 ml-auto">These cannot be reconciled until an account is selected</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[780px] text-sm">
+                      <thead className="bg-brand-black">
+                        <tr>{['Date','Description','Amount','Type','Assign Account'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                      </thead>
+                      <tbody className="divide-y divide-brand-tan/10">
+                        {unassignedExpenses.map((e) => (
+                          <tr key={`ue-${e.id}`} className="hover:bg-red-900/10">
+                            <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.expense_date)}</td>
+                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+                            <td className="px-4 py-3 font-semibold text-red-400">−{fmt(e.amount_aud)}</td>
+                            <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-red-900/30 text-red-400">Expense</span></td>
+                            <td className="px-4 py-3">
+                              <select
+                                defaultValue=""
+                                onChange={(ev) => { if (ev.target.value) handleAssignAccount('expense', e.id, ev.target.value); }}
+                                className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
+                              >
+                                <option value="">— Select account —</option>
+                                {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                        {unassignedIncome.map((e) => (
+                          <tr key={`ui-${e.id}`} className="hover:bg-red-900/10">
+                            <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.income_date)}</td>
+                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+                            <td className="px-4 py-3 font-semibold text-green-400">+{fmt(e.amount_aud)}</td>
+                            <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-green-900/30 text-green-400">Income</span></td>
+                            <td className="px-4 py-3">
+                              <select
+                                defaultValue=""
+                                onChange={(ev) => { if (ev.target.value) handleAssignAccount('income', e.id, ev.target.value); }}
+                                className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
+                              >
+                                <option value="">— Select account —</option>
+                                {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {unreconciledExpenses.length > 0 && (
                 <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
-	                  <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
-	                    <h3 className="font-semibold text-brand-cream">Unreconciled Expenses <span className="text-amber-400 ml-2">{unreconciledExpenses.length}</span></h3>
+                  <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
+                    <h3 className="font-semibold text-brand-cream">Unreconciled Expenses <span className="text-amber-400 ml-2">{unreconciledExpenses.length}</span></h3>
                     <button
                       onClick={async () => {
                         let successCount = 0;
