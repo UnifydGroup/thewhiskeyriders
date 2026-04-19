@@ -983,6 +983,9 @@ export type Database = {
           background_position_y: number
           background_video_url: string | null
           background_zoom: number
+          email_footer_text: string
+          email_header_tagline: string
+          email_header_title: string
           id: string
           logo_url: string
           news_email_notifications_enabled: boolean
@@ -997,6 +1000,9 @@ export type Database = {
           background_position_y?: number
           background_video_url?: string | null
           background_zoom?: number
+          email_footer_text?: string
+          email_header_tagline?: string
+          email_header_title?: string
           id?: string
           logo_url?: string
           news_email_notifications_enabled?: boolean
@@ -1011,6 +1017,9 @@ export type Database = {
           background_position_y?: number
           background_video_url?: string | null
           background_zoom?: number
+          email_footer_text?: string
+          email_header_tagline?: string
+          email_header_title?: string
           id?: string
           logo_url?: string
           news_email_notifications_enabled?: boolean

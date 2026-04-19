@@ -25,7 +25,7 @@ const SUPPORTED_BACKGROUND_MIME_TYPES = new Set([
   'image/svg+xml',
 ]);
 const SITE_SETTINGS_SELECT =
-  'id, logo_url, background_image_url, news_email_notifications_enabled, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity';
+  'id, logo_url, background_image_url, news_email_notifications_enabled, background_media_type, background_video_url, background_position_x, background_position_y, background_zoom, background_opacity, email_header_title, email_header_tagline';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -105,6 +105,8 @@ interface PortalSettings {
   notify_on_document_shared: boolean;
   notify_on_award_created: boolean;
   news_email_notifications_enabled: boolean;
+  email_header_title: string;
+  email_header_tagline: string;
   password_expiry_days: number;
   password_min_length: number;
   require_2fa_for_admins: boolean;
@@ -129,6 +131,8 @@ type SiteSettingsRow = {
   id: string;
   logo_url: string;
   news_email_notifications_enabled: boolean;
+  email_header_title: string | null;
+  email_header_tagline: string | null;
   background_media_type: BackgroundMediaType;
   background_image_url: string;
   background_video_url: string | null;
@@ -152,6 +156,10 @@ const DEFAULT_SETTINGS: PortalSettings = {
   smtp_port: '587',
   smtp_user: '',
   smtp_password: '',
+
+  // Email header branding
+  email_header_title: 'The Whiskey Riders',
+  email_header_tagline: 'Ride. Bond. Remember.',
 
   // Notification Preferences
   notify_on_trip_created: true,
@@ -223,6 +231,8 @@ export default function SettingsPage() {
         ...DEFAULT_SETTINGS,
         logo_url: data?.logo_url || DEFAULT_LOGO_URL,
         news_email_notifications_enabled: data?.news_email_notifications_enabled !== false,
+        email_header_title: data?.email_header_title?.trim() || DEFAULT_SETTINGS.email_header_title,
+        email_header_tagline: data?.email_header_tagline?.trim() || DEFAULT_SETTINGS.email_header_tagline,
         background_media_type: data?.background_media_type === 'video' ? 'video' : 'image',
         background_image_url: data?.background_image_url || DEFAULT_BACKGROUND_URL,
         background_video_url: data?.background_video_url || '',
@@ -271,6 +281,8 @@ export default function SettingsPage() {
       const payload = {
         logo_url: settings.logo_url || DEFAULT_LOGO_URL,
         news_email_notifications_enabled: settings.news_email_notifications_enabled,
+        email_header_title: settings.email_header_title?.trim() || DEFAULT_SETTINGS.email_header_title,
+        email_header_tagline: settings.email_header_tagline?.trim() || DEFAULT_SETTINGS.email_header_tagline,
         background_media_type: settings.background_media_type || DEFAULT_BACKGROUND_MEDIA_TYPE,
         background_image_url: settings.background_image_url || DEFAULT_BACKGROUND_URL,
         background_video_url: settings.background_video_url || null,
@@ -581,6 +593,47 @@ export default function SettingsPage() {
                   onChange={(e) => handleChange('email_from_address', e.target.value)}
                   placeholder="noreply@example.com"
                 />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-700 pt-4">
+              <h3 className="font-bold mb-1">Email Header Branding</h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Customise the title and tagline shown in the header of every email sent from the portal.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Header Title</label>
+                  <Input
+                    type="text"
+                    value={settings.email_header_title}
+                    onChange={(e) => handleChange('email_header_title', e.target.value)}
+                    placeholder="The Whiskey Riders"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Header Tagline</label>
+                  <Input
+                    type="text"
+                    value={settings.email_header_tagline}
+                    onChange={(e) => handleChange('email_header_tagline', e.target.value)}
+                    placeholder="Ride. Bond. Remember."
+                  />
+                </div>
+              </div>
+              {/* Live preview */}
+              <div className="mt-4 rounded-lg overflow-hidden border border-gray-700 text-sm max-w-md">
+                <div className="bg-[#B5621E] px-6 py-3 text-center">
+                  <p className="text-white font-semibold tracking-widest text-xs uppercase">
+                    {settings.email_header_title || 'The Whiskey Riders'}
+                  </p>
+                  <p className="text-white/70 text-xs tracking-wide mt-0.5">
+                    {settings.email_header_tagline || 'Ride. Bond. Remember.'}
+                  </p>
+                </div>
+                <div className="bg-[#111] px-6 py-3">
+                  <p className="text-[#C9B98A] text-xs">Preview of your email header</p>
+                </div>
               </div>
             </div>
 

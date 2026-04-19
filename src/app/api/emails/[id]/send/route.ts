@@ -20,6 +20,7 @@ import {
   buildEmailText,
   isEmailConfigured,
   resolvePortalBaseUrl,
+  fetchEmailHeaderSettings,
 } from '@/lib/email/send';
 import type { UserRole } from '@/lib/types/database';
 
@@ -161,6 +162,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     }
 
     const baseUrl = resolvePortalBaseUrl(request.nextUrl.origin);
+    const emailHeader = await fetchEmailHeaderSettings(db);
 
     let sent = 0;
     let failed = 0;
@@ -174,6 +176,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         bodyHtml: campaign.body,
         ctaUrl: baseUrl ? `${baseUrl}/dashboard` : undefined,
         ctaLabel: 'Visit the Portal',
+        headerTitle: emailHeader.email_header_title,
+        headerTagline: emailHeader.email_header_tagline,
+        footerText: emailHeader.email_footer_text,
       });
 
       const text = buildEmailText({
