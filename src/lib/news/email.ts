@@ -174,7 +174,9 @@ async function resolveRecipientIds(newsItem: NewsItem): Promise<string[]> {
 async function applyNotificationPreferenceFilter(memberIds: string[]): Promise<string[]> {
   if (memberIds.length === 0) return [];
 
-  const { data, error } = await supabase
+  // notification_preferences is an optional table not yet in generated types; cast to bypass TS
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from('notification_preferences')
     .select('user_id, trip_updates')
     .in('user_id', memberIds);

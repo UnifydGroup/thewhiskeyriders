@@ -45,6 +45,8 @@ type TripDocument = {
   created_at: string;
 };
 
+type TripTab = 'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes';
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -87,7 +89,8 @@ export default function TripDetailPage() {
   const [documents, setDocuments] = useState<TripDocument[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes'>('overview');
+  const [tab, setTab] = useState<TripTab>('overview');
+  const [canViewBudgetTab, setCanViewBudgetTab] = useState(false);
   const [loading, setLoading] = useState(true);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
@@ -153,10 +156,12 @@ export default function TripDetailPage() {
         } = await supabase.auth.getSession();
 
         if (session?.access_token) {
+          const authHeaders = {
+            Authorization: `Bearer ${session.access_token}`,
+          };
+
           const newsResponse = await fetch(`/api/news?placement=trip&tripId=${tripData.id}&limit=20`, {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
+            headers: authHeaders,
           });
 
           const newsPayload = await newsResponse.json().catch(() => ({}));
@@ -166,6 +171,19 @@ export default function TripDetailPage() {
               items.filter((item) => item.trip_tags.some((taggedTrip) => taggedTrip.id === tripData.id))
             );
           }
+
+          const budgetResponse = await fetch(`/api/trips/${tripData.id}/budget/summary`, {
+            headers: authHeaders,
+          });
+          const budgetPayload = await budgetResponse.json().catch(() => ({}));
+          if (budgetResponse.ok && budgetPayload?.success) {
+            const visibility = budgetPayload?.data?.visibility;
+            setCanViewBudgetTab(Boolean(visibility?.is_admin || visibility?.show_group || visibility?.show_individual));
+          } else {
+            setCanViewBudgetTab(false);
+          }
+        } else {
+          setCanViewBudgetTab(false);
         }
 
         // Get members
@@ -187,6 +205,12 @@ export default function TripDetailPage() {
 
     loadData();
   }, [slug, router, supabase]);
+
+  useEffect(() => {
+    if (!canViewBudgetTab && tab === 'budget') {
+      setTab('overview');
+    }
+  }, [canViewBudgetTab, tab]);
 
   useEffect(() => {
     if (tab !== 'documents' || !trip?.id) {
@@ -305,6 +329,10 @@ export default function TripDetailPage() {
     );
   }
 
+  const tabs: TripTab[] = canViewBudgetTab
+    ? ['overview', 'news', 'photos', 'documents', 'payments', 'budget', 'votes']
+    : ['overview', 'news', 'photos', 'documents', 'payments', 'votes'];
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -373,7 +401,7 @@ export default function TripDetailPage() {
 
       {/* Tabs */}
       <div className="border-b border-brand-brown/20 flex gap-8 overflow-x-auto">
-        {(['overview', 'news', 'photos', 'documents', 'payments', 'budget', 'votes'] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -623,7 +651,7 @@ export default function TripDetailPage() {
       )}
 
       {/* Budget Tab */}
-      {tab === 'budget' && trip && (
+      {tab === 'budget' && canViewBudgetTab && trip && (
         <MemberBudgetView tripId={trip.id} />
       )}
 

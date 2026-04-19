@@ -220,7 +220,7 @@ export async function verifyRole(
     return { authenticated: false, authorized: false, user, profile };
   }
 
-  const authorized = hasRole(profile.role, requiredRoles);
+  const authorized = hasRole(profile.role as UserRole, requiredRoles);
   return { authenticated: true, authorized, user, profile };
 }
 

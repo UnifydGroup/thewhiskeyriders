@@ -6,31 +6,50 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id: tripId } = await params;
-    const { authenticated, authorized, profile } = await verifyRole(
+    const { authenticated, profile } = await verifyRole(
       request,
       ['member', 'trip_admin', 'admin', 'super_admin']
     );
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
 
     const isAdmin = ['trip_admin', 'admin', 'super_admin'].includes(profile?.role ?? '');
+    const toNumber = (value: unknown) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    if (!isAdmin) {
+      const { data: membership, error: membershipError } = await supabase
+        .from('trip_members')
+        .select('id')
+        .eq('trip_id', tripId)
+        .eq('user_id', profile?.id ?? '')
+        .maybeSingle();
+
+      if (membershipError) throw membershipError;
+      if (!membership) return errorResponse(ApiErrors.FORBIDDEN);
+    }
 
     // ── Budget settings ──────────────────────────────────────────────────────
-    const { data: settings } = await supabase
+    const { data: settings, error: settingsError } = await supabase
       .from('trip_budget_settings')
       .select('*')
       .eq('trip_id', tripId)
       .maybeSingle();
+    if (settingsError) throw settingsError;
 
     const budgetSettings = settings ?? {
       total_budget_aud: 0,
-      show_group_budget_to_members: true,
-      show_individual_breakdown_to_members: true,
+      show_group_budget_to_members: false,
+      show_individual_breakdown_to_members: false,
       exchange_rate_mad_aud: 0.14,
       notes: null,
     };
 
-    const showGroup = isAdmin || budgetSettings.show_group_budget_to_members;
-    const showIndividual = isAdmin || budgetSettings.show_individual_breakdown_to_members;
+    const groupVisibleToMembers = budgetSettings.show_group_budget_to_members === true;
+    const individualVisibleToMembers = budgetSettings.show_individual_breakdown_to_members === true;
+    const showGroup = isAdmin ? true : groupVisibleToMembers;
+    const showIndividual = isAdmin ? true : (groupVisibleToMembers && individualVisibleToMembers);
 
     // ── Categories ───────────────────────────────────────────────────────────
     let categories: any[] = [];
@@ -64,9 +83,10 @@ export async function GET(request: NextRequest, { params }: Params) {
       expenseList = isAdmin ? (expenses ?? []) : [];
 
       for (const e of expenses ?? []) {
-        totalSpentAud += e.amount_aud ?? 0;
+        const amountAud = toNumber(e.amount_aud);
+        totalSpentAud += amountAud;
         const key = e.category_id ?? '__uncategorised__';
-        expensesByCategory[key] = (expensesByCategory[key] ?? 0) + (e.amount_aud ?? 0);
+        expensesByCategory[key] = (expensesByCategory[key] ?? 0) + amountAud;
         if (!e.reconciled && e.source === 'manual') unreconciled_count++;
       }
     }
@@ -79,7 +99,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       .order('payment_date', { ascending: false });
 
     const memberPaymentsAll = memberPaymentsRaw ?? [];
-    const totalCollectedFromMembers = memberPaymentsAll.reduce((s: number, p: any) => s + (p.amount ?? 0), 0);
+    const totalCollectedFromMembers = memberPaymentsAll.reduce((s: number, p: any) => s + toNumber(p.amount), 0);
 
     // ── Manual income entries ─────────────────────────────────────────────────
     let manualIncomeEntries: any[] = [];
@@ -91,7 +111,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         .eq('trip_id', tripId)
         .order('income_date', { ascending: false });
       manualIncomeEntries = incomeData ?? [];
-      totalManualIncome = manualIncomeEntries.reduce((s: number, e: any) => s + (e.amount_aud ?? 0), 0);
+      totalManualIncome = manualIncomeEntries.reduce((s: number, e: any) => s + toNumber(e.amount_aud), 0);
     }
 
     const totalIncomeAud = totalCollectedFromMembers + totalManualIncome;
@@ -103,13 +123,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       .eq('trip_id', tripId);
 
     const memberCount = (tripMembers ?? []).length;
-    const totalBudgetAud = budgetSettings.total_budget_aud ?? 0;
+    const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
     const costSharePerMember = memberCount > 0 ? totalBudgetAud / memberCount : 0;
 
     // Per-member payment totals
     const memberTotalsMap: Record<string, number> = {};
     memberPaymentsAll.forEach((p: any) => {
-      memberTotalsMap[p.member_id] = (memberTotalsMap[p.member_id] ?? 0) + (p.amount ?? 0);
+      memberTotalsMap[p.member_id] = (memberTotalsMap[p.member_id] ?? 0) + toNumber(p.amount);
     });
 
     // Per-member breakdown
@@ -126,7 +146,7 @@ export async function GET(request: NextRequest, { params }: Params) {
           total_paid_aud: paid,
           cost_share_aud: costSharePerMember,
           remaining_aud: remaining,
-          is_current_user: tm.user_id === profile?.user_id,
+          is_current_user: tm.user_id === profile?.id,
         };
       });
       if (!isAdmin) {
@@ -135,12 +155,16 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
 
     // ── Category breakdown with actuals ──────────────────────────────────────
-    const categoriesWithActuals = categories.map((cat: any) => ({
-      ...cat,
-      spent_aud: expensesByCategory[cat.id] ?? 0,
-      remaining_aud: Math.max(0, cat.planned_aud - (expensesByCategory[cat.id] ?? 0)),
-      over_budget: (expensesByCategory[cat.id] ?? 0) > cat.planned_aud,
-    }));
+    const categoriesWithActuals = categories.map((cat: any) => {
+      const plannedAud = toNumber(cat.planned_aud);
+      const spentAud = expensesByCategory[cat.id] ?? 0;
+      return {
+        ...cat,
+        spent_aud: spentAud,
+        remaining_aud: Math.max(0, plannedAud - spentAud),
+        over_budget: spentAud > plannedAud,
+      };
+    });
 
     // ── Unified ledger (admin only) ───────────────────────────────────────────
     let ledger: any[] = [];
@@ -152,7 +176,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         sub_type: 'member_payment',
         date: p.payment_date,
         description: `${p.profiles?.nickname ?? p.profiles?.full_name ?? 'Member'} — payment`,
-        amount_aud: p.amount ?? 0,
+        amount_aud: toNumber(p.amount),
         notes: p.notes ?? null,
         reconciled: true,
         source: 'payment_tracker',
@@ -165,7 +189,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         sub_type: 'manual',
         date: e.income_date,
         description: e.description,
-        amount_aud: e.amount_aud ?? 0,
+        amount_aud: toNumber(e.amount_aud),
         category: e.category,
         notes: e.notes ?? null,
         reconciled: e.reconciled,
@@ -179,7 +203,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         sub_type: e.category?.name ?? 'Uncategorised',
         date: e.expense_date,
         description: e.description,
-        amount_aud: -(e.amount_aud ?? 0),
+        amount_aud: -toNumber(e.amount_aud),
         currency: e.currency,
         amount_original: e.amount,
         category: e.category,
@@ -205,13 +229,15 @@ export async function GET(request: NextRequest, { params }: Params) {
       ledger = withBalance.reverse();
     }
 
+    const exposeBudgetFigures = isAdmin || showGroup;
+
     return successResponse({
       settings: {
-        total_budget_aud: totalBudgetAud,
-        exchange_rate_mad_aud: budgetSettings.exchange_rate_mad_aud,
-        show_group_budget_to_members: budgetSettings.show_group_budget_to_members,
-        show_individual_breakdown_to_members: budgetSettings.show_individual_breakdown_to_members,
-        notes: budgetSettings.notes,
+        total_budget_aud: exposeBudgetFigures ? totalBudgetAud : 0,
+        exchange_rate_mad_aud: toNumber(budgetSettings.exchange_rate_mad_aud),
+        show_group_budget_to_members: groupVisibleToMembers,
+        show_individual_breakdown_to_members: individualVisibleToMembers,
+        notes: exposeBudgetFigures ? budgetSettings.notes : null,
       },
       visibility: {
         show_group: showGroup,
@@ -220,7 +246,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
       overview: showGroup ? {
         total_budget_aud: totalBudgetAud,
-        total_planned_aud: categories.reduce((s: number, c: any) => s + c.planned_aud, 0),
+        total_planned_aud: categories.reduce((s: number, c: any) => s + toNumber(c.planned_aud), 0),
         total_income_aud: totalIncomeAud,
         total_collected_from_members_aud: totalCollectedFromMembers,
         total_manual_income_aud: totalManualIncome,
