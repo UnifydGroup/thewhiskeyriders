@@ -37,7 +37,7 @@ interface MemberPayment {
 }
 
 interface BudgetData {
-  visibility: { show_group: boolean; show_individual: boolean; is_admin: boolean };
+  visibility: { show_group: boolean; show_individual: boolean; is_admin: boolean; acting_as_member?: boolean };
   overview: BudgetOverview | null;
   categories: BudgetCategory[];
   member_payments: MemberPayment[];
@@ -50,9 +50,10 @@ function fmt(amount: number) {
 
 interface Props {
   tripId: string;
+  viewAsMember?: boolean;
 }
 
-export default function MemberBudgetView({ tripId }: Props) {
+export default function MemberBudgetView({ tripId, viewAsMember = false }: Props) {
   const supabase = createClient();
   const [data, setData] = useState<BudgetData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +66,10 @@ export default function MemberBudgetView({ tripId }: Props) {
         const headers: Record<string, string> = session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {};
-        const res = await fetch(`/api/trips/${tripId}/budget/summary`, { headers });
+        const summaryUrl = viewAsMember
+          ? `/api/trips/${tripId}/budget/summary?view_as_member=true`
+          : `/api/trips/${tripId}/budget/summary`;
+        const res = await fetch(summaryUrl, { headers });
         if (!res.ok) return;
         const json = await res.json();
         setData(json.data);
@@ -74,7 +78,7 @@ export default function MemberBudgetView({ tripId }: Props) {
       }
     };
     loadData();
-  }, [tripId, supabase]);
+  }, [tripId, viewAsMember, supabase]);
 
   if (loading) {
     return (

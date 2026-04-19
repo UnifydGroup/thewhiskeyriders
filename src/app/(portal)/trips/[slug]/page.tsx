@@ -91,6 +91,7 @@ export default function TripDetailPage() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [tab, setTab] = useState<TripTab>('overview');
   const [canViewBudgetTab, setCanViewBudgetTab] = useState(false);
+  const [budgetViewAsMember, setBudgetViewAsMember] = useState(false);
   const [loading, setLoading] = useState(true);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
@@ -211,6 +212,16 @@ export default function TripDetailPage() {
       setTab('overview');
     }
   }, [canViewBudgetTab, tab]);
+
+  const canToggleBudgetPreview = currentUser?.role === 'trip_admin'
+    || currentUser?.role === 'admin'
+    || currentUser?.role === 'super_admin';
+
+  useEffect(() => {
+    if (!canToggleBudgetPreview && budgetViewAsMember) {
+      setBudgetViewAsMember(false);
+    }
+  }, [canToggleBudgetPreview, budgetViewAsMember]);
 
   useEffect(() => {
     if (tab !== 'documents' || !trip?.id) {
@@ -652,7 +663,33 @@ export default function TripDetailPage() {
 
       {/* Budget Tab */}
       {tab === 'budget' && canViewBudgetTab && trip && (
-        <MemberBudgetView tripId={trip.id} />
+        <div className="space-y-4">
+          {canToggleBudgetPreview && (
+            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-brand-cream">Budget View Mode</p>
+                <p className="text-xs text-brand-cream/50">Toggle between organiser data and what members can currently see</p>
+              </div>
+              <div className="inline-flex rounded-lg border border-brand-tan/30 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setBudgetViewAsMember(false)}
+                  className={`px-3 py-1.5 text-sm transition-colors ${!budgetViewAsMember ? 'bg-brand-tan text-brand-black font-semibold' : 'bg-brand-black/40 text-brand-cream/80 hover:bg-brand-black/60'}`}
+                >
+                  Admin view
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBudgetViewAsMember(true)}
+                  className={`px-3 py-1.5 text-sm transition-colors border-l border-brand-tan/30 ${budgetViewAsMember ? 'bg-brand-tan text-brand-black font-semibold' : 'bg-brand-black/40 text-brand-cream/80 hover:bg-brand-black/60'}`}
+                >
+                  View as member
+                </button>
+              </div>
+            </div>
+          )}
+          <MemberBudgetView tripId={trip.id} viewAsMember={canToggleBudgetPreview && budgetViewAsMember} />
+        </div>
       )}
 
       {/* Votes Tab */}

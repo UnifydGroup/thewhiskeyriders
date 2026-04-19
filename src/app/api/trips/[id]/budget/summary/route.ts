@@ -13,6 +13,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
 
     const isAdmin = ['trip_admin', 'admin', 'super_admin'].includes(profile?.role ?? '');
+    const requestUrl = new URL(request.url);
+    const previewAsMember = isAdmin && requestUrl.searchParams.get('view_as_member') === 'true';
+    const hasAdminBudgetAccess = isAdmin && !previewAsMember;
     const toNumber = (value: unknown) => {
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : 0;
@@ -48,8 +51,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const groupVisibleToMembers = budgetSettings.show_group_budget_to_members === true;
     const individualVisibleToMembers = budgetSettings.show_individual_breakdown_to_members === true;
-    const showGroup = isAdmin ? true : groupVisibleToMembers;
-    const showIndividual = isAdmin ? true : (groupVisibleToMembers && individualVisibleToMembers);
+    const showGroup = hasAdminBudgetAccess ? true : groupVisibleToMembers;
+    const showIndividual = hasAdminBudgetAccess ? true : (groupVisibleToMembers && individualVisibleToMembers);
 
     // ── Categories ───────────────────────────────────────────────────────────
     let categories: any[] = [];
@@ -80,7 +83,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         .order('expense_date', { ascending: false });
 
       const { data: expenses } = await query;
-      expenseList = isAdmin ? (expenses ?? []) : [];
+      expenseList = hasAdminBudgetAccess ? (expenses ?? []) : [];
 
       for (const e of expenses ?? []) {
         const amountAud = toNumber(e.amount_aud);
@@ -104,7 +107,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     // ── Manual income entries ─────────────────────────────────────────────────
     let manualIncomeEntries: any[] = [];
     let totalManualIncome = 0;
-    if (isAdmin) {
+    if (hasAdminBudgetAccess) {
       const { data: incomeData } = await supabase
         .from('trip_income_entries')
         .select('*')
@@ -149,7 +152,7 @@ export async function GET(request: NextRequest, { params }: Params) {
           is_current_user: tm.user_id === profile?.id,
         };
       });
-      if (!isAdmin) {
+      if (!hasAdminBudgetAccess) {
         memberBreakdown = memberBreakdown.filter((m) => m.is_current_user);
       }
     }
@@ -168,7 +171,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // ── Unified ledger (admin only) ───────────────────────────────────────────
     let ledger: any[] = [];
-    if (isAdmin) {
+    if (hasAdminBudgetAccess) {
       // Income rows from member payments
       const incomeRows = memberPaymentsAll.map((p: any) => ({
         id: p.id,
@@ -229,7 +232,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       ledger = withBalance.reverse();
     }
 
-    const exposeBudgetFigures = isAdmin || showGroup;
+    const exposeBudgetFigures = hasAdminBudgetAccess || showGroup;
 
     return successResponse({
       settings: {
@@ -243,6 +246,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         show_group: showGroup,
         show_individual: showIndividual,
         is_admin: isAdmin,
+        acting_as_member: previewAsMember,
       },
       overview: showGroup ? {
         total_budget_aud: totalBudgetAud,
@@ -260,11 +264,11 @@ export async function GET(request: NextRequest, { params }: Params) {
         unreconciled_count,
       } : null,
       categories: showGroup ? categoriesWithActuals : [],
-      expenses: isAdmin ? expenseList : [],
-      income_entries: isAdmin ? manualIncomeEntries : [],
-      member_payments: showIndividual ? (isAdmin ? memberPaymentsAll : memberBreakdown) : [],
+      expenses: hasAdminBudgetAccess ? expenseList : [],
+      income_entries: hasAdminBudgetAccess ? manualIncomeEntries : [],
+      member_payments: showIndividual ? (hasAdminBudgetAccess ? memberPaymentsAll : memberBreakdown) : [],
       member_breakdown: showIndividual ? memberBreakdown : [],
-      ledger: isAdmin ? ledger : [],
+      ledger: hasAdminBudgetAccess ? ledger : [],
     });
   } catch (err) {
     console.error('GET budget/summary error:', err);
