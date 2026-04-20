@@ -27,14 +27,14 @@ interface Expense {
   payer: { id: string; full_name: string | null; nickname: string | null } | null;
   notes: string | null; source: string; reconciled: boolean;
 }
-interface LedgerRow { id: string; type: 'income' | 'expense'; sub_type: string; date: string; description: string; amount_aud: number; running_balance: number; reconciled: boolean; source: string; category?: unknown; notes?: string | null; }
+interface LedgerRow { id: string; type: 'income' | 'expense'; sub_type: string; date: string; description: string; amount_aud: number; running_balance: number; reconciled: boolean; source: string; category?: unknown; notes?: string | null; currency?: string; amount_original?: number; }
 interface MemberPayment { id: string; member_id: string; payment_date: string; amount: number; payment_method: string | null; notes: string | null; profiles?: { full_name: string | null; nickname: string | null }; }
 interface PaymentMilestone { id: string; trip_id: string; milestone_date: string; accumulated_amount: number; description: string | null; }
 interface MemberPaymentSummary { member_id: string; full_name: string; nickname?: string | null; total_paid: number; payment_count: number; last_payment_date: string | null; }
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
 interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; remaining_aud: number; }
 interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; unreconciled_count: number; }
-interface BudgetSettings { total_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; notes: string | null; }
+interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; }
 interface AccountBalances { westpac_choice: number; westpac_life: number; paypal: number; balance_date: string; }
 interface TripPaymentSettings {
   flights_cost_aud: number;
@@ -76,6 +76,10 @@ interface PaymentSource {
 type TransactionNoteMeta = {
   text: string;
   account_source_id: string | null;
+  transfer_link_id?: string | null;
+  transfer_direction?: 'in' | 'out' | null;
+  linked_transaction_id?: string | null;
+  counterparty_account_id?: string | null;
 };
 type ParsedCategoryNotes = {
   notes_text?: unknown;
@@ -88,6 +92,17 @@ type AccountOption = {
   sourceType: PaymentSourceType;
   sourceId: string;
   isMemberPortalSource: boolean;
+};
+type ReconcileType = 'expense' | 'income';
+type ReconcileChange = {
+  type: ReconcileType;
+  id: string;
+  reconciled: boolean;
+};
+type AccountAssignmentChange = {
+  type: 'expense' | 'income';
+  id: string;
+  accountId: string;
 };
 type TripMemberWithProfileRow = {
   user_id: string;
@@ -242,35 +257,61 @@ function parsePaymentSourcesPayload(rawBankNotes: unknown): { notes: string; sou
 }
 
 function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
-  if (!rawNotes) return { text: '', account_source_id: null };
+  if (!rawNotes) return { text: '', account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null };
   try {
     const parsed = JSON.parse(rawNotes) as {
       text?: unknown;
       account_source_id?: unknown;
+      transfer_link_id?: unknown;
+      transfer_direction?: unknown;
+      linked_transaction_id?: unknown;
+      counterparty_account_id?: unknown;
     };
     if (parsed && typeof parsed === 'object' && ('text' in parsed || 'account_source_id' in parsed)) {
       return {
         text: typeof parsed.text === 'string' ? parsed.text : '',
         account_source_id: typeof parsed.account_source_id === 'string' ? parsed.account_source_id : null,
+        transfer_link_id: typeof parsed.transfer_link_id === 'string' ? parsed.transfer_link_id : null,
+        transfer_direction: parsed.transfer_direction === 'in' || parsed.transfer_direction === 'out' ? parsed.transfer_direction : null,
+        linked_transaction_id: typeof parsed.linked_transaction_id === 'string' ? parsed.linked_transaction_id : null,
+        counterparty_account_id: typeof parsed.counterparty_account_id === 'string' ? parsed.counterparty_account_id : null,
       };
     }
   } catch {
     // Backwards compatibility for plain text notes.
   }
-  return { text: rawNotes, account_source_id: null };
+  return { text: rawNotes, account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null };
 }
 
-function encodeTransactionNote(text: string, accountSourceId: string | null): string | null {
+function encodeTransactionNote(
+  text: string,
+  accountSourceId: string | null,
+  transferMeta?: Partial<Pick<TransactionNoteMeta, 'transfer_link_id' | 'transfer_direction' | 'linked_transaction_id' | 'counterparty_account_id'>>
+): string | null {
   const noteText = text.trim();
-  if (!noteText && !accountSourceId) return null;
+  const hasTransferMeta = Boolean(
+    transferMeta?.transfer_link_id ||
+    transferMeta?.transfer_direction ||
+    transferMeta?.linked_transaction_id ||
+    transferMeta?.counterparty_account_id
+  );
+  if (!noteText && !accountSourceId && !hasTransferMeta) return null;
   return JSON.stringify({
     text: noteText || '',
     account_source_id: accountSourceId || null,
+    transfer_link_id: transferMeta?.transfer_link_id || null,
+    transfer_direction: transferMeta?.transfer_direction || null,
+    linked_transaction_id: transferMeta?.linked_transaction_id || null,
+    counterparty_account_id: transferMeta?.counterparty_account_id || null,
   });
 }
 
 function getTransactionNoteText(rawNotes: string | null): string {
   return parseTransactionNote(rawNotes).text;
+}
+
+function isLinkedTransferNote(note: TransactionNoteMeta): boolean {
+  return Boolean(note.transfer_link_id && note.linked_transaction_id && (note.transfer_direction === 'in' || note.transfer_direction === 'out'));
 }
 
 function createBudgetPart(defaultMemberCount: number): BudgetPart {
@@ -362,8 +403,15 @@ function downloadCsv(filename: string, rows: string[][]) {
 
 function fmt(n: number) { return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function fmtSigned(n: number) { return (n >= 0 ? '+' : '') + fmt(n); }
-function fmtDate(d: string) { return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
-function fmtShort(d: string) { return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }); }
+/** Parse a YYYY-MM-DD date string as local noon to avoid timezone-off-by-one in AU */
+function parseLocalDate(ds: string): Date {
+  // For full ISO timestamps (contains 'T' or 'Z'), use as-is
+  if (ds.includes('T') || ds.includes('Z')) return new Date(ds);
+  const [y, m, d] = ds.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+function fmtDate(d: string) { return parseLocalDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
+function fmtShort(d: string) { return parseLocalDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }); }
 function normalisePaymentSettings(
   raw: Partial<Record<keyof TripPaymentSettings, unknown>> | null | undefined
 ): TripPaymentSettings {
@@ -429,6 +477,7 @@ export default function AdminBudgetPage() {
   const [tab, setTab] = useState<Tab>('pl');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [applyingReconcile, setApplyingReconcile] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   // Data
@@ -442,7 +491,30 @@ export default function AdminBudgetPage() {
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [memberBreakdown, setMemberBreakdown] = useState<MemberBreakdown[]>([]);
   const [tripMembers, setTripMembers] = useState<{ id: string; full_name: string | null; nickname: string | null }[]>([]);
-  const [settings, setSettings] = useState<BudgetSettings>({ total_budget_aud: 0, exchange_rate_mad_aud: 0.14, show_group_budget_to_members: true, show_individual_breakdown_to_members: true, notes: null });
+  const [settings, setSettings] = useState<BudgetSettings>({ total_budget_aud: 0, per_person_budget_aud: 0, exchange_rate_mad_aud: 0.14, show_group_budget_to_members: true, show_individual_breakdown_to_members: true, enabled_currencies: ['AUD'], notes: null });
+  // When the per-person budget was last auto-computed from group total (or vice versa)
+  const [budgetSyncMode, setBudgetSyncMode] = useState<'group_drives' | 'per_person_drives'>('per_person_drives');
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Master ledger add form
+  const [showLedgerAddForm, setShowLedgerAddForm] = useState(false);
+  const emptyLedgerAddForm = () => ({
+    txType: 'expense' as 'expense' | 'income',
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    amount: '',
+    currency: 'AUD',
+    exchange_rate: '',
+    amount_aud: '',
+    amount_aud_overridden: false,
+    category_id: '',
+    account_source_id: '',
+    paid_by_type: 'group_kitty',
+    paid_by_member: '',
+    income_category: 'other',
+    notes: '',
+  });
+  const [ledgerAddForm, setLedgerAddForm] = useState(emptyLedgerAddForm());
 
   // UI state — expense form
   const [showExpForm, setShowExpForm] = useState(false);
@@ -534,6 +606,8 @@ export default function AdminBudgetPage() {
   const [ledgerDateFrom, setLedgerDateFrom] = useState('');
   const [ledgerDateTo, setLedgerDateTo] = useState('');
   const [ledgerAccountFilter, setLedgerAccountFilter] = useState('');
+  const [pendingReconcileChanges, setPendingReconcileChanges] = useState<Record<string, ReconcileChange>>({});
+  const [pendingAccountAssignments, setPendingAccountAssignments] = useState<Record<string, AccountAssignmentChange>>({});
 
   // UI state — bank CSV import
   const [showBankImport, setShowBankImport] = useState(false);
@@ -595,7 +669,13 @@ export default function AdminBudgetPage() {
       setIncomeEntries(d.income_entries ?? []);
       setMemberBreakdown(d.member_breakdown ?? []);
       if (d.settings) {
-        setSettings(d.settings);
+        setSettings({
+          ...d.settings,
+          per_person_budget_aud: d.settings.per_person_budget_aud ?? 0,
+          enabled_currencies: Array.isArray(d.settings.enabled_currencies) && d.settings.enabled_currencies.length > 0
+            ? d.settings.enabled_currencies
+            : ['AUD'],
+        });
         // Load account balances, interest rate, and free-text notes from settings.notes JSON blob
         if (d.settings.notes) {
           try {
@@ -687,6 +767,10 @@ export default function AdminBudgetPage() {
   const openExpForm = (exp?: Expense) => {
     if (exp) {
       const expenseNote = parseTransactionNote(exp.notes);
+      if (isLinkedTransferNote(expenseNote) || exp.description.toLowerCase().startsWith('transfer ')) {
+        showToast('error', 'Transfer expenses cannot be edited individually. Delete and recreate the transfer.');
+        return;
+      }
       setEditingExp(exp);
       setExpForm({
         description: exp.description, amount: String(exp.amount), currency: exp.currency,
@@ -733,11 +817,17 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeleteExp = async (id: string) => {
-    if (!confirm('Delete this expense?')) return;
+    const existingExpense = expenses.find((entry) => entry.id === id);
+    const expenseNote = parseTransactionNote(existingExpense?.notes ?? null);
+    const deletingLinkedTransfer = isLinkedTransferNote(expenseNote);
+    if (!confirm(deletingLinkedTransfer ? 'Delete this linked transfer pair?' : 'Delete this expense?')) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/budget/expenses/${id}`, { method: 'DELETE', headers: h });
       if (!res.ok) throw new Error();
+      if (deletingLinkedTransfer && expenseNote.linked_transaction_id) {
+        await fetch(`/api/trips/${tripId}/budget/income?entryId=${expenseNote.linked_transaction_id}`, { method: 'DELETE', headers: h });
+      }
       showToast('success', 'Expense deleted'); fetchData();
     } catch { showToast('error', 'Failed to delete expense'); }
   };
@@ -746,6 +836,11 @@ export default function AdminBudgetPage() {
 
   const handleSaveIncome = async () => {
     if (!incomeForm.description || !incomeForm.amount_aud || !incomeForm.income_date) return showToast('error', 'All fields are required');
+    const parsedAmount = Number(incomeForm.amount_aud);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return showToast('error', 'Income amount must be greater than zero');
+    if (incomeForm.category === 'transfer') {
+      return showToast('error', 'Use the Ledger Transfer action to create linked transfer entries');
+    }
     setSaving(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
@@ -754,6 +849,7 @@ export default function AdminBudgetPage() {
         headers: h,
         body: JSON.stringify({
           ...incomeForm,
+          amount_aud: parsedAmount,
           notes: encodeTransactionNote(incomeForm.notes, incomeForm.account_source_id || null),
         }),
       });
@@ -767,11 +863,17 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeleteIncome = async (id: string) => {
-    if (!confirm('Delete this income entry?')) return;
+    const existingIncome = incomeEntries.find((entry) => entry.id === id);
+    const incomeNote = parseTransactionNote(existingIncome?.notes ?? null);
+    const deletingLinkedTransfer = isLinkedTransferNote(incomeNote);
+    if (!confirm(deletingLinkedTransfer ? 'Delete this linked transfer pair?' : 'Delete this income entry?')) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${id}`, { method: 'DELETE', headers: h });
       if (!res.ok) throw new Error();
+      if (deletingLinkedTransfer && incomeNote.linked_transaction_id) {
+        await fetch(`/api/trips/${tripId}/budget/expenses/${incomeNote.linked_transaction_id}`, { method: 'DELETE', headers: h });
+      }
       showToast('success', 'Income entry deleted'); fetchData();
     } catch { showToast('error', 'Failed to delete income entry'); }
   };
@@ -1079,6 +1181,14 @@ export default function AdminBudgetPage() {
 
   const openLedgerEditor = (row: LedgerRow) => {
     const parsed = parseTransactionNote(row.notes || null);
+    const existingIncome = row.type === 'income' ? incomeEntries.find((entry) => entry.id === row.id) : null;
+    const isTransferRow = isLinkedTransferNote(parsed)
+      || row.description.toLowerCase().startsWith('transfer ')
+      || existingIncome?.category === 'transfer';
+    if (isTransferRow) {
+      showToast('error', 'Transfer entries cannot be edited individually. Delete and recreate the transfer.');
+      return;
+    }
     const payment = memberPayments.find((item) => item.id === row.id);
     const isMemberPayment = row.type === 'income' && row.sub_type === 'member_payment';
     const defaultAccountId = isMemberPayment ? (memberPortalAccountId || '') : getDefaultInternalAccountId();
@@ -1114,12 +1224,9 @@ export default function AdminBudgetPage() {
       return showToast('error', 'Description, date and amount are required');
     }
     const parsedAmount = Number(ledgerEditForm.amount_aud);
-    if (!Number.isFinite(parsedAmount)) return showToast('error', 'Amount must be a number');
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return showToast('error', 'Amount must be greater than zero');
 
     const isMemberPayment = editingLedgerRow.type === 'income' && editingLedgerRow.sub_type === 'member_payment';
-    if ((editingLedgerRow.type === 'expense' || isMemberPayment) && parsedAmount <= 0) {
-      return showToast('error', 'Amount must be greater than zero');
-    }
 
     setSaving(true);
     try {
@@ -1203,6 +1310,11 @@ export default function AdminBudgetPage() {
       const fromName = getAccountDisplayName(transferForm.from_account_id);
       const toName = getAccountDisplayName(transferForm.to_account_id);
       const noteSeed = transferForm.notes.trim();
+      const transferLinkId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const incomingText = noteSeed ? `Transfer from ${fromName}: ${noteSeed}` : `Transfer from ${fromName}`;
+      const outgoingText = noteSeed ? `Transfer to ${toName}: ${noteSeed}` : `Transfer to ${toName}`;
       const incomingRes = await fetch(`/api/trips/${tripId}/budget/income`, {
         method: 'POST',
         headers: h,
@@ -1212,8 +1324,13 @@ export default function AdminBudgetPage() {
           income_date: transferForm.transfer_date,
           category: 'transfer',
           notes: encodeTransactionNote(
-            noteSeed ? `Transfer from ${fromName}: ${noteSeed}` : `Transfer from ${fromName}`,
-            transferForm.to_account_id
+            incomingText,
+            transferForm.to_account_id,
+            {
+              transfer_link_id: transferLinkId,
+              transfer_direction: 'in',
+              counterparty_account_id: transferForm.from_account_id,
+            }
           ),
         }),
       });
@@ -1233,8 +1350,14 @@ export default function AdminBudgetPage() {
           expense_date: transferForm.transfer_date,
           paid_by_type: 'group_kitty',
           notes: encodeTransactionNote(
-            noteSeed ? `Transfer to ${toName}: ${noteSeed}` : `Transfer to ${toName}`,
-            transferForm.from_account_id
+            outgoingText,
+            transferForm.from_account_id,
+            {
+              transfer_link_id: transferLinkId,
+              transfer_direction: 'out',
+              linked_transaction_id: incomingId,
+              counterparty_account_id: transferForm.to_account_id,
+            }
           ),
           source: 'manual',
           reconciled: true,
@@ -1246,6 +1369,28 @@ export default function AdminBudgetPage() {
           await fetch(`/api/trips/${tripId}/budget/income?entryId=${incomingId}`, { method: 'DELETE', headers: await getAuthHeader() });
         }
         throw new Error();
+      }
+      const outgoingPayload = await outgoingRes.json().catch(() => ({}));
+      const outgoingId = outgoingPayload?.data?.id || outgoingPayload?.id || null;
+
+      // Backfill incoming note with linked expense id so both sides are explicitly paired.
+      if (incomingId && outgoingId) {
+        await fetch(`/api/trips/${tripId}/budget/income?entryId=${incomingId}`, {
+          method: 'PUT',
+          headers: h,
+          body: JSON.stringify({
+            notes: encodeTransactionNote(
+              incomingText,
+              transferForm.to_account_id,
+              {
+                transfer_link_id: transferLinkId,
+                transfer_direction: 'in',
+                linked_transaction_id: outgoingId,
+                counterparty_account_id: transferForm.from_account_id,
+              }
+            ),
+          }),
+        });
       }
 
       showToast('success', 'Transfer recorded');
@@ -1449,55 +1594,132 @@ export default function AdminBudgetPage() {
 
   // ── Reconciliation ────────────────────────────────────────────────────────
 
-  const handleReconcile = async (type: 'expense' | 'income', id: string, reconciled: boolean) => {
-    try {
-      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/trips/${tripId}/budget/reconcile`, { method: 'POST', headers: h, body: JSON.stringify({ type, id, reconciled }) });
-      if (!res.ok) throw new Error();
-      fetchData();
-      return true;
-    } catch { showToast('error', 'Failed to update reconciliation'); }
-    return false;
+  const getReconcileChangeKey = (type: ReconcileType, id: string) => `${type}:${id}`;
+
+  const queueReconcileChange = (type: ReconcileType, id: string, reconciled: boolean, currentReconciled: boolean) => {
+    const key = getReconcileChangeKey(type, id);
+    setPendingReconcileChanges((prev) => {
+      const next = { ...prev };
+      if (reconciled === currentReconciled) {
+        delete next[key];
+      } else {
+        next[key] = { type, id, reconciled };
+      }
+      return next;
+    });
   };
 
-  // Assign an account to an existing expense or income entry
-  const handleAssignAccount = async (type: 'expense' | 'income', id: string, accountId: string) => {
+  const discardQueuedReconcile = (type: ReconcileType, id: string) => {
+    const key = getReconcileChangeKey(type, id);
+    setPendingReconcileChanges((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const getAccountAssignmentKey = (type: 'expense' | 'income', id: string) => `${type}:${id}`;
+
+  const handleAssignAccount = (type: 'expense' | 'income', id: string, accountId: string) => {
+    const currentAccountId = type === 'expense'
+      ? parseTransactionNote(expenses.find((e) => e.id === id)?.notes ?? null).account_source_id
+      : parseTransactionNote(incomeEntries.find((e) => e.id === id)?.notes ?? null).account_source_id;
+    const key = getAccountAssignmentKey(type, id);
+    setPendingAccountAssignments((prev) => {
+      const next = { ...prev };
+      if (!accountId || accountId === currentAccountId) {
+        delete next[key];
+      } else {
+        next[key] = { type, id, accountId };
+      }
+      return next;
+    });
+  };
+
+  const discardQueuedAccountAssignment = (type: 'expense' | 'income', id: string) => {
+    const key = getAccountAssignmentKey(type, id);
+    setPendingAccountAssignments((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const applyQueuedChanges = async () => {
+    const reconcileChanges = Object.values(pendingReconcileChanges);
+    const accountChanges = Object.values(pendingAccountAssignments);
+    const totalChanges = reconcileChanges.length + accountChanges.length;
+    if (totalChanges === 0) {
+      showToast('error', 'No queued changes to apply');
+      return;
+    }
+    setApplyingReconcile(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      if (type === 'expense') {
-        const exp = expenses.find((e) => e.id === id);
-        if (!exp) return;
-        const existing = parseTransactionNote(exp.notes);
-        const newNotes = encodeTransactionNote(existing.text || '', accountId);
-        const res = await fetch(`/api/trips/${tripId}/budget/expenses/${id}`, {
-          method: 'PUT', headers: h,
-          body: JSON.stringify({
-            description: exp.description, amount: exp.amount_aud, currency: 'AUD',
-            amount_aud: exp.amount_aud, exchange_rate: 1, amount_aud_overridden: false,
-            expense_date: exp.expense_date, category_id: exp.category?.id || null,
-            paid_by: null, paid_by_type: 'group_kitty', paid_by_label: null,
-            notes: newNotes, source: exp.source, reconciled: exp.reconciled,
-          }),
-        });
-        if (res.ok) { showToast('success', 'Account assigned'); fetchData(); }
-        else throw new Error();
-      } else {
-        const inc = incomeEntries.find((e) => e.id === id);
-        if (!inc) return;
-        const existing = parseTransactionNote(inc.notes);
-        const newNotes = encodeTransactionNote(existing.text || '', accountId);
-        const res = await fetch(`/api/trips/${tripId}/budget/income/${id}`, {
-          method: 'PUT', headers: h,
-          body: JSON.stringify({
-            description: inc.description, amount_aud: inc.amount_aud,
-            income_date: inc.income_date, category: inc.category,
-            notes: newNotes, reconciled: inc.reconciled,
-          }),
-        });
-        if (res.ok) { showToast('success', 'Account assigned'); fetchData(); }
-        else throw new Error();
+      let successCount = 0;
+      for (const change of accountChanges) {
+        if (change.type === 'expense') {
+          const exp = expenses.find((e) => e.id === change.id);
+          if (!exp) continue;
+          const existing = parseTransactionNote(exp.notes);
+          const newNotes = encodeTransactionNote(existing.text || '', change.accountId, {
+            transfer_link_id: existing.transfer_link_id || null,
+            transfer_direction: existing.transfer_direction || null,
+            linked_transaction_id: existing.linked_transaction_id || null,
+            counterparty_account_id: existing.counterparty_account_id || null,
+          });
+          const res = await fetch(`/api/trips/${tripId}/budget/expenses/${change.id}`, {
+            method: 'PUT',
+            headers: h,
+            body: JSON.stringify({ notes: newNotes }),
+          });
+          if (res.ok) successCount++;
+        } else {
+          const inc = incomeEntries.find((e) => e.id === change.id);
+          if (!inc) continue;
+          const existing = parseTransactionNote(inc.notes);
+          const newNotes = encodeTransactionNote(existing.text || '', change.accountId, {
+            transfer_link_id: existing.transfer_link_id || null,
+            transfer_direction: existing.transfer_direction || null,
+            linked_transaction_id: existing.linked_transaction_id || null,
+            counterparty_account_id: existing.counterparty_account_id || null,
+          });
+          const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${change.id}`, {
+            method: 'PUT',
+            headers: h,
+            body: JSON.stringify({ notes: newNotes }),
+          });
+          if (res.ok) successCount++;
+        }
       }
-    } catch { showToast('error', 'Failed to assign account'); }
+
+      for (const change of reconcileChanges) {
+        const res = await fetch(`/api/trips/${tripId}/budget/reconcile`, {
+          method: 'POST',
+          headers: h,
+          body: JSON.stringify(change),
+        });
+        if (res.ok) successCount++;
+      }
+
+      if (successCount === totalChanges) {
+        showToast('success', `${successCount} queued change${successCount === 1 ? '' : 's'} saved`);
+      } else if (successCount > 0) {
+        showToast('error', `${successCount} of ${totalChanges} queued changes saved`);
+      } else {
+        showToast('error', 'Failed to save queued changes');
+      }
+
+      setPendingReconcileChanges({});
+      setPendingAccountAssignments({});
+      await fetchData();
+    } catch {
+      showToast('error', 'Failed to save queued changes');
+    } finally {
+      setApplyingReconcile(false);
+    }
   };
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -1527,6 +1749,63 @@ export default function AdminBudgetPage() {
       setSettings((prev) => ({ ...prev, notes: updatedNotes }));
       showToast('success', 'Settings saved'); fetchData();
     } catch { showToast('error', 'Failed to save settings'); }
+    finally { setSaving(false); }
+  };
+
+  const handleDeleteAllData = async () => {
+    const confirmed = confirm(
+      'DELETE ALL FINANCIAL DATA?\n\nThis will permanently delete ALL expenses and income entries for this trip. Member payment records are kept.\n\nThis cannot be undone. Type "DELETE" in the prompt to confirm.'
+    );
+    if (!confirmed) return;
+    const typed = prompt('Type DELETE to confirm:');
+    if (typed !== 'DELETE') { showToast('error', 'Cancelled — nothing was deleted'); return; }
+    setDeletingAll(true);
+    try {
+      const h = await getAuthHeader();
+      const res = await fetch(`/api/trips/${tripId}/budget/all`, { method: 'DELETE', headers: h });
+      if (!res.ok) throw new Error();
+      const json = await res.json();
+      showToast('success', json.data?.message ?? 'All data deleted');
+      fetchData();
+    } catch { showToast('error', 'Failed to delete data'); }
+    finally { setDeletingAll(false); }
+  };
+
+  const handleSaveLedgerAdd = async () => {
+    const { txType, description, date, amount, currency, exchange_rate, amount_aud, amount_aud_overridden, category_id, account_source_id, paid_by_type, paid_by_member, income_category, notes } = ledgerAddForm;
+    if (!description || !date) return showToast('error', 'Description and date are required');
+    const parsedAmount = parseFloat(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return showToast('error', 'Amount must be greater than zero');
+    setSaving(true);
+    try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
+      if (txType === 'expense') {
+        const rate = currency === 'AUD' ? 1 : (parseFloat(exchange_rate) || settings.exchange_rate_mad_aud);
+        const audAmount = amount_aud ? parseFloat(amount_aud) : (currency === 'AUD' ? parsedAmount : parsedAmount * rate);
+        const paid_by = paid_by_type === 'member' ? paid_by_member || null : null;
+        const body = JSON.stringify({
+          description, amount: parsedAmount, currency, exchange_rate: rate,
+          amount_aud: audAmount, amount_aud_overridden,
+          expense_date: date, category_id: category_id || null,
+          paid_by, paid_by_type, source: 'manual',
+          notes: encodeTransactionNote(notes, account_source_id || null),
+        });
+        const res = await fetch(`/api/trips/${tripId}/budget/expenses`, { method: 'POST', headers: h, body });
+        if (!res.ok) throw new Error();
+      } else {
+        const body = JSON.stringify({
+          description, amount_aud: parsedAmount, income_date: date,
+          category: income_category, source: 'manual', reconciled: false,
+          notes: encodeTransactionNote(notes, account_source_id || null),
+        });
+        const res = await fetch(`/api/trips/${tripId}/budget/income`, { method: 'POST', headers: h, body });
+        if (!res.ok) throw new Error();
+      }
+      showToast('success', txType === 'expense' ? 'Expense recorded' : 'Income recorded');
+      setLedgerAddForm(emptyLedgerAddForm());
+      setShowLedgerAddForm(false);
+      fetchData();
+    } catch { showToast('error', 'Failed to save transaction'); }
     finally { setSaving(false); }
   };
 
@@ -1679,6 +1958,9 @@ export default function AdminBudgetPage() {
   const unassignedExpenses = expenses.filter((e) => !parseTransactionNote(e.notes).account_source_id);
   const unassignedIncome = incomeEntries.filter((e) => !parseTransactionNote(e.notes).account_source_id);
   const totalUnreconciled = unreconciledExpenses.length + unreconciledIncome.length + unassignedExpenses.length + unassignedIncome.length;
+  const pendingReconcileCount = Object.keys(pendingReconcileChanges).length;
+  const pendingAccountAssignmentCount = Object.keys(pendingAccountAssignments).length;
+  const pendingChangeCount = pendingReconcileCount + pendingAccountAssignmentCount;
   const participantCount = Math.max(1, overview?.member_count || tripMembers.length || 1);
   const targetAmount = paymentSchedule.length > 0 ? paymentSchedule[paymentSchedule.length - 1].accumulated_amount : 0;
   const totalBudgetPerPersonAud = (overview?.total_budget_aud || 0) / participantCount;
@@ -1699,6 +1981,43 @@ export default function AdminBudgetPage() {
     isMemberPortalSource: acct.id === 'westpac_choice',
   }));
   const accountNameById = new Map(accountOptions.map((option) => [option.id, option.name]));
+  const isTransferExpense = (entry: Expense) => {
+    const note = parseTransactionNote(entry.notes);
+    return Boolean(note.transfer_link_id || entry.description.toLowerCase().startsWith('transfer to'));
+  };
+  const isTransferIncome = (entry: IncomeEntry) => {
+    const note = parseTransactionNote(entry.notes);
+    return Boolean(note.transfer_link_id || entry.category === 'transfer');
+  };
+  const transferExpenseEntries = expenses.filter(isTransferExpense);
+  const transferIncomeEntries = incomeEntries.filter(isTransferIncome);
+  const transferOutflowTotal = transferExpenseEntries.reduce((sum, entry) => sum + Math.abs(Number(entry.amount_aud || 0)), 0);
+  const transferInflowTotal = transferIncomeEntries.reduce((sum, entry) => sum + Math.abs(Number(entry.amount_aud || 0)), 0);
+  const transferNetImbalance = transferInflowTotal - transferOutflowTotal;
+  const transferLinkIndex = new Map<string, { inCount: number; outCount: number }>();
+  transferIncomeEntries.forEach((entry) => {
+    const note = parseTransactionNote(entry.notes);
+    if (!note.transfer_link_id) return;
+    const current = transferLinkIndex.get(note.transfer_link_id) || { inCount: 0, outCount: 0 };
+    current.inCount += 1;
+    transferLinkIndex.set(note.transfer_link_id, current);
+  });
+  transferExpenseEntries.forEach((entry) => {
+    const note = parseTransactionNote(entry.notes);
+    if (!note.transfer_link_id) return;
+    const current = transferLinkIndex.get(note.transfer_link_id) || { inCount: 0, outCount: 0 };
+    current.outCount += 1;
+    transferLinkIndex.set(note.transfer_link_id, current);
+  });
+  const brokenTransferLinkCount = Array.from(transferLinkIndex.values()).filter((pair) => pair.inCount !== 1 || pair.outCount !== 1).length;
+  const unlinkedTransferIncomeCount = transferIncomeEntries.filter((entry) => !parseTransactionNote(entry.notes).transfer_link_id).length;
+  const unlinkedTransferExpenseCount = transferExpenseEntries.filter((entry) => !parseTransactionNote(entry.notes).transfer_link_id).length;
+  const hasTransferIntegrityIssue =
+    Math.abs(transferNetImbalance) > 0.01 ||
+    brokenTransferLinkCount > 0 ||
+    unlinkedTransferIncomeCount > 0 ||
+    unlinkedTransferExpenseCount > 0;
+
   const accountFlowMap = new Map<string, { option: AccountOption | null; name: string; inflow: number; outflow: number }>();
   accountOptions.forEach((option) => {
     accountFlowMap.set(option.id, {
@@ -1750,7 +2069,7 @@ export default function AdminBudgetPage() {
   expenses.forEach((entry) => {
     const expenseNote = parseTransactionNote(entry.notes);
     const accountId = expenseNote.account_source_id;
-    applyFlow(accountId, 'outflow', Number(entry.amount_aud || 0));
+    applyFlow(accountId, 'outflow', Math.abs(Number(entry.amount_aud || 0)));
   });
   const accountFlowSummary = Array.from(accountFlowMap.entries())
     .map(([id, flow]) => ({
@@ -1790,9 +2109,9 @@ export default function AdminBudgetPage() {
     return acc;
   }, {});
   const today = new Date();
-  const passedMilestones = paymentSchedule.filter((m) => new Date(m.milestone_date) <= today);
+  const passedMilestones = paymentSchedule.filter((m) => parseLocalDate(m.milestone_date) <= today);
   const expectedByMilestone = passedMilestones.length > 0 ? passedMilestones[passedMilestones.length - 1].accumulated_amount : 0;
-  const nextMilestone = paymentSchedule.find((m) => new Date(m.milestone_date) > today);
+  const nextMilestone = paymentSchedule.find((m) => parseLocalDate(m.milestone_date) > today);
   const collectionGapAud = overview?.collection_gap_aud ?? 0;
   const hasCollectionSurplus = collectionGapAud < 0;
 
@@ -1866,6 +2185,35 @@ export default function AdminBudgetPage() {
           </button>
         ))}
       </div>
+
+      {pendingChangeCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-lg border border-brand-tan/30 bg-brand-dark-grey">
+          <p className="text-sm text-brand-cream/80">
+            {pendingChangeCount} change{pendingChangeCount === 1 ? '' : 's'} queued
+            {pendingAccountAssignmentCount > 0 ? ` · ${pendingAccountAssignmentCount} account assignment${pendingAccountAssignmentCount === 1 ? '' : 's'}` : ''}
+            {pendingReconcileCount > 0 ? ` · ${pendingReconcileCount} reconciliation change${pendingReconcileCount === 1 ? '' : 's'}` : ''}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setPendingReconcileChanges({});
+                setPendingAccountAssignments({});
+              }}
+              disabled={applyingReconcile}
+              className="px-3 py-1.5 text-xs border border-brand-tan/30 rounded text-brand-cream/80 hover:bg-brand-tan/10 disabled:opacity-50"
+            >
+              Discard
+            </button>
+            <button
+              onClick={applyQueuedChanges}
+              disabled={applyingReconcile}
+              className="px-3 py-1.5 text-xs bg-brand-tan text-brand-black font-semibold rounded hover:bg-brand-tan/90 disabled:opacity-50"
+            >
+              {applyingReconcile ? 'Applying…' : 'Apply Changes'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {overview && (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -2026,8 +2374,8 @@ export default function AdminBudgetPage() {
                     <tr key={row.id} className="hover:bg-brand-tan/5">
                       <td className="px-4 py-3 font-medium text-brand-cream">{row.name}</td>
                       <td className="px-4 py-3 text-brand-cream/60">{row.typeLabel}</td>
-                      <td className="px-4 py-3 text-green-400 font-semibold">{fmt(row.inflow)}</td>
-                      <td className="px-4 py-3 text-red-400 font-semibold">{fmt(row.outflow)}</td>
+                      <td className="px-4 py-3 text-green-400 font-semibold">+{fmt(row.inflow)}</td>
+                      <td className="px-4 py-3 text-red-400 font-semibold">-{fmt(row.outflow)}</td>
                       <td className="px-4 py-3 font-semibold">
                         <span className={row.net >= 0 ? 'text-brand-tan' : 'text-red-400'}>{fmt(row.net)}</span>
                       </td>
@@ -2256,6 +2604,11 @@ export default function AdminBudgetPage() {
                 <h3 className="font-semibold text-brand-cream">Inter-Account Transfers</h3>
               </div>
               <p className="text-xs text-brand-cream/40 mt-0.5">Transfers between accounts — recorded as expense (outflow) and income (inflow) to keep the ledger balanced.</p>
+              {hasTransferIntegrityIssue && (
+                <p className="text-xs text-amber-400 mt-2">
+                  Transfer integrity warning: inflow {fmt(transferInflowTotal)} vs outflow {fmt(transferOutflowTotal)} (net {fmtSigned(transferNetImbalance)}).
+                </p>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-sm">
@@ -2264,26 +2617,26 @@ export default function AdminBudgetPage() {
                 </thead>
                 <tbody className="divide-y divide-brand-tan/10">
                   {/* Expenses flagged as transfers */}
-                  {expenses.filter((e) => e.description?.toLowerCase().includes('transfer') || e.paid_by_label?.toLowerCase().includes('paypal')).map((e) => (
+                  {transferExpenseEntries.map((e) => (
                     <tr key={`exp-${e.id}`} className="hover:bg-brand-tan/5">
                       <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.expense_date)}</td>
                       <td className="px-4 py-3 text-brand-cream">{e.description}</td>
                       <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-red-900/20 text-red-400 border border-red-600/20">Outflow</span></td>
-                      <td className="px-4 py-3 font-semibold text-red-400">{fmt(e.amount_aud)}</td>
+                      <td className="px-4 py-3 font-semibold text-red-400">-{fmt(Math.abs(e.amount_aud))}</td>
                       <td className="px-4 py-3 text-brand-cream/40 text-xs">{e.notes ? String(e.notes).substring(0, 60) : '—'}</td>
                     </tr>
                   ))}
                   {/* Income entries flagged as transfers */}
-                  {incomeEntries.filter((e) => e.category === 'transfer').map((e) => (
+                  {transferIncomeEntries.map((e) => (
                     <tr key={`inc-${e.id}`} className="hover:bg-brand-tan/5">
                       <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.income_date)}</td>
                       <td className="px-4 py-3 text-brand-cream">{e.description}</td>
                       <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-green-900/20 text-green-400 border border-green-600/20">Inflow</span></td>
-                      <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
+                      <td className="px-4 py-3 font-semibold text-green-400">+{fmt(Math.abs(e.amount_aud))}</td>
                       <td className="px-4 py-3 text-brand-cream/40 text-xs">{e.notes?.substring(0, 60) || '—'}</td>
                     </tr>
                   ))}
-                  {expenses.filter((e) => e.description?.toLowerCase().includes('transfer') || e.paid_by_label?.toLowerCase().includes('paypal')).length === 0 && incomeEntries.filter((e) => e.category === 'transfer').length === 0 && (
+                  {transferExpenseEntries.length === 0 && transferIncomeEntries.length === 0 && (
                     <tr><td colSpan={5} className="px-4 py-8 text-center text-brand-cream/30 text-sm">No transfers recorded yet</td></tr>
                   )}
                 </tbody>
@@ -2364,10 +2717,240 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'ledger' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 text-sm text-brand-cream/50">
-            <Info className="w-4 h-4" />
-            Chronological view of all income and expenses with running balance
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-sm text-brand-cream/50">
+              <Info className="w-4 h-4" />
+              Master ledger — all income &amp; expenses with running balance
+            </div>
+            <button
+              onClick={() => { setShowLedgerAddForm((v) => !v); setLedgerAddForm(emptyLedgerAddForm()); }}
+              className="flex items-center gap-1.5 px-4 py-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black text-sm font-semibold rounded-lg"
+            >
+              <Plus className="w-4 h-4" /> Add Transaction
+            </button>
           </div>
+
+          {/* ── Master add-transaction form ─────────────────────────────────── */}
+          {showLedgerAddForm && (
+            <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-brand-cream">New Transaction</h3>
+                <button onClick={() => setShowLedgerAddForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
+              </div>
+
+              {/* Type toggle */}
+              <div className="flex gap-2">
+                {(['expense', 'income'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setLedgerAddForm((prev) => ({ ...prev, txType: t, currency: t === 'income' ? 'AUD' : prev.currency }))}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${ledgerAddForm.txType === t ? (t === 'expense' ? 'bg-red-700/40 border-red-500/60 text-red-200' : 'bg-green-800/40 border-green-500/60 text-green-200') : 'border-brand-tan/20 text-brand-cream/50 hover:bg-brand-tan/5'}`}
+                  >
+                    {t === 'expense' ? '↑ Expense' : '↓ Income'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Description */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Description *</label>
+                  <input
+                    value={ledgerAddForm.description}
+                    onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder={ledgerAddForm.txType === 'expense' ? 'e.g. Riad accommodation deposit' : 'e.g. Andreas — payment'}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  />
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Date *</label>
+                  <input
+                    type="date"
+                    value={ledgerAddForm.date}
+                    onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, date: e.target.value }))}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  />
+                </div>
+
+                {/* Amount + Currency */}
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount *</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={ledgerAddForm.amount}
+                      onChange={(e) => {
+                        const a = parseFloat(e.target.value) || 0;
+                        const r = parseFloat(ledgerAddForm.exchange_rate) || settings.exchange_rate_mad_aud;
+                        setLedgerAddForm((prev) => ({
+                          ...prev,
+                          amount: e.target.value,
+                          amount_aud: prev.amount_aud_overridden ? prev.amount_aud : (prev.currency === 'AUD' ? e.target.value : String((a * r).toFixed(2))),
+                        }));
+                      }}
+                      placeholder="0.00"
+                      className="flex-1 px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    />
+                    {ledgerAddForm.txType === 'expense' && (
+                      <select
+                        value={ledgerAddForm.currency}
+                        onChange={(e) => {
+                          const c = e.target.value;
+                          const a = parseFloat(ledgerAddForm.amount) || 0;
+                          const r = parseFloat(ledgerAddForm.exchange_rate) || settings.exchange_rate_mad_aud;
+                          setLedgerAddForm((prev) => ({
+                            ...prev,
+                            currency: c,
+                            amount_aud_overridden: c === 'AUD' ? false : prev.amount_aud_overridden,
+                            amount_aud: c === 'AUD' ? ledgerAddForm.amount : String((a * r).toFixed(2)),
+                          }));
+                        }}
+                        className="w-24 px-2 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                      >
+                        {(settings.enabled_currencies?.length ? settings.enabled_currencies : CURRENCIES).map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {/* AUD override for non-AUD expenses */}
+                {ledgerAddForm.txType === 'expense' && ledgerAddForm.currency !== 'AUD' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-brand-cream/60 mb-1">Exchange Rate ({ledgerAddForm.currency} → AUD)</label>
+                      <input
+                        type="number" min="0" step="0.000001"
+                        value={ledgerAddForm.exchange_rate}
+                        onChange={(e) => {
+                          const r = parseFloat(e.target.value) || 0;
+                          const a = parseFloat(ledgerAddForm.amount) || 0;
+                          setLedgerAddForm((prev) => ({
+                            ...prev,
+                            exchange_rate: e.target.value,
+                            amount_aud: prev.amount_aud_overridden ? prev.amount_aud : String((a * r).toFixed(2)),
+                          }));
+                        }}
+                        placeholder={String(settings.exchange_rate_mad_aud)}
+                        className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-brand-cream/60 mb-1">
+                        AUD Amount <span className="text-brand-cream/30">(click to override)</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={ledgerAddForm.amount_aud}
+                          onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, amount_aud: e.target.value, amount_aud_overridden: true }))}
+                          className={`w-full pl-7 pr-3 py-2 bg-brand-black border rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan ${ledgerAddForm.amount_aud_overridden ? 'border-amber-500/50' : 'border-brand-tan/30'}`}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Category */}
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Category</label>
+                  {ledgerAddForm.txType === 'expense' ? (
+                    <select
+                      value={ledgerAddForm.category_id}
+                      onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, category_id: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="">— Uncategorised —</option>
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  ) : (
+                    <select
+                      value={ledgerAddForm.income_category}
+                      onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, income_category: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="other">Other</option>
+                      <option value="interest">Interest</option>
+                      <option value="sponsorship">Sponsorship</option>
+                      <option value="refund">Refund</option>
+                      <option value="fx">FX / Currency</option>
+                    </select>
+                  )}
+                </div>
+
+                {/* Account */}
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Account</label>
+                  <select
+                    value={ledgerAddForm.account_source_id}
+                    onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, account_source_id: e.target.value }))}
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  >
+                    <option value="">— Unassigned —</option>
+                    {accountOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </div>
+
+                {/* Paid by (expenses only) */}
+                {ledgerAddForm.txType === 'expense' && (
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Paid By</label>
+                    <select
+                      value={ledgerAddForm.paid_by_type}
+                      onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, paid_by_type: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="group_kitty">Group Kitty</option>
+                      <option value="member">Member</option>
+                      <option value="external">External</option>
+                    </select>
+                  </div>
+                )}
+                {ledgerAddForm.txType === 'expense' && ledgerAddForm.paid_by_type === 'member' && (
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Member</label>
+                    <select
+                      value={ledgerAddForm.paid_by_member}
+                      onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, paid_by_member: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="">— Select member —</option>
+                      {tripMembers.map((m) => <option key={m.id} value={m.id}>{m.nickname || m.full_name}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* Notes */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
+                  <textarea
+                    rows={2}
+                    value={ledgerAddForm.notes}
+                    onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Optional notes…"
+                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowLedgerAddForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                <button
+                  onClick={handleSaveLedgerAdd}
+                  disabled={saving}
+                  className={`px-5 py-2 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 ${ledgerAddForm.txType === 'expense' ? 'bg-red-700/50 hover:bg-red-700/70 border border-red-500/50 text-red-100' : 'bg-green-800/50 hover:bg-green-800/70 border border-green-500/50 text-green-100'}`}
+                >
+                  {saving ? 'Saving…' : ledgerAddForm.txType === 'expense' ? 'Record Expense' : 'Record Income'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
             {/* Row 1: quick actions */}
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2696,9 +3279,9 @@ export default function AdminBudgetPage() {
           ) : (
             <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1120px] text-sm">
+                <table className="w-full min-w-[1200px] text-sm">
                   <thead className="bg-brand-black">
-                    <tr>{['Date','Description','Type','Account','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                    <tr>{['Date','Description','Type','Account','Currency','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
                     {(() => {
@@ -2714,6 +3297,10 @@ export default function AdminBudgetPage() {
                       return filteredLedger.map((row, i) => {
                         const fallbackAccountId = row.sub_type === 'member_payment' ? memberPortalAccountId : null;
                         const accountId = getTransactionAccountId(row.notes, fallbackAccountId);
+                        const reconcileType: ReconcileType = row.type === 'income' ? 'income' : 'expense';
+                        const reconcileKey = getReconcileChangeKey(reconcileType, row.id);
+                        const pendingReconcile = pendingReconcileChanges[reconcileKey];
+                        const reconciledDisplay = pendingReconcile ? pendingReconcile.reconciled : row.reconciled;
                         return (
                           <tr key={`${row.id}-${i}`} className={`hover:bg-brand-tan/5 ${!row.reconciled && row.source === 'manual' ? 'border-l-2 border-amber-500/50' : ''}`}>
                             <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(row.date)}</td>
@@ -2727,6 +3314,16 @@ export default function AdminBudgetPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">{getAccountDisplayName(accountId)}</td>
+                            <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">
+                              {row.currency && row.currency !== 'AUD' ? (
+                                <span className="px-1.5 py-0.5 bg-brand-black/50 border border-brand-tan/20 rounded text-brand-tan font-mono">
+                                  {row.currency}
+                                  {row.amount_original !== undefined && <span className="ml-1 text-brand-cream/40">{Math.abs(row.amount_original).toFixed(2)}</span>}
+                                </span>
+                              ) : (
+                                <span className="text-brand-cream/30">AUD</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 font-semibold whitespace-nowrap">
                               <span className={row.amount_aud >= 0 ? 'text-green-400' : 'text-red-400'}>{fmtSigned(row.amount_aud)}</span>
                             </td>
@@ -2734,11 +3331,30 @@ export default function AdminBudgetPage() {
                               <span className={row.running_balance >= 0 ? 'text-brand-cream' : 'text-red-400'}>{fmt(row.running_balance)}</span>
                             </td>
                             <td className="px-4 py-3">
-                              {row.reconciled
-                                ? <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="w-3.5 h-3.5" />Reconciled</span>
-                                : row.source === 'manual'
-                                  ? <button onClick={() => handleReconcile(row.type === 'income' ? 'income' : 'expense', row.id, true)} className="text-xs text-amber-400 hover:underline flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />Mark reconciled</button>
-                                  : <span className="text-xs text-brand-cream/30">—</span>}
+                              {pendingReconcile ? (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs text-amber-400">
+                                    Queued: {pendingReconcile.reconciled ? 'Reconcile' : 'Unreconcile'}
+                                  </span>
+                                  <button
+                                    onClick={() => discardQueuedReconcile(reconcileType, row.id)}
+                                    className="text-[11px] text-brand-cream/50 hover:text-brand-cream underline text-left"
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              ) : reconciledDisplay ? (
+                                <span className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="w-3.5 h-3.5" />Reconciled</span>
+                              ) : row.source === 'manual' ? (
+                                <button
+                                  onClick={() => queueReconcileChange(reconcileType, row.id, true, row.reconciled)}
+                                  className="text-xs text-amber-400 hover:underline flex items-center gap-1"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5" />Queue reconcile
+                                </button>
+                              ) : (
+                                <span className="text-xs text-brand-cream/30">—</span>
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               <button onClick={() => openLedgerEditor(row)} className="p-1 text-brand-cream/30 hover:text-brand-tan rounded" title="Edit transaction">
@@ -2764,6 +3380,7 @@ export default function AdminBudgetPage() {
                         });
                         return `${filteredLedger.length} rows${(ledgerDateFrom || ledgerDateTo || ledgerAccountFilter) ? ' (filtered)' : ''}`;
                       })()}</td>
+                      <td className="px-4 py-2 text-xs text-brand-cream/30">Total income:</td>
                       <td className="px-4 py-2 font-bold text-green-400 text-sm">{fmt(ledger.filter((row) => {
                         if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
                         if (ledgerDateTo && row.date > ledgerDateTo) return false;
@@ -2773,7 +3390,7 @@ export default function AdminBudgetPage() {
                         }
                         return row.type === 'income';
                       }).reduce((s, r) => s + r.amount_aud, 0))}</td>
-                      <td colSpan={3} />
+                      <td colSpan={4} />
                     </tr>
                   </tfoot>
                 </table>
@@ -2858,8 +3475,8 @@ export default function AdminBudgetPage() {
               className="w-full flex items-center justify-between px-5 py-4 hover:bg-brand-tan/5 transition-colors"
             >
               <div className="text-left">
-                <h3 className="font-semibold text-brand-cream">Legacy Payment Tracker</h3>
-                <p className="text-xs text-brand-cream/40 mt-0.5">Existing tracker operations and member payment status</p>
+                <h3 className="font-semibold text-brand-cream">Member Collections</h3>
+                <p className="text-xs text-brand-cream/40 mt-0.5">Payment history, import, and per-member status</p>
               </div>
               {showLegacyPaymentSection ? <ChevronUp className="w-5 h-5 text-brand-cream/50" /> : <ChevronDown className="w-5 h-5 text-brand-cream/50" />}
             </button>
@@ -2985,11 +3602,11 @@ export default function AdminBudgetPage() {
             </div>
           )}
 
-          {/* Legacy Payment Tracker View */}
+          {/* Member Collections Status */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-brand-cream">Payment Tracker Status</h3>
-              <p className="text-xs text-brand-cream/40">Legacy view retained in Financial Manager</p>
+              <h3 className="font-semibold text-brand-cream">Member Payment Status</h3>
+              <p className="text-xs text-brand-cream/40">{memberPaymentSummary.length} member{memberPaymentSummary.length !== 1 ? 's' : ''} tracked</p>
             </div>
 
             {/* Member payment summary cards */}
@@ -3117,7 +3734,7 @@ export default function AdminBudgetPage() {
                             <td className="px-6 py-4">
 	                              <p className="text-brand-cream/70">
 	                                {member.last_payment_date
-	                                  ? new Date(member.last_payment_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+	                                  ? parseLocalDate(member.last_payment_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 	                                  : '-'}
 	                              </p>
                             </td>
@@ -3144,7 +3761,7 @@ export default function AdminBudgetPage() {
                                   </p>
                                   {nextMilestone && (
                                     <p className="text-xs text-blue-400/50">
-                                      Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                      Next due {fmtShort(nextMilestone.milestone_date)}: ${nextMilestone.accumulated_amount.toLocaleString()}
                                     </p>
                                   )}
                                 </div>
@@ -3156,7 +3773,7 @@ export default function AdminBudgetPage() {
                                   </span>
                                   {nextMilestone ? (
                                     <p className="text-xs text-green-400/70 mt-1">
-                                      Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                      Next due {fmtShort(nextMilestone.milestone_date)}: ${nextMilestone.accumulated_amount.toLocaleString()}
                                     </p>
                                   ) : (
                                     <p className="text-xs text-green-400/70 mt-1">Final milestone reached</p>
@@ -3172,7 +3789,7 @@ export default function AdminBudgetPage() {
                                   </p>
                                   {nextMilestone && (
                                     <p className="text-xs text-red-400/50">
-                                      Next due {new Date(nextMilestone.milestone_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${nextMilestone.accumulated_amount.toLocaleString()}
+                                      Next due {fmtShort(nextMilestone.milestone_date)}: ${nextMilestone.accumulated_amount.toLocaleString()}
                                     </p>
                                   )}
                                 </div>
@@ -3268,7 +3885,7 @@ export default function AdminBudgetPage() {
                       <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Category</label>
                         <select value={incomeForm.category} onChange={(e) => setIncomeForm({ ...incomeForm, category: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan">
                           <option value="interest">Interest</option>
-                          <option value="transfer">Transfer (inter-account)</option>
+                          <option value="transfer" disabled>Transfer (use Ledger → Transfer)</option>
                           <option value="refund">Refund</option>
                           <option value="sponsorship">Sponsorship</option>
                           <option value="other">Other</option>
@@ -3329,14 +3946,25 @@ export default function AdminBudgetPage() {
                         </button>
                         {unreconciledIncome.length > 0 && (
                           <button
-                            onClick={async () => {
-                              let count = 0;
-                              for (const e of unreconciledIncome) { if (await handleReconcile('income', e.id, true)) count++; }
-                              if (count > 0) showToast('success', `${count} income entries reconciled`);
+                            onClick={() => {
+                              let queued = 0;
+                              setPendingReconcileChanges((prev) => {
+                                const next = { ...prev };
+                                for (const e of unreconciledIncome) {
+                                  const key = getReconcileChangeKey('income', e.id);
+                                  if (next[key]?.reconciled === true) continue;
+                                  next[key] = { type: 'income', id: e.id, reconciled: true };
+                                  queued++;
+                                }
+                                return next;
+                              });
+                              if (queued > 0) {
+                                showToast('success', `${queued} income entr${queued === 1 ? 'y' : 'ies'} queued`);
+                              }
                             }}
                             className="text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20"
                           >
-                            Mark all reconciled ({unreconciledIncome.length})
+                            Queue all reconciled ({unreconciledIncome.length})
                           </button>
                         )}
                         <span className="text-green-400 font-semibold text-sm">{fmt(incomeEntries.reduce((s, e) => s + e.amount_aud, 0))}</span>
@@ -3368,7 +3996,39 @@ export default function AdminBudgetPage() {
                                   })()}
                                 </td>
                                 <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
-                                <td className="px-4 py-3">{e.reconciled ? <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />Yes</span> : <button onClick={() => handleReconcile('income', e.id, true)} className="text-xs text-amber-400 hover:underline">Mark reconciled</button>}</td>
+                                <td className="px-4 py-3">
+                                  {(() => {
+                                    const key = getReconcileChangeKey('income', e.id);
+                                    const pending = pendingReconcileChanges[key];
+                                    const reconciledDisplay = pending ? pending.reconciled : e.reconciled;
+
+                                    if (pending) {
+                                      return (
+                                        <div className="flex flex-col gap-1">
+                                          <span className="text-xs text-amber-400">
+                                            Queued: {pending.reconciled ? 'Reconcile' : 'Unreconcile'}
+                                          </span>
+                                          <button onClick={() => discardQueuedReconcile('income', e.id)} className="text-[11px] text-brand-cream/50 hover:text-brand-cream underline text-left">
+                                            Undo
+                                          </button>
+                                        </div>
+                                      );
+                                    }
+
+                                    if (reconciledDisplay) {
+                                      return <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />Yes</span>;
+                                    }
+
+                                    return (
+                                      <button
+                                        onClick={() => queueReconcileChange('income', e.id, true, e.reconciled)}
+                                        className="text-xs text-amber-400 hover:underline"
+                                      >
+                                        Queue reconcile
+                                      </button>
+                                    );
+                                  })()}
+                                </td>
                                 <td className="px-4 py-3"><button onClick={() => handleDeleteIncome(e.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></td>
                               </tr>
                             );
@@ -3379,7 +4039,7 @@ export default function AdminBudgetPage() {
                   </div>
                 ) : (
                   <div className="bg-brand-black/30 border border-brand-tan/20 rounded-lg py-8 text-center text-brand-cream/40 text-sm">
-                    No income entries yet — use <strong className="text-brand-cream/60">Add Other Income</strong> above to record interest, transfers, or refunds
+                    No income entries yet — use <strong className="text-brand-cream/60">Add Other Income</strong> above to record interest or refunds. Use <strong className="text-brand-cream/60">Ledger → Transfer</strong> for inter-account transfers.
                   </div>
                 )}
               </div>
@@ -3404,7 +4064,7 @@ export default function AdminBudgetPage() {
                       e.expense_date, e.description, e.category?.name || '',
                       e.paid_by_type === 'group_kitty' ? 'Group Kitty' : e.paid_by_type === 'member' ? (e.payer?.nickname || e.payer?.full_name || 'Member') : (e.paid_by_label || 'External'),
                       getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
-                      String(e.amount), e.currency, String(e.amount_aud),
+                      String(-Math.abs(e.amount)), e.currency, String(-Math.abs(e.amount_aud)),
                       e.source, e.reconciled ? 'Yes' : 'No',
                     ]),
                   ]);
@@ -3557,7 +4217,7 @@ export default function AdminBudgetPage() {
                   <div className="flex gap-2">
                     <input type="number" min="0" step="0.01" value={expForm.amount} onChange={(e) => handleExpFormChange('amount', e.target.value)} className="flex-1 px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="0.00" />
                     <select value={expForm.currency} onChange={(e) => handleExpFormChange('currency', e.target.value)} className="w-24 px-2 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan">
-                      {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {(settings.enabled_currencies?.length ? settings.enabled_currencies : CURRENCIES).map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                 </div>
@@ -3684,7 +4344,7 @@ export default function AdminBudgetPage() {
                   );
                 })
               : expenses;
-            const expTotal = filteredExpenses.reduce((s, e) => s + Number(e.amount_aud || 0), 0);
+            const expTotal = filteredExpenses.reduce((s, e) => s + Math.abs(Number(e.amount_aud || 0)), 0);
             return (
               <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-brand-tan/10 flex items-center gap-3">
@@ -3723,8 +4383,8 @@ export default function AdminBudgetPage() {
                           <td className="px-3 py-3 text-brand-cream/50 text-xs">
                             {getAccountDisplayName(parseTransactionNote(exp.notes).account_source_id)}
                           </td>
-                          <td className="px-3 py-3 text-brand-cream/70 text-xs whitespace-nowrap">{exp.amount.toLocaleString()} {exp.currency}</td>
-                          <td className="px-3 py-3 font-semibold text-brand-tan whitespace-nowrap">{fmt(exp.amount_aud)}</td>
+                          <td className="px-3 py-3 text-red-400 text-xs whitespace-nowrap">-{Math.abs(exp.amount).toLocaleString()} {exp.currency}</td>
+                          <td className="px-3 py-3 font-semibold text-red-400 whitespace-nowrap">-{fmt(Math.abs(exp.amount_aud))}</td>
                           <td className="px-3 py-3">
                             <span className={`text-xs px-2 py-0.5 rounded-full border ${exp.source === 'import' ? 'bg-blue-900/20 text-blue-400 border-blue-600/30' : exp.reconciled ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-amber-900/20 text-amber-400 border-amber-600/30'}`}>
                               {exp.source === 'import' ? 'Imported' : exp.reconciled ? 'Reconciled' : 'Unreconciled'}
@@ -3744,7 +4404,7 @@ export default function AdminBudgetPage() {
                         <td colSpan={6} className="px-3 py-3 text-xs text-brand-cream/40">
                           {filteredExpenses.length} expense{filteredExpenses.length === 1 ? '' : 's'}{expenseSearch ? ' (filtered)' : ''}
                         </td>
-                        <td className="px-3 py-3 font-bold text-brand-tan whitespace-nowrap">{fmt(expTotal)}</td>
+                        <td className="px-3 py-3 font-bold text-red-400 whitespace-nowrap">-{fmt(expTotal)}</td>
                         <td colSpan={2} />
                       </tr>
                     </tfoot>
@@ -3770,6 +4430,71 @@ export default function AdminBudgetPage() {
               </p>
             </div>
           </div>
+
+          {/* ── Bank balance reconciliation check ───────────────────────────── */}
+          {(() => {
+            const accounts = accountOptions.filter((a) => a.accountType !== 'paypal_wallet');
+            if (accounts.length === 0 || Object.values(accountBalances).every((v, i, arr) => i === arr.length - 1 || v === 0)) return null;
+            const reconciledByAccount: Record<string, number> = {};
+            ledger
+              .filter((row) => row.reconciled)
+              .forEach((row) => {
+                const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                if (acctId) {
+                  reconciledByAccount[acctId] = (reconciledByAccount[acctId] ?? 0) + row.amount_aud;
+                }
+              });
+            const knownBalances: Record<string, number> = {
+              westpac_choice: accountBalances.westpac_choice,
+              westpac_life: accountBalances.westpac_life,
+              paypal: accountBalances.paypal,
+            };
+            const hasAnyBalance = Object.values(knownBalances).some((v) => v > 0);
+            if (!hasAnyBalance) return null;
+            const discrepancies = BUDGET_ACCOUNTS.map((acct) => {
+              const bookBalance = reconciledByAccount[acct.id] ?? 0;
+              const bankBalance = knownBalances[acct.id] ?? 0;
+              const diff = bankBalance - bookBalance;
+              return { acct, bookBalance, bankBalance, diff };
+            }).filter((d) => d.bankBalance > 0 || d.bookBalance !== 0);
+            if (discrepancies.length === 0) return null;
+            const allMatch = discrepancies.every((d) => Math.abs(d.diff) < 0.01);
+            return (
+              <div className={`border rounded-xl p-5 space-y-3 ${allMatch ? 'bg-green-950/30 border-green-600/30' : 'bg-amber-950/30 border-amber-600/30'}`}>
+                <div className="flex items-center gap-2">
+                  {allMatch ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <AlertTriangle className="w-4 h-4 text-amber-400" />}
+                  <h3 className={`font-semibold text-sm ${allMatch ? 'text-green-300' : 'text-amber-300'}`}>
+                    Bank Balance Reconciliation {allMatch ? '— All match ✓' : '— Discrepancies found'}
+                  </h3>
+                  <button onClick={() => setTab('accounts')} className="ml-auto text-xs text-brand-cream/40 hover:text-brand-cream underline">Update balances →</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {discrepancies.map(({ acct, bookBalance, bankBalance, diff }) => {
+                    const matches = Math.abs(diff) < 0.01;
+                    return (
+                      <div key={acct.id} className={`p-3 rounded-lg border ${matches ? 'bg-green-950/20 border-green-600/20' : 'bg-amber-950/20 border-amber-500/30'}`}>
+                        <p className="text-xs text-brand-cream/50 font-medium mb-2">{acct.name}</p>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between"><span className="text-brand-cream/40">Bank balance:</span><span className="font-semibold text-brand-cream">{fmt(bankBalance)}</span></div>
+                          <div className="flex justify-between"><span className="text-brand-cream/40">Book balance:</span><span className="font-semibold text-brand-cream">{fmt(bookBalance)}</span></div>
+                          <div className={`flex justify-between pt-1 border-t border-brand-tan/10 ${matches ? 'text-green-400' : 'text-amber-400'}`}>
+                            <span>Difference:</span>
+                            <span className="font-bold">{diff >= 0 ? '+' : ''}{fmt(diff)}</span>
+                          </div>
+                        </div>
+                        {!matches && (
+                          <p className="text-[11px] text-amber-400/60 mt-1">
+                            {Math.abs(diff) < 1 ? 'Minor rounding — check FX or fees' : diff > 0 ? 'Bank higher — unrecorded income?' : 'Bank lower — unrecorded expense?'}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-brand-cream/30">Book balance = sum of all reconciled transactions per account. Set bank balances in the Accounts tab.</p>
+              </div>
+            );
+          })()}
 
           {totalUnreconciled === 0 ? (
             <div className="bg-brand-dark-grey border border-green-600/30 rounded-lg py-12 text-center">
@@ -3800,14 +4525,34 @@ export default function AdminBudgetPage() {
                             <td className="px-4 py-3 font-semibold text-red-400">−{fmt(e.amount_aud)}</td>
                             <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-red-900/30 text-red-400">Expense</span></td>
                             <td className="px-4 py-3">
+                              {(() => {
+                                const key = getAccountAssignmentKey('expense', e.id);
+                                const pending = pendingAccountAssignments[key];
+                                return (
+                                  <>
                               <select
-                                defaultValue=""
-                                onChange={(ev) => { if (ev.target.value) handleAssignAccount('expense', e.id, ev.target.value); }}
+                                value={pending?.accountId ?? ''}
+                                onChange={(ev) => handleAssignAccount('expense', e.id, ev.target.value)}
                                 className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
                               >
                                 <option value="">— Select account —</option>
                                 {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                               </select>
+                              {pending && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="text-[11px] text-brand-tan">Queued</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => discardQueuedAccountAssignment('expense', e.id)}
+                                    className="text-[11px] text-brand-cream/60 hover:text-brand-cream/90 underline"
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              )}
+                                  </>
+                                );
+                              })()}
                             </td>
                           </tr>
                         ))}
@@ -3818,14 +4563,34 @@ export default function AdminBudgetPage() {
                             <td className="px-4 py-3 font-semibold text-green-400">+{fmt(e.amount_aud)}</td>
                             <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-green-900/30 text-green-400">Income</span></td>
                             <td className="px-4 py-3">
+                              {(() => {
+                                const key = getAccountAssignmentKey('income', e.id);
+                                const pending = pendingAccountAssignments[key];
+                                return (
+                                  <>
                               <select
-                                defaultValue=""
-                                onChange={(ev) => { if (ev.target.value) handleAssignAccount('income', e.id, ev.target.value); }}
+                                value={pending?.accountId ?? ''}
+                                onChange={(ev) => handleAssignAccount('income', e.id, ev.target.value)}
                                 className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
                               >
                                 <option value="">— Select account —</option>
                                 {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                               </select>
+                              {pending && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="text-[11px] text-brand-tan">Queued</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => discardQueuedAccountAssignment('income', e.id)}
+                                    className="text-[11px] text-brand-cream/60 hover:text-brand-cream/90 underline"
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              )}
+                                  </>
+                                );
+                              })()}
                             </td>
                           </tr>
                         ))}
@@ -3840,20 +4605,25 @@ export default function AdminBudgetPage() {
                   <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
                     <h3 className="font-semibold text-brand-cream">Unreconciled Expenses <span className="text-amber-400 ml-2">{unreconciledExpenses.length}</span></h3>
                     <button
-                      onClick={async () => {
-                        let successCount = 0;
-                        for (const e of unreconciledExpenses) {
-                          if (await handleReconcile('expense', e.id, true)) successCount++;
-                        }
-                        if (successCount === unreconciledExpenses.length) {
-                          showToast('success', 'All marked reconciled');
-                        } else if (successCount > 0) {
-                          showToast('success', `${successCount} of ${unreconciledExpenses.length} marked reconciled`);
+                      onClick={() => {
+                        let queued = 0;
+                        setPendingReconcileChanges((prev) => {
+                          const next = { ...prev };
+                          for (const e of unreconciledExpenses) {
+                            const key = getReconcileChangeKey('expense', e.id);
+                            if (next[key]?.reconciled === true) continue;
+                            next[key] = { type: 'expense', id: e.id, reconciled: true };
+                            queued++;
+                          }
+                          return next;
+                        });
+                        if (queued > 0) {
+                          showToast('success', `${queued} expense${queued === 1 ? '' : 's'} queued`);
                         }
                       }}
                       className="text-xs text-brand-tan hover:underline"
                     >
-	                      Mark all reconciled
+	                      Queue all reconciled
 	                    </button>
 	                  </div>
 	                  <div className="overflow-x-auto">
@@ -3864,12 +4634,25 @@ export default function AdminBudgetPage() {
 	                          <tr key={e.id} className="hover:bg-brand-tan/5">
 	                            <td className="px-4 py-3 text-brand-cream/60">{fmtDate(e.expense_date)}</td>
 	                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
-	                            <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(e.amount_aud)}</td>
+	                            <td className="px-4 py-3 font-semibold text-red-400">-{fmt(Math.abs(e.amount_aud))}</td>
 	                            <td className="px-4 py-3 text-brand-cream/50">{e.category?.name || '—'}</td>
 	                            <td className="px-4 py-3">
-	                              <button onClick={() => handleReconcile('expense', e.id, true)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
-	                                <CheckCircle2 className="w-3.5 h-3.5" /> Reconcile
-	                              </button>
+                                {(() => {
+                                  const key = getReconcileChangeKey('expense', e.id);
+                                  const pending = pendingReconcileChanges[key];
+                                  if (pending) {
+                                    return (
+                                      <button onClick={() => discardQueuedReconcile('expense', e.id)} className="flex items-center gap-1 text-xs text-brand-cream/70 hover:text-brand-cream border border-brand-tan/30 rounded px-2 py-1 hover:bg-brand-tan/10">
+                                        <X className="w-3.5 h-3.5" /> Undo queued
+                                      </button>
+                                    );
+                                  }
+                                  return (
+	                                <button onClick={() => queueReconcileChange('expense', e.id, true, e.reconciled)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
+	                                  <CheckCircle2 className="w-3.5 h-3.5" /> Queue reconcile
+	                                </button>
+                                  );
+                                })()}
 	                            </td>
 	                          </tr>
 	                        ))}
@@ -3884,20 +4667,25 @@ export default function AdminBudgetPage() {
                   <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
                     <h3 className="font-semibold text-brand-cream">Unreconciled Income <span className="text-amber-400 ml-2">{unreconciledIncome.length}</span></h3>
                     <button
-                      onClick={async () => {
-                        let successCount = 0;
-                        for (const e of unreconciledIncome) {
-                          if (await handleReconcile('income', e.id, true)) successCount++;
-                        }
-                        if (successCount === unreconciledIncome.length) {
-                          showToast('success', 'All income marked reconciled');
-                        } else if (successCount > 0) {
-                          showToast('success', `${successCount} of ${unreconciledIncome.length} marked reconciled`);
+                      onClick={() => {
+                        let queued = 0;
+                        setPendingReconcileChanges((prev) => {
+                          const next = { ...prev };
+                          for (const e of unreconciledIncome) {
+                            const key = getReconcileChangeKey('income', e.id);
+                            if (next[key]?.reconciled === true) continue;
+                            next[key] = { type: 'income', id: e.id, reconciled: true };
+                            queued++;
+                          }
+                          return next;
+                        });
+                        if (queued > 0) {
+                          showToast('success', `${queued} income entr${queued === 1 ? 'y' : 'ies'} queued`);
                         }
                       }}
                       className="text-xs text-brand-tan hover:underline"
                     >
-                      Mark all reconciled
+                      Queue all reconciled
                     </button>
                   </div>
 	                  <div className="overflow-x-auto">
@@ -3910,9 +4698,22 @@ export default function AdminBudgetPage() {
 	                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
 	                            <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
 	                            <td className="px-4 py-3">
-	                              <button onClick={() => handleReconcile('income', e.id, true)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
-	                                <CheckCircle2 className="w-3.5 h-3.5" /> Reconcile
-	                              </button>
+                                {(() => {
+                                  const key = getReconcileChangeKey('income', e.id);
+                                  const pending = pendingReconcileChanges[key];
+                                  if (pending) {
+                                    return (
+                                      <button onClick={() => discardQueuedReconcile('income', e.id)} className="flex items-center gap-1 text-xs text-brand-cream/70 hover:text-brand-cream border border-brand-tan/30 rounded px-2 py-1 hover:bg-brand-tan/10">
+                                        <X className="w-3.5 h-3.5" /> Undo queued
+                                      </button>
+                                    );
+                                  }
+                                  return (
+	                                <button onClick={() => queueReconcileChange('income', e.id, true, e.reconciled)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
+	                                  <CheckCircle2 className="w-3.5 h-3.5" /> Queue reconcile
+	                                </button>
+                                  );
+                                })()}
 	                            </td>
 	                          </tr>
 	                        ))}
@@ -4124,20 +4925,144 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <div className="max-w-5xl space-y-5">
-          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-4">
+          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-5">
             <h3 className="font-semibold text-brand-cream">Budget Configuration</h3>
-            <div>
-              <label className="block text-xs font-medium text-brand-cream/60 mb-1">Total Budget (AUD)</label>
-              <input type="number" min="0" step="100" value={settings.total_budget_aud} onChange={(e) => setSettings({ ...settings, total_budget_aud: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
-              <p className="text-xs text-brand-cream/30 mt-1">Used for cost-share calculation per member</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-                <div className="px-3 py-2 bg-brand-black/40 border border-brand-tan/20 rounded text-xs text-brand-cream/70">
-                  Group budget: <span className="text-brand-tan font-semibold">{fmt(settings.total_budget_aud || 0)}</span>
-                </div>
-                <div className="px-3 py-2 bg-brand-black/40 border border-brand-tan/20 rounded text-xs text-brand-cream/70">
-                  Per person ({participantCount} members): <span className="text-brand-tan font-semibold">{fmt((settings.total_budget_aud || 0) / participantCount)}</span>
+
+            {/* Budget fields — both independent, with auto-sync helpers */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-brand-cream/60 mb-1">Per-Person Budget (AUD)</label>
+                <input
+                  type="number" min="0" step="100"
+                  value={settings.per_person_budget_aud || ''}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const pp = parseFloat(e.target.value) || 0;
+                    setSettings((prev) => ({
+                      ...prev,
+                      per_person_budget_aud: pp,
+                      ...(budgetSyncMode === 'per_person_drives' ? { total_budget_aud: pp * participantCount } : {}),
+                    }));
+                  }}
+                  className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                />
+                <p className="text-xs text-brand-cream/30 mt-1">Cost each member is expected to contribute</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-brand-cream/60 mb-1">Group Total Budget (AUD)</label>
+                <input
+                  type="number" min="0" step="100"
+                  value={settings.total_budget_aud || ''}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const grp = parseFloat(e.target.value) || 0;
+                    setSettings((prev) => ({
+                      ...prev,
+                      total_budget_aud: grp,
+                      ...(budgetSyncMode === 'group_drives' ? { per_person_budget_aud: participantCount > 0 ? grp / participantCount : 0 } : {}),
+                    }));
+                  }}
+                  className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                />
+                <p className="text-xs text-brand-cream/30 mt-1">Total group budget across all {participantCount} members</p>
+              </div>
+            </div>
+
+            {/* Sync mode toggle */}
+            <div className="flex flex-wrap items-center gap-3 p-3 bg-brand-black/30 rounded-lg border border-brand-tan/10">
+              <span className="text-xs text-brand-cream/50 font-medium">Auto-calculate:</span>
+              <label className="flex items-center gap-1.5 text-xs text-brand-cream/70 cursor-pointer">
+                <input
+                  type="radio"
+                  name="budgetSyncMode"
+                  checked={budgetSyncMode === 'per_person_drives'}
+                  onChange={() => {
+                    setBudgetSyncMode('per_person_drives');
+                    setSettings((prev) => ({ ...prev, total_budget_aud: prev.per_person_budget_aud * participantCount }));
+                  }}
+                  className="text-brand-tan"
+                />
+                Per-person → Group total
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-brand-cream/70 cursor-pointer">
+                <input
+                  type="radio"
+                  name="budgetSyncMode"
+                  checked={budgetSyncMode === 'group_drives'}
+                  onChange={() => {
+                    setBudgetSyncMode('group_drives');
+                    setSettings((prev) => ({ ...prev, per_person_budget_aud: participantCount > 0 ? prev.total_budget_aud / participantCount : 0 }));
+                  }}
+                  className="text-brand-tan"
+                />
+                Group total → Per-person
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-brand-cream/70 cursor-pointer">
+                <input
+                  type="radio"
+                  name="budgetSyncMode"
+                  checked={budgetSyncMode !== 'per_person_drives' && budgetSyncMode !== 'group_drives'}
+                  onChange={() => setBudgetSyncMode('per_person_drives')}
+                  className="text-brand-tan"
+                />
+                Independent (no auto-calc)
+              </label>
+            </div>
+
+            {/* Quick-split helper */}
+            {settings.total_budget_aud > 0 && (
+              <div className="p-3 bg-brand-black/20 border border-brand-tan/15 rounded-lg">
+                <p className="text-xs font-medium text-brand-cream/60 mb-2">Group → Per-person split ({participantCount} members)</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {[participantCount, participantCount - 1, participantCount + 1, participantCount + 2].filter((n) => n > 0).map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setSettings((prev) => ({ ...prev, per_person_budget_aud: prev.total_budget_aud / n }))}
+                      className="px-2 py-1.5 bg-brand-black/40 border border-brand-tan/20 rounded text-xs text-brand-cream/70 hover:border-brand-tan/50 hover:text-brand-cream transition-colors"
+                    >
+                      ÷ {n} = {fmt(settings.total_budget_aud / n)}
+                    </button>
+                  ))}
                 </div>
               </div>
+            )}
+
+            {/* Enabled currencies */}
+            <div>
+              <label className="block text-xs font-medium text-brand-cream/60 mb-2">Enabled Currencies for This Trip</label>
+              <div className="flex flex-wrap gap-2">
+                {['AUD', 'MAD', 'USD', 'EUR', 'GBP', 'CAD', 'NZD', 'JPY', 'CHF', 'SGD'].map((cur) => {
+                  const enabled = (settings.enabled_currencies ?? ['AUD']).includes(cur);
+                  return (
+                    <button
+                      key={cur}
+                      type="button"
+                      disabled={cur === 'AUD'} // AUD is always enabled
+                      onClick={() => {
+                        setSettings((prev) => {
+                          const current = prev.enabled_currencies ?? ['AUD'];
+                          if (cur === 'AUD') return prev;
+                          return {
+                            ...prev,
+                            enabled_currencies: enabled
+                              ? current.filter((c) => c !== cur)
+                              : [...current, cur],
+                          };
+                        });
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                        enabled
+                          ? 'bg-brand-tan/20 border-brand-tan text-brand-tan'
+                          : 'border-brand-tan/20 text-brand-cream/40 hover:border-brand-tan/40 hover:text-brand-cream/60'
+                      } ${cur === 'AUD' ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      {cur}
+                      {cur === 'AUD' && <span className="ml-1 text-brand-cream/30">(default)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-brand-cream/30 mt-2">AUD is always included. Selected currencies appear in transaction forms.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-brand-cream/60 mb-1">Westpac Life Savings Rate (% per year)</label>
@@ -4506,6 +5431,30 @@ export default function AdminBudgetPage() {
           <button onClick={handleSaveSettings} disabled={saving} className="w-full bg-brand-tan hover:bg-brand-tan/90 text-brand-black font-semibold py-3 rounded-lg transition-colors disabled:opacity-50">
             {saving ? 'Saving…' : 'Save Settings'}
           </button>
+
+          {/* ── Danger Zone ───────────────────────────────────────────────── */}
+          <div className="bg-red-950/30 border border-red-600/30 rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <h3 className="font-semibold text-red-300 text-sm">Danger Zone</h3>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-brand-cream">Delete All Financial Data</p>
+                <p className="text-xs text-brand-cream/40 mt-0.5">
+                  Permanently removes ALL expenses and income entries. Member payment records are kept. Start fresh.
+                </p>
+              </div>
+              <button
+                onClick={handleDeleteAllData}
+                disabled={deletingAll}
+                className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-red-700/30 border border-red-600/50 text-red-300 rounded-lg text-sm font-semibold hover:bg-red-700/50 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deletingAll ? 'Deleting…' : 'Delete All Data'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

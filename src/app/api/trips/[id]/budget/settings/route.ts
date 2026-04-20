@@ -32,12 +32,15 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (error) throw error;
 
     // Return defaults if no row exists yet
-    const settings = data ?? {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const settings: any = data ?? {
       trip_id: tripId,
       total_budget_aud: 0,
+      per_person_budget_aud: 0,
       show_group_budget_to_members: false,
       show_individual_breakdown_to_members: false,
       exchange_rate_mad_aud: 0.14,
+      enabled_currencies: ['AUD'],
       notes: null,
     };
 
@@ -76,11 +79,26 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const body = await getJsonBody(request);
     const {
       total_budget_aud,
+      per_person_budget_aud,
       show_group_budget_to_members,
       show_individual_breakdown_to_members,
       exchange_rate_mad_aud,
+      enabled_currencies,
       notes,
     } = body;
+
+    // Validate enabled_currencies if provided
+    const SUPPORTED_CURRENCIES = ['AUD', 'MAD', 'USD', 'EUR', 'GBP', 'CAD', 'NZD', 'JPY', 'CHF', 'SGD'];
+    let normalizedCurrencies: string[] | undefined;
+    if (enabled_currencies !== undefined) {
+      if (!Array.isArray(enabled_currencies) || enabled_currencies.length === 0) {
+        return errorResponse({ code: 'VALIDATION_ERROR', message: 'enabled_currencies must be a non-empty array', status: 400 });
+      }
+      normalizedCurrencies = enabled_currencies
+        .map((c: unknown) => String(c).toUpperCase())
+        .filter((c: string) => SUPPORTED_CURRENCIES.includes(c));
+      if (!normalizedCurrencies.includes('AUD')) normalizedCurrencies.unshift('AUD');
+    }
 
     // Upsert — creates the row if it doesn't exist
     const { data, error } = await supabase
@@ -89,9 +107,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
         {
           trip_id: tripId,
           ...(total_budget_aud !== undefined && { total_budget_aud }),
+          ...(per_person_budget_aud !== undefined && { per_person_budget_aud }),
           ...(show_group_budget_to_members !== undefined && { show_group_budget_to_members }),
           ...(show_individual_breakdown_to_members !== undefined && { show_individual_breakdown_to_members }),
           ...(exchange_rate_mad_aud !== undefined && { exchange_rate_mad_aud }),
+          ...(normalizedCurrencies !== undefined && { enabled_currencies: normalizedCurrencies }),
           ...(notes !== undefined && { notes }),
         },
         { onConflict: 'trip_id' }

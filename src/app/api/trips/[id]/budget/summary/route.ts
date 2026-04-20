@@ -41,11 +41,14 @@ export async function GET(request: NextRequest, { params }: Params) {
       .maybeSingle();
     if (settingsError) throw settingsError;
 
-    const budgetSettings = settings ?? {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const budgetSettings: any = settings ?? {
       total_budget_aud: 0,
+      per_person_budget_aud: 0,
       show_group_budget_to_members: false,
       show_individual_breakdown_to_members: false,
       exchange_rate_mad_aud: 0.14,
+      enabled_currencies: ['AUD'],
       notes: null,
     };
 
@@ -86,7 +89,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       expenseList = hasAdminBudgetAccess ? (expenses ?? []) : [];
 
       for (const e of expenses ?? []) {
-        const amountAud = toNumber(e.amount_aud);
+        const amountAud = Math.abs(toNumber(e.amount_aud));
         totalSpentAud += amountAud;
         const key = e.category_id ?? '__uncategorised__';
         expensesByCategory[key] = (expensesByCategory[key] ?? 0) + amountAud;
@@ -206,7 +209,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         sub_type: e.category?.name ?? 'Uncategorised',
         date: e.expense_date,
         description: e.description,
-        amount_aud: -toNumber(e.amount_aud),
+        amount_aud: -Math.abs(toNumber(e.amount_aud)),
         currency: e.currency,
         amount_original: e.amount,
         category: e.category,
@@ -237,9 +240,13 @@ export async function GET(request: NextRequest, { params }: Params) {
     return successResponse({
       settings: {
         total_budget_aud: exposeBudgetFigures ? totalBudgetAud : 0,
+        per_person_budget_aud: exposeBudgetFigures ? toNumber(budgetSettings.per_person_budget_aud) : 0,
         exchange_rate_mad_aud: toNumber(budgetSettings.exchange_rate_mad_aud),
         show_group_budget_to_members: groupVisibleToMembers,
         show_individual_breakdown_to_members: individualVisibleToMembers,
+        enabled_currencies: Array.isArray(budgetSettings.enabled_currencies) && budgetSettings.enabled_currencies.length > 0
+          ? budgetSettings.enabled_currencies
+          : ['AUD'],
         notes: exposeBudgetFigures ? budgetSettings.notes : null,
       },
       visibility: {
