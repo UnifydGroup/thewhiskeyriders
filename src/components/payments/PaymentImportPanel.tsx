@@ -530,6 +530,16 @@ export default function PaymentImportPanel({
             </table>
           </div>
 
+          {replaceExisting && (
+            <div className="bg-amber-900/20 border border-amber-600/40 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-amber-300 text-xs font-semibold">Replace mode active</p>
+                <p className="text-amber-400/70 text-xs mt-0.5">All existing payment records for this trip will be deleted before importing {previewSummary?.matched ?? 0} new payments. This cannot be undone.</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3 justify-between pt-1">
             <button onClick={reset} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream font-semibold hover:bg-brand-dark-grey/50 transition-colors text-sm">
               ← Different file
@@ -537,10 +547,14 @@ export default function PaymentImportPanel({
             <button
               onClick={handleConfirmImport}
               disabled={(previewSummary?.matched ?? 0) === 0}
-              className="flex items-center gap-2 px-5 py-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              className={`flex items-center gap-2 px-5 py-2 font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm ${
+                replaceExisting
+                  ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                  : 'bg-brand-tan hover:bg-brand-tan/90 text-brand-black'
+              }`}
             >
               <Upload className="w-4 h-4" />
-              Import {previewSummary?.matched ?? 0} payments
+              {replaceExisting ? 'Replace & Import' : 'Import'} {previewSummary?.matched ?? 0} payments
             </button>
           </div>
         </div>

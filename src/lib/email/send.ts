@@ -111,12 +111,16 @@ export function buildEmailHtml(args: {
   previewText?: string;
   headerTitle?: string;
   headerTagline?: string;
+  headerImageUrl?: string;
   footerText?: string;
+  footerImageUrl?: string;
 }): string {
   const { recipientName, subject, bodyHtml, ctaUrl, ctaLabel, previewText } = args;
   const headerTitle = args.headerTitle?.trim() || 'The Whiskey Riders';
   const headerTagline = args.headerTagline?.trim() || 'Ride. Bond. Remember.';
+  const headerImageUrl = args.headerImageUrl?.trim() || '';
   const footerText = args.footerText?.trim() || "You're receiving this because you're a member of The Whiskey Riders.";
+  const footerImageUrl = args.footerImageUrl?.trim() || '';
 
   const ctaBlock =
     ctaUrl && ctaLabel
@@ -148,8 +152,9 @@ export function buildEmailHtml(args: {
           <!-- Header -->
           <tr>
             <td style="background:#B5621E;padding:20px 32px;text-align:center">
-              <p style="margin:0;color:#fff;font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase">${escapeHtml(headerTitle)}</p>
-              <p style="margin:4px 0 0;color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:1px">${escapeHtml(headerTagline)}</p>
+              ${headerImageUrl ? `<img src="${escapeHtml(headerImageUrl)}" alt="${escapeHtml(headerTitle)}" style="display:block;margin:0 auto${headerTitle || headerTagline ? ' 12px' : ''};max-height:64px;max-width:220px;width:auto;height:auto;border:0" />` : ''}
+              ${headerTitle ? `<p style="margin:0;color:#fff;font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase">${escapeHtml(headerTitle)}</p>` : ''}
+              ${headerTagline ? `<p style="margin:4px 0 0;color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:1px">${escapeHtml(headerTagline)}</p>` : ''}
             </td>
           </tr>
           <!-- Body -->
@@ -165,6 +170,7 @@ export function buildEmailHtml(args: {
           <!-- Footer -->
           <tr>
             <td style="padding:16px 32px;border-top:1px solid #3a2a1a;text-align:center">
+              ${footerImageUrl ? `<img src="${escapeHtml(footerImageUrl)}" alt="" style="display:block;margin:0 auto 10px;max-height:48px;max-width:160px;width:auto;height:auto;border:0" />` : ''}
               <p style="margin:0;color:#666;font-size:12px">
                 ${escapeHtml(footerText)}
               </p>
@@ -181,13 +187,17 @@ export function buildEmailHtml(args: {
 export type EmailHeaderSettings = {
   email_header_title: string;
   email_header_tagline: string;
+  email_header_image_url: string | null;
   email_footer_text: string;
+  email_footer_image_url: string | null;
 };
 
 const DEFAULT_EMAIL_HEADER: EmailHeaderSettings = {
   email_header_title: 'The Whiskey Riders',
   email_header_tagline: 'Ride. Bond. Remember.',
+  email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
+  email_footer_image_url: null,
 };
 
 /**
@@ -201,7 +211,7 @@ export async function fetchEmailHeaderSettings(
   try {
     const { data, error } = await db
       .from('site_settings')
-      .select('email_header_title, email_header_tagline, email_footer_text')
+      .select('email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url')
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -211,7 +221,9 @@ export async function fetchEmailHeaderSettings(
     return {
       email_header_title: data.email_header_title?.trim() || DEFAULT_EMAIL_HEADER.email_header_title,
       email_header_tagline: data.email_header_tagline?.trim() || DEFAULT_EMAIL_HEADER.email_header_tagline,
+      email_header_image_url: data.email_header_image_url?.trim() || null,
       email_footer_text: data.email_footer_text?.trim() || DEFAULT_EMAIL_HEADER.email_footer_text,
+      email_footer_image_url: data.email_footer_image_url?.trim() || null,
     };
   } catch {
     return DEFAULT_EMAIL_HEADER;

@@ -1,7 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { DollarSign, AlertCircle, Banknote } from 'lucide-react';
+import { DollarSign, AlertCircle, Banknote, CheckCircle2, Clock } from 'lucide-react';
+
+/** Parse a YYYY-MM-DD date string as local noon to avoid timezone-off-by-one in AU */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function fmtDateAU(dateStr: string, opts: Intl.DateTimeFormatOptions): string {
+  return parseLocalDate(dateStr).toLocaleDateString('en-AU', opts);
+}
 
 interface PaymentMilestone {
   id: string;
@@ -229,14 +239,20 @@ export default function PaymentScheduleSection({
         </div>
         <p className="text-sm text-brand-cream/70">
           Total trip cost:{' '}
-          <span className="font-semibold text-brand-tan">${totalTripCost.toFixed(2)}</span>
+          <span className="font-semibold text-brand-tan">
+            ${totalTripCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          </span>
         </p>
         {flightsCost > 0 && (
           <p className="text-sm text-brand-cream/70 mt-1">
             Payment schedule target:{' '}
-            <span className="font-semibold text-brand-tan">${scheduleTargetAmount.toFixed(2)}</span>
+            <span className="font-semibold text-brand-tan">
+              ${scheduleTargetAmount.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </span>
             {' '}+ Flights:{' '}
-            <span className="font-semibold text-brand-tan">${flightsCost.toFixed(2)}</span>
+            <span className="font-semibold text-brand-tan">
+              ${flightsCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </span>
           </p>
         )}
       </div>
@@ -284,36 +300,70 @@ export default function PaymentScheduleSection({
           <h4 className="font-semibold text-brand-cream mb-4">Payment Milestones</h4>
           <div className="space-y-3">
             {schedule.map((milestone, index) => {
-              const date = new Date(milestone.milestone_date);
               const isLastMilestone = index === schedule.length - 1;
+              const today = new Date();
+              today.setHours(12, 0, 0, 0);
+              const milestoneDate = parseLocalDate(milestone.milestone_date);
+              const isPast = milestoneDate < today;
+              const isToday = milestoneDate.toDateString() === today.toDateString();
+              const isUpcoming = !isPast && !isToday;
 
               return (
                 <div key={milestone.id} className="flex gap-4">
                   <div className="flex flex-col items-center">
-                    <div className="w-4 h-4 bg-brand-tan rounded-full border-4 border-brand-dark-grey shadow-lg shadow-brand-tan/30"></div>
+                    <div className={`w-4 h-4 rounded-full border-4 border-brand-dark-grey shadow-lg ${
+                      isPast || isToday ? 'bg-brand-tan shadow-brand-tan/30' : 'bg-brand-tan/40 shadow-brand-tan/10'
+                    }`} />
                     {!isLastMilestone && (
-                      <div className="w-1 h-12 bg-gradient-to-b from-brand-tan to-brand-tan/30 mt-2"></div>
+                      <div className={`w-0.5 h-12 mt-2 ${
+                        isPast ? 'bg-brand-tan/60' : 'bg-brand-tan/20'
+                      }`} />
                     )}
                   </div>
 
                   <div className="pb-4 flex-1">
-                    <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-4 hover:border-brand-tan/40 transition-colors">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-semibold text-brand-cream">
-                            {date.toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'long',
-                              day: 'numeric',
-                            })}
-                          </p>
+                    <div className={`border rounded-lg p-4 transition-colors ${
+                      isToday
+                        ? 'bg-brand-tan/10 border-brand-tan/50'
+                        : isPast
+                          ? 'bg-brand-dark-grey border-brand-tan/20'
+                          : 'bg-brand-dark-grey border-brand-tan/10 hover:border-brand-tan/30'
+                    }`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold text-brand-cream">
+                              {fmtDateAU(milestone.milestone_date, {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric',
+                              })}
+                            </p>
+                            {isToday && (
+                              <span className="text-xs px-2 py-0.5 bg-brand-tan/20 border border-brand-tan/40 text-brand-tan rounded-full font-medium">
+                                Due today
+                              </span>
+                            )}
+                            {isPast && !isToday && (
+                              <span className="flex items-center gap-1 text-xs text-brand-tan/60">
+                                <CheckCircle2 className="w-3 h-3" /> Past due
+                              </span>
+                            )}
+                            {isUpcoming && (
+                              <span className="flex items-center gap-1 text-xs text-brand-cream/30">
+                                <Clock className="w-3 h-3" /> Upcoming
+                              </span>
+                            )}
+                          </div>
                           {milestone.description && (
-                            <p className="text-sm text-brand-cream/70 mt-1">{milestone.description}</p>
+                            <p className="text-sm text-brand-cream/60 mt-1">{milestone.description}</p>
                           )}
                         </div>
-                        <div className="text-right">
-                          <p className="text-lg font-bold text-brand-tan">${milestone.accumulated_amount.toFixed(2)}</p>
-                          <p className="text-xs text-brand-cream/50 mt-1">Accumulated</p>
+                        <div className="text-right flex-shrink-0">
+                          <p className={`text-lg font-bold ${isPast || isToday ? 'text-brand-tan' : 'text-brand-cream/70'}`}>
+                            ${milestone.accumulated_amount.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                          <p className="text-xs text-brand-cream/40 mt-0.5">accumulated</p>
                         </div>
                       </div>
                     </div>

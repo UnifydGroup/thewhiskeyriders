@@ -9,22 +9,32 @@ import { Spinner } from '@/components/ui/Spinner';
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/news/RichTextEditor';
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   BookTemplate,
   Check,
   ChevronDown,
+  ChevronRight,
+  Code2,
   Edit2,
+  Eye,
+  EyeOff,
   FileText,
+  GripVertical,
+  ImagePlus,
   Layout,
   Mail,
+  Paintbrush,
   Plus,
   Search,
   Send,
   Trash2,
+  Type,
   Users,
   X,
 } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
-import { normalizeEditorHtmlForSave, toEditorHtml, hasRenderableNewsContent } from '@/lib/news/content';
+import { sanitizeLinkUrl, toEditorHtml } from '@/lib/news/content';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,10 +73,37 @@ type Template = {
 type HeaderSettings = {
   email_header_title: string;
   email_header_tagline: string;
+  email_header_image_url: string | null;
   email_footer_text: string;
+  email_footer_image_url: string | null;
 };
+type EditorMode = 'rich' | 'html';
+type EmailAsset = {
+  path: string;
+  name: string;
+  file_url: string;
+  file_size: number | null;
+  updated_at: string | null;
+  content_type: string | null;
+};
+type RichTemplateBlock = { id: string; label: string };
 
-// ─── Defaults ────────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const RICH_EMAIL_ALLOWED_TAGS = new Set([
+  'div','p','br','strong','b','em','i','u','s','blockquote','ul','ol','li',
+  'h1','h2','h3','h4','h5','h6','a','img','hr','span','table','thead','tbody',
+  'tr','td','th',
+]);
+
+const RICH_EMAIL_ALLOWED_STYLE_PROPS = new Set([
+  'background','background-color','color','padding','padding-top','padding-right',
+  'padding-bottom','padding-left','margin','margin-top','margin-right','margin-bottom',
+  'margin-left','border','border-top','border-right','border-bottom','border-left',
+  'border-radius','text-align','font-size','font-weight','line-height',
+  'letter-spacing','text-transform','text-decoration','display','width','max-width',
+  'min-width','height','max-height','min-height',
+]);
 
 const emptyCampaignForm = {
   subject: '',
@@ -77,17 +114,14 @@ const emptyCampaignForm = {
   member_ids: [] as string[],
 };
 
-const emptyTemplateForm = {
-  name: '',
-  description: '',
-  subject: '',
-  body: '',
-};
+const emptyTemplateForm = { name: '', description: '', subject: '', body: '' };
 
 const defaultHeader: HeaderSettings = {
   email_header_title: 'The Whiskey Riders',
   email_header_tagline: 'Ride. Bond. Remember.',
+  email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
+  email_footer_image_url: null,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -95,8 +129,7 @@ const defaultHeader: HeaderSettings = {
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-AU', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }
 
@@ -107,21 +140,469 @@ function formatDateShort(iso: string | null): string {
   });
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+function detectEditorMode(body: string): EditorMode {
+  const lower = (body || '').toLowerCase();
+  return (
+    lower.includes('<!doctype') || lower.includes('<html') || lower.includes('<body') ||
+    lower.includes('<style') || lower.includes('<table') || lower.includes('class=') ||
+    lower.includes('email-wrapper')
+  ) ? 'html' : 'rich';
+}
+
+function sanitizeRichInlineStyle(styleValue: string): string {
+  const sanitized: string[] = [];
+  for (const declaration of styleValue.split(';')) {
+    const sep = declaration.indexOf(':');
+    if (sep <= 0) continue;
+    const prop = declaration.slice(0, sep).trim().toLowerCase();
+    const value = declaration.slice(sep + 1).trim();
+    if (!prop || !value || !RICH_EMAIL_ALLOWED_STYLE_PROPS.has(prop)) continue;
+    const lower = value.toLowerCase();
+    if (lower.includes('javascript:') || lower.includes('expression(') || lower.includes('url(')) continue;
+    sanitized.push(`${prop}: ${value}`);
+  }
+  return sanitized.join('; ');
+}
+
+function sanitizeRichEmailHtml(content: string): string {
+  const raw = (content || '').trim();
+  if (!raw || typeof window === 'undefined') return raw;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${raw}</div>`, 'text/html');
+  const wrapper = doc.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return '';
+  const walk = (node: Node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) continue;
+      if (child.nodeType !== Node.ELEMENT_NODE) { node.removeChild(child); continue; }
+      const el = child as HTMLElement;
+      const tag = el.tagName.toLowerCase();
+      if (!RICH_EMAIL_ALLOWED_TAGS.has(tag)) {
+        const frag = doc.createDocumentFragment();
+        while (el.firstChild) frag.appendChild(el.firstChild);
+        el.replaceWith(frag);
+        continue;
+      }
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on')) { el.removeAttribute(attr.name); continue; }
+        if (name === 'style') {
+          const s = sanitizeRichInlineStyle(attr.value || '');
+          s ? el.setAttribute('style', s) : el.removeAttribute('style');
+          continue;
+        }
+        if (name === 'href' || name === 'src') {
+          const safe = sanitizeLinkUrl(attr.value || '');
+          safe ? el.setAttribute(attr.name, safe) : el.removeAttribute(attr.name);
+          continue;
+        }
+        if (['target','rel','alt','title','colspan','rowspan'].includes(name) || name.startsWith('data-email-')) continue;
+        el.removeAttribute(attr.name);
+      }
+      if (tag === 'a' && el.getAttribute('href')) {
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
+      walk(el);
+    }
+  };
+  walk(wrapper);
+  return wrapper.innerHTML.trim();
+}
+
+function hasRenderableRichEmailContent(content: string): boolean {
+  const s = sanitizeRichEmailHtml(content);
+  if (!s) return false;
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 0 ||
+    /<(img|table|hr)\b/i.test(s);
+}
+
+function applyRichEmailCanvasBackground(content: string, color: string): string {
+  const sanitized = sanitizeRichEmailHtml(content);
+  const initial = sanitized || '<p></p>';
+  if (typeof window === 'undefined') return initial;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${initial}</div>`, 'text/html');
+  const wrapper = doc.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return initial;
+  let canvas = wrapper.querySelector('[data-email-canvas="true"]') as HTMLElement | null;
+  if (!canvas) {
+    canvas = doc.createElement('div');
+    canvas.setAttribute('data-email-canvas', 'true');
+    while (wrapper.firstChild) canvas.appendChild(wrapper.firstChild);
+    wrapper.appendChild(canvas);
+  }
+  canvas.style.setProperty('background-color', color);
+  if (!canvas.style.getPropertyValue('padding')) canvas.style.setProperty('padding', '24px');
+  if (!canvas.style.getPropertyValue('border-radius')) canvas.style.setProperty('border-radius', '10px');
+  return wrapper.innerHTML.trim();
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function createRichNodeId(): string {
+  return `blk-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36).slice(-5)}`;
+}
+
+function ensureRichEmailNodeIds(content: string): string {
+  const sanitized = sanitizeRichEmailHtml(content);
+  const initial = sanitized || '<p></p>';
+  if (typeof window === 'undefined') return initial;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${initial}</div>`, 'text/html');
+  const wrapper = doc.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return initial;
+  const canvas = (wrapper.querySelector('[data-email-canvas="true"]') as HTMLElement | null) || wrapper;
+  for (const child of Array.from(canvas.children) as HTMLElement[]) {
+    const tag = child.tagName.toLowerCase();
+    const isReorderable =
+      child.getAttribute('data-email-section') === 'true' ||
+      child.getAttribute('data-email-block') === 'true' ||
+      child.getAttribute('data-email-canvas') === 'true' ||
+      tag === 'table';
+    if (!isReorderable) continue;
+    if (!child.getAttribute('data-email-node-id')) child.setAttribute('data-email-node-id', createRichNodeId());
+  }
+  return wrapper.innerHTML.trim();
+}
+
+function getRichTemplateBlocks(content: string): RichTemplateBlock[] {
+  const normalized = ensureRichEmailNodeIds(content);
+  if (typeof window === 'undefined') return [];
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${normalized}</div>`, 'text/html');
+  const wrapper = doc.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return [];
+  const canvas = (wrapper.querySelector('[data-email-canvas="true"]') as HTMLElement | null) || wrapper;
+  const blocks: RichTemplateBlock[] = [];
+  (Array.from(canvas.children) as HTMLElement[]).forEach((child, index) => {
+    const id = child.getAttribute('data-email-node-id');
+    if (!id) return;
+    const tag = child.tagName.toLowerCase();
+    let label = `Block ${index + 1}`;
+    if (child.getAttribute('data-email-section') === 'true') label = `Section ${index + 1}`;
+    else if (child.querySelector('[data-email-button="true"]')) label = `Button Block ${index + 1}`;
+    else if (tag === 'table') label = `Columns Block ${index + 1}`;
+    else if (child.querySelector('img') && !child.textContent?.trim()) label = `Image Block ${index + 1}`;
+    else if (child.querySelector('h1,h2,h3,h4')) label = `Heading Block ${index + 1}`;
+    blocks.push({ id, label });
+  });
+  return blocks;
+}
+
+function reorderRichTemplateBlocks(content: string, sourceId: string, targetId: string): string {
+  if (!sourceId || !targetId || sourceId === targetId) return ensureRichEmailNodeIds(content);
+  const normalized = ensureRichEmailNodeIds(content);
+  if (typeof window === 'undefined') return normalized;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${normalized}</div>`, 'text/html');
+  const wrapper = doc.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return normalized;
+  const canvas = (wrapper.querySelector('[data-email-canvas="true"]') as HTMLElement | null) || wrapper;
+  const children = Array.from(canvas.children) as HTMLElement[];
+  const source = children.find(el => el.getAttribute('data-email-node-id') === sourceId);
+  const target = children.find(el => el.getAttribute('data-email-node-id') === targetId);
+  if (!source || !target || source === target) return wrapper.innerHTML.trim();
+  const sourceIndex = children.indexOf(source);
+  const targetIndex = children.indexOf(target);
+  source.remove();
+  sourceIndex < targetIndex ? target.after(source) : target.before(source);
+  return wrapper.innerHTML.trim();
+}
+
+function formatBytes(value: number | null): string {
+  if (!value || value <= 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value, index = 0;
+  while (size >= 1024 && index < units.length - 1) { size /= 1024; index++; }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function isImageAsset(asset: EmailAsset): boolean {
+  return (asset.content_type || '').toLowerCase().startsWith('image/');
+}
+
+// ─── Sub-Components ───────────────────────────────────────────────────────────
+
+/** Collapsible panel */
+function CollapsibleSection({
+  title, icon: Icon, defaultOpen = false, children,
+}: { title: string; icon: React.ElementType; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/20 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-brand-cream/80 hover:text-brand-cream hover:bg-brand-dark-grey/30 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <Icon className="w-4 h-4 text-brand-brown" />
+          {title}
+        </span>
+        {open ? <ChevronDown className="w-4 h-4 opacity-50" /> : <ChevronRight className="w-4 h-4 opacity-50" />}
+      </button>
+      {open && <div className="px-3 pb-3 pt-1 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+/** Mode toggle: Rich / HTML */
+function EditorModeToggle({
+  mode, onSwitch,
+}: { mode: EditorMode; onSwitch: (m: EditorMode) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border border-brand-brown/25 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => onSwitch('rich')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+          mode === 'rich'
+            ? 'bg-brand-brown text-white'
+            : 'bg-brand-dark-grey/40 text-brand-cream/60 hover:text-brand-cream hover:bg-brand-dark-grey/70'
+        }`}
+      >
+        <Type className="w-3.5 h-3.5" />
+        Visual
+      </button>
+      <button
+        type="button"
+        onClick={() => onSwitch('html')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+          mode === 'html'
+            ? 'bg-brand-brown text-white'
+            : 'bg-brand-dark-grey/40 text-brand-cream/60 hover:text-brand-cream hover:bg-brand-dark-grey/70'
+        }`}
+      >
+        <Code2 className="w-3.5 h-3.5" />
+        HTML
+      </button>
+    </div>
+  );
+}
+
+/** Block insertion toolbar */
+function BlockInsertBar({
+  onHero, onText, onButton, onColumns, onDivider, onLogo,
+}: {
+  onHero: () => void; onText: () => void; onButton: () => void;
+  onColumns: () => void; onDivider: () => void; onLogo: () => void;
+}) {
+  const blocks = [
+    { label: 'Hero Section', fn: onHero },
+    { label: 'Text Block', fn: onText },
+    { label: 'Button CTA', fn: onButton },
+    { label: 'Two Columns', fn: onColumns },
+    { label: 'Divider', fn: onDivider },
+    { label: 'Add Logo', fn: onLogo },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {blocks.map(({ label, fn }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={fn}
+          className="px-2.5 py-1 rounded border border-brand-brown/30 bg-brand-dark-grey/40 text-xs text-brand-cream/80 hover:bg-brand-brown/20 hover:text-brand-cream hover:border-brand-brown/60 transition-colors"
+        >
+          + {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Color styling controls */
+function ColorControls({
+  emailBg, sectionBg, blockBg, buttonBg,
+  onEmailBg, onSectionBg, onBlockBg, onButtonBg,
+  onApplyEmail, onApplySection, onApplyBlock, onApplyButton,
+}: {
+  emailBg: string; sectionBg: string; blockBg: string; buttonBg: string;
+  onEmailBg: (v: string) => void; onSectionBg: (v: string) => void;
+  onBlockBg: (v: string) => void; onButtonBg: (v: string) => void;
+  onApplyEmail: () => void; onApplySection: () => void;
+  onApplyBlock: () => void; onApplyButton: () => void;
+}) {
+  const row = (label: string, color: string, onChange: (v: string) => void, onApply: () => void) => (
+    <div className="flex items-center gap-2">
+      <input
+        type="color" value={color} onChange={e => onChange(e.target.value)}
+        className="h-7 w-9 rounded border border-brand-brown/20 bg-transparent cursor-pointer"
+      />
+      <span className="text-xs text-brand-cream/70 flex-1">{label}</span>
+      <button
+        type="button" onClick={onApply}
+        className="px-2 py-0.5 rounded text-[11px] border border-brand-brown/30 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/50 transition-colors"
+      >
+        Apply
+      </button>
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {row('Email Background', emailBg, onEmailBg, onApplyEmail)}
+      {row('Section Background', sectionBg, onSectionBg, onApplySection)}
+      {row('Block Background', blockBg, onBlockBg, onApplyBlock)}
+      {row('Button Color', buttonBg, onButtonBg, onApplyButton)}
+    </div>
+  );
+}
+
+/** Drag-and-drop block reorder list */
+function BlockOrderPanel({
+  blocks, draggingId, dropTargetId,
+  onDragStart, onDragEnter, onDragLeave, onDrop, onDragEnd, onMoveUp, onMoveDown,
+}: {
+  blocks: RichTemplateBlock[];
+  draggingId: string | null;
+  dropTargetId: string | null;
+  onDragStart: (id: string) => void;
+  onDragEnter: (id: string) => void;
+  onDragLeave: () => void;
+  onDrop: (targetId: string) => void;
+  onDragEnd: () => void;
+  onMoveUp: (index: number) => void;
+  onMoveDown: (index: number) => void;
+}) {
+  if (blocks.length === 0) {
+    return (
+      <p className="text-xs text-brand-cream/50 py-1">
+        Insert blocks above to enable drag-and-drop ordering.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      {blocks.map((block, index) => {
+        const isDragging = draggingId === block.id;
+        const isTarget = dropTargetId === block.id && !isDragging;
+        return (
+          <div
+            key={block.id}
+            draggable
+            onDragStart={() => onDragStart(block.id)}
+            onDragEnter={e => { e.preventDefault(); onDragEnter(block.id); }}
+            onDragLeave={onDragLeave}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); onDrop(block.id); }}
+            onDragEnd={onDragEnd}
+            className={`
+              flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs cursor-grab active:cursor-grabbing transition-all
+              ${isDragging ? 'opacity-40 border-brand-brown/40 bg-brand-dark-grey/20' : ''}
+              ${isTarget ? 'border-brand-brown bg-brand-brown/15 shadow-[0_0_0_1px_rgba(181,98,30,0.4)]' : ''}
+              ${!isDragging && !isTarget ? 'border-brand-brown/20 bg-brand-dark-grey/30 hover:border-brand-brown/40' : ''}
+            `}
+          >
+            <GripVertical className="w-3.5 h-3.5 text-brand-cream/40 shrink-0" />
+            <span className="flex-1 truncate text-brand-cream/80">
+              <span className="text-brand-cream/40 mr-1">{index + 1}.</span>
+              {block.label}
+            </span>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onMoveUp(index); }}
+                disabled={index === 0}
+                title="Move up"
+                className={`inline-flex h-5 w-5 items-center justify-center rounded transition-colors ${
+                  index === 0 ? 'text-brand-cream/20 cursor-not-allowed' : 'text-brand-cream/60 hover:text-brand-cream'
+                }`}
+              >
+                <ArrowUp className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onMoveDown(index); }}
+                disabled={index === blocks.length - 1}
+                title="Move down"
+                className={`inline-flex h-5 w-5 items-center justify-center rounded transition-colors ${
+                  index === blocks.length - 1 ? 'text-brand-cream/20 cursor-not-allowed' : 'text-brand-cream/60 hover:text-brand-cream'
+                }`}
+              >
+                <ArrowDown className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Live email preview */
+function LiveEmailPreview({
+  body, mode, header,
+}: { body: string; mode: EditorMode; header: HeaderSettings }) {
+  if (!body.trim()) {
+    return (
+      <div className="flex items-center justify-center min-h-[200px] text-brand-cream/40 text-sm border border-brand-brown/20 rounded-lg">
+        Email preview will appear here
+      </div>
+    );
+  }
+  if (mode === 'html') {
+    return (
+      <iframe
+        title="HTML Email Preview"
+        srcDoc={body}
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        className="w-full min-h-[500px] rounded-lg border border-brand-brown/30 bg-white"
+      />
+    );
+  }
+  return (
+    <div className="rounded-lg overflow-hidden border border-brand-brown/30 text-sm">
+      <div className="bg-brand-brown px-5 py-4 text-center">
+        {header.email_header_image_url && (
+          <img src={header.email_header_image_url} alt="" className="mx-auto mb-2 max-h-[52px] max-w-[180px] w-auto h-auto object-contain" />
+        )}
+        {header.email_header_title && (
+          <p className="text-white font-semibold tracking-widest text-xs uppercase">{header.email_header_title}</p>
+        )}
+        {header.email_header_tagline && (
+          <p className="text-white/70 text-xs tracking-wide mt-0.5">{header.email_header_tagline}</p>
+        )}
+      </div>
+      <div className="bg-[#111] px-5 py-5">
+        <p className="text-[#C9B98A] mb-3 text-xs">Hi Rider,</p>
+        <div
+          className="text-[#d4c9a8] text-xs leading-relaxed [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-[#f2e8d1] [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-[#f2e8d1] [&_h3]:text-sm [&_h3]:font-semibold [&_a]:text-brand-brown [&_a]:underline [&_img]:max-w-full [&_img]:rounded [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
+          dangerouslySetInnerHTML={{ __html: body }}
+        />
+      </div>
+      <div className="bg-[#111] border-t border-brand-brown/20 px-5 py-3 text-center">
+        {header.email_footer_image_url && (
+          <img src={header.email_footer_image_url} alt="" className="mx-auto mb-1.5 max-h-[36px] max-w-[120px] w-auto h-auto object-contain" />
+        )}
+        <p className="text-[#555] text-[11px]">{header.email_footer_text}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminEmailsPage() {
   const supabase = useMemo(() => createClient(), []);
   const campaignEditorRef = useRef<RichTextEditorHandle>(null);
   const templateEditorRef = useRef<RichTextEditorHandle>(null);
+  const templateHtmlRef = useRef<HTMLTextAreaElement>(null);
+  const campaignHtmlRef = useRef<HTMLTextAreaElement>(null);
+  const assetInputRef = useRef<HTMLInputElement>(null);
+  const headerImgRef = useRef<HTMLInputElement>(null);
+  const footerImgRef = useRef<HTMLInputElement>(null);
 
-  // Tab
   const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'header'>('campaigns');
 
-  // ── Campaign state ──
+  // Campaign state
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
+  const [campaignEditorMode, setCampaignEditorMode] = useState<EditorMode>('rich');
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState('');
   const [campaignSaving, setCampaignSaving] = useState(false);
@@ -129,23 +610,42 @@ export default function AdminEmailsPage() {
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
   const [confirmSend, setConfirmSend] = useState<Campaign | null>(null);
 
-  // ── Template state ──
+  // Template state
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateForm, setTemplateForm] = useState(emptyTemplateForm);
+  const [templateEditorMode, setTemplateEditorMode] = useState<EditorMode>('rich');
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templatePickerSearch, setTemplatePickerSearch] = useState('');
+  const [showLivePreview, setShowLivePreview] = useState(true);
 
-  // ── Header/footer state ──
+  // Builder drag state
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [dropTargetBlockId, setDropTargetBlockId] = useState<string | null>(null);
+
+  // Color state (shared between campaign & template builders)
+  const [richEmailBgColor, setRichEmailBgColor] = useState('#111111');
+  const [richSectionBgColor, setRichSectionBgColor] = useState('#1f1f1f');
+  const [richBlockBgColor, setRichBlockBgColor] = useState('#171717');
+  const [richButtonBgColor, setRichButtonBgColor] = useState('#B5621E');
+
+  // Assets
+  const [emailAssets, setEmailAssets] = useState<EmailAsset[]>([]);
+  const [emailAssetSearch, setEmailAssetSearch] = useState('');
+  const [uploadingAsset, setUploadingAsset] = useState(false);
+
+  // Header/footer
   const [header, setHeader] = useState<HeaderSettings>(defaultHeader);
   const [headerOriginal, setHeaderOriginal] = useState<HeaderSettings>(defaultHeader);
   const [headerSaving, setHeaderSaving] = useState(false);
   const [siteSettingsId, setSiteSettingsId] = useState<string | null>(null);
+  const [uploadingHeaderImage, setUploadingHeaderImage] = useState(false);
+  const [uploadingFooterImage, setUploadingFooterImage] = useState(false);
 
-  // ── Shared state ──
+  // Shared
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -157,52 +657,43 @@ export default function AdminEmailsPage() {
     return session.access_token;
   }, [supabase]);
 
-  // ─── Load data ─────────────────────────────────────────────────────────────
+  // ─── Load ──────────────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setMessage(null);
-      const accessToken = await getAccessToken();
-
-      const [campaignsRes, optionsRes, templatesRes] = await Promise.all([
-        fetch('/api/emails?limit=200', { headers: { Authorization: `Bearer ${accessToken}` } }),
-        fetch('/api/news/options', { headers: { Authorization: `Bearer ${accessToken}` } }),
-        fetch('/api/email-templates', { headers: { Authorization: `Bearer ${accessToken}` } }),
+      const token = await getAccessToken();
+      const [cRes, oRes, tRes, aRes] = await Promise.all([
+        fetch('/api/emails?limit=200', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/news/options', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/email-templates', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/email-assets?limit=400', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
+      const [cData, oData, tData, aData] = await Promise.all([
+        cRes.json().catch(() => ({})),
+        oRes.json().catch(() => ({})),
+        tRes.json().catch(() => ({})),
+        aRes.json().catch(() => ({})),
+      ]);
+      if (!cRes.ok || !cData.success) throw new Error(cData.error || 'Failed to load campaigns');
+      setCampaigns(cData.data?.campaigns || []);
+      setTrips(oData.data?.trips || []);
+      setMembers(oData.data?.members || []);
+      setTemplates(tData.data?.templates || []);
+      setEmailAssets(aData.data?.assets || []);
 
-      const campaignsData = await campaignsRes.json().catch(() => ({})) as {
-        success?: boolean; data?: { campaigns?: Campaign[] }; error?: string;
-      };
-      const optionsData = await optionsRes.json().catch(() => ({})) as {
-        success?: boolean; data?: { trips?: Trip[]; members?: Member[] }; error?: string;
-      };
-      const templatesData = await templatesRes.json().catch(() => ({})) as {
-        success?: boolean; data?: { templates?: Template[] }; error?: string;
-      };
-
-      if (!campaignsRes.ok || !campaignsData.success) {
-        throw new Error(campaignsData.error || 'Failed to load campaigns');
-      }
-
-      setCampaigns(campaignsData.data?.campaigns || []);
-      setTrips(optionsData.data?.trips || []);
-      setMembers(optionsData.data?.members || []);
-      setTemplates(templatesData.data?.templates || []);
-
-      // Load header settings directly via Supabase client
       const { data: settingsRow } = await supabase
         .from('site_settings')
-        .select('id, email_header_title, email_header_tagline, email_footer_text')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
+        .select('id, email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle();
       if (settingsRow) {
         const loaded: HeaderSettings = {
           email_header_title: settingsRow.email_header_title?.trim() || defaultHeader.email_header_title,
           email_header_tagline: settingsRow.email_header_tagline?.trim() || defaultHeader.email_header_tagline,
+          email_header_image_url: settingsRow.email_header_image_url?.trim() || null,
           email_footer_text: settingsRow.email_footer_text?.trim() || defaultHeader.email_footer_text,
+          email_footer_image_url: settingsRow.email_footer_image_url?.trim() || null,
         };
         setSiteSettingsId(settingsRow.id);
         setHeader(loaded);
@@ -217,44 +708,66 @@ export default function AdminEmailsPage() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
+  // ─── Mode switching ────────────────────────────────────────────────────────
+
+  const switchCampaignMode = useCallback((mode: EditorMode) => {
+    if (mode === campaignEditorMode) return;
+    // When switching to rich: ensure node IDs are set
+    if (mode === 'rich') {
+      setCampaignForm(prev => ({ ...prev, body: ensureRichEmailNodeIds(prev.body) }));
+    }
+    // When switching to html: body already contains the HTML from rich editor (shared state)
+    setCampaignEditorMode(mode);
+  }, [campaignEditorMode]);
+
+  const switchTemplateMode = useCallback((mode: EditorMode) => {
+    if (mode === templateEditorMode) return;
+    if (mode === 'rich') {
+      setTemplateForm(prev => ({ ...prev, body: ensureRichEmailNodeIds(prev.body) }));
+    }
+    setTemplateEditorMode(mode);
+  }, [templateEditorMode]);
+
   // ─── Campaign handlers ─────────────────────────────────────────────────────
 
   const resetCampaignForm = () => {
     setEditingCampaignId(null);
     setCampaignForm(emptyCampaignForm);
+    setCampaignEditorMode('rich');
     setMessage(null);
   };
 
-  const toggleSelection = (ids: string[], id: string) =>
-    ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id];
+  const toggleId = (ids: string[], id: string) =>
+    ids.includes(id) ? ids.filter(v => v !== id) : [...ids, id];
 
   const handleLoadTemplate = (template: Template) => {
-    setCampaignForm((prev) => ({
+    const mode = detectEditorMode(template.body);
+    setCampaignForm(prev => ({
       ...prev,
       subject: template.subject,
-      body: toEditorHtml(template.body),
+      body: mode === 'rich' ? ensureRichEmailNodeIds(toEditorHtml(template.body)) : template.body,
     }));
+    setCampaignEditorMode(mode);
     setShowTemplatePicker(false);
     setTemplatePickerSearch('');
   };
 
   const handleCampaignSave = async () => {
     const subject = campaignForm.subject.trim();
-    const body = normalizeEditorHtmlForSave(campaignForm.body);
+    const body = campaignEditorMode === 'html'
+      ? campaignForm.body.trim()
+      : ensureRichEmailNodeIds(campaignForm.body);
     if (!subject) { setMessage({ type: 'error', text: 'Subject line is required.' }); return; }
-    if (!hasRenderableNewsContent(body)) { setMessage({ type: 'error', text: 'Email body is required.' }); return; }
-
+    if (campaignEditorMode === 'html' && !body) { setMessage({ type: 'error', text: 'Email body HTML is required.' }); return; }
+    if (campaignEditorMode === 'rich' && !hasRenderableRichEmailContent(body)) { setMessage({ type: 'error', text: 'Email body is required.' }); return; }
     try {
       setCampaignSaving(true);
       setMessage(null);
-      const accessToken = await getAccessToken();
-
+      const token = await getAccessToken();
       const endpoint = editingCampaignId ? `/api/emails/${editingCampaignId}` : '/api/emails';
-      const method = editingCampaignId ? 'PUT' : 'POST';
-
       const res = await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        method: editingCampaignId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           subject, body,
           is_global: campaignForm.is_global,
@@ -263,10 +776,8 @@ export default function AdminEmailsPage() {
           member_ids: campaignForm.tag_all_members ? [] : campaignForm.member_ids,
         }),
       });
-
-      const payload = await res.json().catch(() => ({})) as { success?: boolean; error?: string };
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to save campaign');
-
       setMessage({ type: 'success', text: editingCampaignId ? 'Campaign updated.' : 'Campaign saved as draft.' });
       resetCampaignForm();
       await loadData();
@@ -278,15 +789,17 @@ export default function AdminEmailsPage() {
   };
 
   const handleCampaignEdit = (campaign: Campaign) => {
+    const mode = detectEditorMode(campaign.body);
     setEditingCampaignId(campaign.id);
     setCampaignForm({
       subject: campaign.subject,
-      body: toEditorHtml(campaign.body),
+      body: mode === 'rich' ? ensureRichEmailNodeIds(toEditorHtml(campaign.body)) : campaign.body,
       is_global: campaign.is_global,
       tag_all_members: campaign.tag_all_members,
-      trip_ids: campaign.trip_tags.map((t) => t.id),
-      member_ids: campaign.member_tags.map((m) => m.id),
+      trip_ids: campaign.trip_tags.map(t => t.id),
+      member_ids: campaign.member_tags.map(m => m.id),
     });
+    setCampaignEditorMode(mode);
     setMessage(null);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -296,20 +809,12 @@ export default function AdminEmailsPage() {
     try {
       setSendingId(campaign.id);
       setMessage(null);
-      const accessToken = await getAccessToken();
-
+      const token = await getAccessToken();
       const res = await fetch(`/api/emails/${campaign.id}/send`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
       });
-
-      const payload = await res.json().catch(() => ({})) as {
-        success?: boolean; error?: string;
-        data?: { sent: number; failed: number; attempted: number };
-      };
-
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to send campaign');
-
       const { sent, failed, attempted } = payload.data || { sent: 0, failed: 0, attempted: 0 };
       setMessage({
         type: failed > 0 && sent === 0 ? 'error' : 'success',
@@ -327,12 +832,11 @@ export default function AdminEmailsPage() {
     if (!window.confirm(`Delete "${campaign.subject}"?`)) return;
     try {
       setDeletingCampaignId(campaign.id);
-      const accessToken = await getAccessToken();
+      const token = await getAccessToken();
       const res = await fetch(`/api/emails/${campaign.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
       });
-      const payload = await res.json().catch(() => ({})) as { success?: boolean; error?: string };
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to delete');
       setMessage({ type: 'success', text: 'Campaign deleted.' });
       if (editingCampaignId === campaign.id) resetCampaignForm();
@@ -349,33 +853,31 @@ export default function AdminEmailsPage() {
   const resetTemplateForm = () => {
     setEditingTemplateId(null);
     setTemplateForm(emptyTemplateForm);
+    setTemplateEditorMode('rich');
   };
 
   const handleTemplateSave = async () => {
     const name = templateForm.name.trim();
     const subject = templateForm.subject.trim();
-    const body = normalizeEditorHtmlForSave(templateForm.body);
+    const body = templateEditorMode === 'html'
+      ? templateForm.body.trim()
+      : ensureRichEmailNodeIds(templateForm.body);
     if (!name) { setMessage({ type: 'error', text: 'Template name is required.' }); return; }
     if (!subject) { setMessage({ type: 'error', text: 'Subject line is required.' }); return; }
-    if (!hasRenderableNewsContent(body)) { setMessage({ type: 'error', text: 'Body is required.' }); return; }
-
+    if (templateEditorMode === 'html' && !body) { setMessage({ type: 'error', text: 'Body HTML is required.' }); return; }
+    if (templateEditorMode === 'rich' && !hasRenderableRichEmailContent(body)) { setMessage({ type: 'error', text: 'Body is required.' }); return; }
     try {
       setTemplateSaving(true);
       setMessage(null);
-      const accessToken = await getAccessToken();
-
+      const token = await getAccessToken();
       const endpoint = editingTemplateId ? `/api/email-templates/${editingTemplateId}` : '/api/email-templates';
-      const method = editingTemplateId ? 'PUT' : 'POST';
-
       const res = await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        method: editingTemplateId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name, description: templateForm.description.trim(), subject, body }),
       });
-
-      const payload = await res.json().catch(() => ({})) as { success?: boolean; error?: string };
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to save template');
-
       setMessage({ type: 'success', text: editingTemplateId ? 'Template updated.' : 'Template saved.' });
       resetTemplateForm();
       await loadData();
@@ -387,13 +889,15 @@ export default function AdminEmailsPage() {
   };
 
   const handleTemplateEdit = (template: Template) => {
+    const mode = detectEditorMode(template.body);
     setEditingTemplateId(template.id);
     setTemplateForm({
       name: template.name,
       description: template.description,
       subject: template.subject,
-      body: toEditorHtml(template.body),
+      body: mode === 'rich' ? ensureRichEmailNodeIds(toEditorHtml(template.body)) : template.body,
     });
+    setTemplateEditorMode(mode);
     setPreviewTemplate(null);
     setMessage(null);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -403,12 +907,11 @@ export default function AdminEmailsPage() {
     if (!window.confirm(`Delete template "${template.name}"?`)) return;
     try {
       setDeletingTemplateId(template.id);
-      const accessToken = await getAccessToken();
+      const token = await getAccessToken();
       const res = await fetch(`/api/email-templates/${template.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
       });
-      const payload = await res.json().catch(() => ({})) as { success?: boolean; error?: string };
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to delete');
       setMessage({ type: 'success', text: 'Template deleted.' });
       if (editingTemplateId === template.id) resetTemplateForm();
@@ -421,77 +924,355 @@ export default function AdminEmailsPage() {
     }
   };
 
-  // ─── Header/Footer handlers ────────────────────────────────────────────────
+  // ─── Block builder – Campaign ──────────────────────────────────────────────
+
+  const insertCampaignSnippet = useCallback((snippet: string) => {
+    if (campaignEditorMode !== 'rich') {
+      // In HTML mode, insert at cursor in textarea
+      const el = campaignHtmlRef.current;
+      if (!el) { setCampaignForm(p => ({ ...p, body: p.body + snippet })); return; }
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? start;
+      setCampaignForm(p => ({
+        ...p,
+        body: `${p.body.slice(0, start)}${snippet}${p.body.slice(end)}`,
+      }));
+      const next = start + snippet.length;
+      requestAnimationFrame(() => {
+        if (!campaignHtmlRef.current) return;
+        campaignHtmlRef.current.focus();
+        campaignHtmlRef.current.selectionStart = next;
+        campaignHtmlRef.current.selectionEnd = next;
+      });
+      return;
+    }
+    // Rich mode: append block to state directly instead of using execCommand('insertHTML').
+    // execCommand inserts at the cursor position, which can inject the new block INSIDE an
+    // existing block if the cursor is nested there. Updating state directly always appends
+    // after all existing content, regardless of where the cursor happens to be.
+    const processed = ensureRichEmailNodeIds(snippet);
+    setCampaignForm(prev => {
+      const body = prev.body;
+      if (!body) return { ...prev, body: processed };
+      if (typeof window !== 'undefined' && body.includes('data-email-canvas="true"')) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(`<div>${body}</div>`, 'text/html');
+        const wrapper = doc.body.firstElementChild as HTMLElement | null;
+        const canvas = wrapper?.querySelector('[data-email-canvas="true"]') as HTMLElement | null;
+        if (canvas) {
+          canvas.insertAdjacentHTML('beforeend', processed);
+          return { ...prev, body: wrapper!.innerHTML };
+        }
+      }
+      return { ...prev, body: body + processed };
+    });
+  }, [campaignEditorMode]);
+
+  // ─── Block builder – Template ──────────────────────────────────────────────
+
+  const insertTemplateSnippet = useCallback((snippet: string) => {
+    if (templateEditorMode !== 'rich') {
+      const el = templateHtmlRef.current;
+      if (!el) { setTemplateForm(p => ({ ...p, body: p.body + snippet })); return; }
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? start;
+      setTemplateForm(p => ({
+        ...p,
+        body: `${p.body.slice(0, start)}${snippet}${p.body.slice(end)}`,
+      }));
+      const next = start + snippet.length;
+      requestAnimationFrame(() => {
+        if (!templateHtmlRef.current) return;
+        templateHtmlRef.current.focus();
+        templateHtmlRef.current.selectionStart = next;
+        templateHtmlRef.current.selectionEnd = next;
+      });
+      return;
+    }
+    // Rich mode: append block to state directly instead of using execCommand('insertHTML').
+    // execCommand inserts at the cursor position, which can inject the new block INSIDE an
+    // existing block if the cursor is nested there. Updating state directly always appends
+    // after all existing content, regardless of where the cursor happens to be.
+    const processed = ensureRichEmailNodeIds(snippet);
+    setTemplateForm(prev => {
+      const body = prev.body;
+      if (!body) return { ...prev, body: processed };
+      if (typeof window !== 'undefined' && body.includes('data-email-canvas="true"')) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(`<div>${body}</div>`, 'text/html');
+        const wrapper = doc.body.firstElementChild as HTMLElement | null;
+        const canvas = wrapper?.querySelector('[data-email-canvas="true"]') as HTMLElement | null;
+        if (canvas) {
+          canvas.insertAdjacentHTML('beforeend', processed);
+          return { ...prev, body: wrapper!.innerHTML };
+        }
+      }
+      return { ...prev, body: body + processed };
+    });
+  }, [templateEditorMode]);
+
+  // Block snippets factory (uses current color state)
+  const makeHeroSnippet = () => `<div data-email-section="true" style="background-color:${richSectionBgColor};padding:24px;border-radius:10px;margin:0 0 16px"><h2 style="margin:0 0 10px;color:#f2e8d1;font-size:24px;line-height:1.2">Your Big Update Title</h2><p style="margin:0;color:#c8bfb0;line-height:1.6">Start with a clear summary so riders know exactly what changed.</p></div>`;
+  const makeTextSnippet = () => `<div data-email-block="true" style="background-color:${richBlockBgColor};padding:16px 18px;border-radius:8px;margin:0 0 12px"><p style="margin:0;color:#d4c9a8;line-height:1.65">Drop in a focused content block for itinerary notes, reminders, or announcements.</p></div>`;
+  const makeButtonSnippet = () => `<div data-email-block="true" style="text-align:center;margin:16px 0"><a data-email-button="true" href="https://www.thewhiskeyriders.com" target="_blank" rel="noopener noreferrer" style="display:inline-block;background-color:${richButtonBgColor};color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:700;letter-spacing:0.5px">Open Portal</a></div>`;
+  const makeColumnsSnippet = () => `<table data-email-block="true" role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;margin:0 0 14px"><tr><td style="width:50%;background-color:${richBlockBgColor};border-radius:8px;padding:12px;vertical-align:top"><p style="margin:0 0 6px;font-weight:700;color:#f2e8d1">Column One</p><p style="margin:0;color:#c8bfb0;line-height:1.6">Add your content here.</p></td><td style="width:50%;background-color:${richBlockBgColor};border-radius:8px;padding:12px;vertical-align:top"><p style="margin:0 0 6px;font-weight:700;color:#f2e8d1">Column Two</p><p style="margin:0;color:#c8bfb0;line-height:1.6">Keep it concise for mobile.</p></td></tr></table>`;
+  const makeDividerSnippet = () => `<div data-email-block="true" style="padding:8px 0 12px"><hr style="border:0;border-top:1px solid #2f271c;margin:0" /></div>`;
+
+  const makeLogoSnippet = (): string | null => {
+    const logoUrl = header.email_header_image_url || emailAssets.find(isImageAsset)?.file_url;
+    if (!logoUrl) return null;
+    const safe = sanitizeLinkUrl(logoUrl);
+    if (!safe) return null;
+    return `<div data-email-block="true" style="text-align:center;padding:4px 0 16px"><img src="${escapeHtmlAttr(safe)}" alt="Logo" style="max-width:200px;height:auto;display:inline-block" /></div>`;
+  };
+
+  // Campaign builder insertions
+  const campaignInsert = {
+    hero: () => insertCampaignSnippet(makeHeroSnippet()),
+    text: () => insertCampaignSnippet(makeTextSnippet()),
+    button: () => insertCampaignSnippet(makeButtonSnippet()),
+    columns: () => insertCampaignSnippet(makeColumnsSnippet()),
+    divider: () => insertCampaignSnippet(makeDividerSnippet()),
+    logo: () => { const s = makeLogoSnippet(); if (s) insertCampaignSnippet(s); else setMessage({ type: 'error', text: 'No logo image found. Upload an image asset or set a header logo first.' }); },
+  };
+
+  // Template builder insertions
+  const templateInsert = {
+    hero: () => insertTemplateSnippet(makeHeroSnippet()),
+    text: () => insertTemplateSnippet(makeTextSnippet()),
+    button: () => insertTemplateSnippet(makeButtonSnippet()),
+    columns: () => insertTemplateSnippet(makeColumnsSnippet()),
+    divider: () => insertTemplateSnippet(makeDividerSnippet()),
+    logo: () => { const s = makeLogoSnippet(); if (s) insertTemplateSnippet(s); else setMessage({ type: 'error', text: 'No logo image found. Upload an image asset or set a header logo first.' }); },
+  };
+
+  // ─── Block reorder ─────────────────────────────────────────────────────────
+
+  const handleReorderBlock = useCallback((sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setTemplateForm(prev => ({
+      ...prev,
+      body: reorderRichTemplateBlocks(prev.body, sourceId, targetId),
+    }));
+  }, []);
+
+  // ─── Color apply ──────────────────────────────────────────────────────────
+
+  const applyEmailBg = () => {
+    setTemplateForm(prev => ({ ...prev, body: applyRichEmailCanvasBackground(prev.body, richEmailBgColor) }));
+    setMessage({ type: 'success', text: 'Email background updated.' });
+  };
+
+  const applyClosestStyle = (
+    editorRef: React.RefObject<RichTextEditorHandle | null>,
+    selector: string,
+    styles: Record<string, string>,
+    label: string
+  ) => {
+    const updated = editorRef.current?.applyStylesToClosest(selector, styles);
+    if (!updated) setMessage({ type: 'error', text: `Place your cursor inside a ${label} first.` });
+    else setMessage({ type: 'success', text: `${label} background updated.` });
+  };
+
+  // ─── Assets ───────────────────────────────────────────────────────────────
+
+  const handleUploadAsset = async (file: File) => {
+    try {
+      setUploadingAsset(true);
+      setMessage(null);
+      const token = await getAccessToken();
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/email-assets', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.success || !payload.data?.asset) throw new Error(payload.error || 'Upload failed');
+      setEmailAssets(prev => [payload.data.asset, ...prev]);
+      setMessage({ type: 'success', text: 'Asset uploaded.' });
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Upload failed' });
+    } finally {
+      setUploadingAsset(false);
+      if (assetInputRef.current) assetInputRef.current.value = '';
+    }
+  };
+
+  const insertAssetImage = (asset: EmailAsset, forTemplate: boolean) => {
+    if (forTemplate) {
+      if (templateEditorMode === 'html') { insertTemplateSnippet(`<img src="${asset.file_url}" alt="${asset.name}" />`); return; }
+      templateEditorRef.current?.insertImage(asset.file_url, asset.name);
+    } else {
+      if (campaignEditorMode === 'html') { insertCampaignSnippet(`<img src="${asset.file_url}" alt="${asset.name}" />`); return; }
+      campaignEditorRef.current?.insertImage(asset.file_url, asset.name);
+    }
+  };
+
+  const insertAssetLink = (asset: EmailAsset, forTemplate: boolean) => {
+    const snippet = `<a href="${asset.file_url}" target="_blank" rel="noopener noreferrer">${asset.name}</a>`;
+    if (forTemplate) {
+      if (templateEditorMode === 'html') { insertTemplateSnippet(snippet); return; }
+      templateEditorRef.current?.insertLink(asset.file_url, asset.name);
+    } else {
+      if (campaignEditorMode === 'html') { insertCampaignSnippet(snippet); return; }
+      campaignEditorRef.current?.insertLink(asset.file_url, asset.name);
+    }
+  };
+
+  const copyAssetUrl = async (asset: EmailAsset) => {
+    try {
+      await navigator.clipboard.writeText(asset.file_url);
+      setMessage({ type: 'success', text: `Copied URL for "${asset.name}"` });
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to copy URL' });
+    }
+  };
+
+  // ─── Header/Footer ─────────────────────────────────────────────────────────
 
   const handleHeaderSave = async () => {
     try {
       setHeaderSaving(true);
       setMessage(null);
-
       const { data: userResult } = await supabase.auth.getUser();
       if (!userResult.user?.id) throw new Error('Not authenticated');
-
-      const updatePayload = {
+      const payload = {
         email_header_title: header.email_header_title.trim() || defaultHeader.email_header_title,
         email_header_tagline: header.email_header_tagline.trim() || defaultHeader.email_header_tagline,
+        email_header_image_url: header.email_header_image_url || null,
         email_footer_text: header.email_footer_text.trim() || defaultHeader.email_footer_text,
+        email_footer_image_url: header.email_footer_image_url || null,
         updated_by: userResult.user.id,
       };
-
       if (siteSettingsId) {
-        const { error } = await supabase
-          .from('site_settings')
-          .update(updatePayload)
-          .eq('id', siteSettingsId);
+        const { error } = await supabase.from('site_settings').update(payload).eq('id', siteSettingsId);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
-          .from('site_settings')
-          .insert(updatePayload)
-          .select('id')
-          .single();
+        const { data, error } = await supabase.from('site_settings').insert(payload).select('id').single();
         if (error) throw error;
         setSiteSettingsId(data?.id ?? null);
       }
-
       setHeaderOriginal({ ...header });
       setMessage({ type: 'success', text: 'Email header and footer saved.' });
     } catch (err: unknown) {
-      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save header settings' });
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save header' });
     } finally {
       setHeaderSaving(false);
     }
   };
 
+  const handleImageUpload = async (file: File, slot: 'header' | 'footer') => {
+    const setter = slot === 'header' ? setUploadingHeaderImage : setUploadingFooterImage;
+    setter(true);
+    setMessage(null);
+    try {
+      if (!file.type.startsWith('image/')) throw new Error('Please choose an image file.');
+      if (file.size > 5 * 1024 * 1024) throw new Error('Image must be 5 MB or smaller.');
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const path = `site/email-assets/${slot}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('photos').upload(path, file, {
+        cacheControl: '3600', upsert: true, contentType: file.type,
+      });
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('photos').getPublicUrl(path);
+      if (!data?.publicUrl) throw new Error('Could not get public URL.');
+      slot === 'header'
+        ? setHeader(p => ({ ...p, email_header_image_url: data.publicUrl }))
+        : setHeader(p => ({ ...p, email_footer_image_url: data.publicUrl }));
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Upload failed' });
+    } finally {
+      setter(false);
+      if (slot === 'header' && headerImgRef.current) headerImgRef.current.value = '';
+      if (slot === 'footer' && footerImgRef.current) footerImgRef.current.value = '';
+    }
+  };
+
   // ─── Derived ───────────────────────────────────────────────────────────────
 
-  const filteredMembers = members.filter((m) => {
-    if (!memberSearch.trim()) return true;
-    return getMemberDisplayName(m).toLowerCase().includes(memberSearch.toLowerCase());
-  });
+  const filteredMembers = members.filter(m =>
+    !memberSearch.trim() || getMemberDisplayName(m).toLowerCase().includes(memberSearch.toLowerCase())
+  );
 
-  const filteredTemplatesForPicker = templates.filter((t) => {
-    if (!templatePickerSearch.trim()) return true;
-    return (
-      t.name.toLowerCase().includes(templatePickerSearch.toLowerCase()) ||
-      t.subject.toLowerCase().includes(templatePickerSearch.toLowerCase()) ||
-      t.description.toLowerCase().includes(templatePickerSearch.toLowerCase())
-    );
-  });
+  const filteredTemplatePicker = templates.filter(t =>
+    !templatePickerSearch.trim() ||
+    [t.name, t.subject, t.description].some(s => s.toLowerCase().includes(templatePickerSearch.toLowerCase()))
+  );
 
-  const drafts = campaigns.filter((c) => c.status === 'draft');
-  const sent = campaigns.filter((c) => c.status === 'sent');
+  const filteredAssets = emailAssets.filter(a =>
+    !emailAssetSearch.trim() ||
+    [a.name, a.path, a.file_url].some(s => s.toLowerCase().includes(emailAssetSearch.toLowerCase()))
+  );
+
+  const richTemplateBlocks = useMemo(
+    () => templateEditorMode === 'rich' ? getRichTemplateBlocks(templateForm.body) : [],
+    [templateEditorMode, templateForm.body]
+  );
+
+  const drafts = campaigns.filter(c => c.status === 'draft');
+  const sent = campaigns.filter(c => c.status === 'sent');
   const headerChanged = JSON.stringify(header) !== JSON.stringify(headerOriginal);
+  const isEditingTemplate = editingTemplateId !== null || templateForm.body !== '' || templateForm.name !== '';
 
-  // ─── Loading state ─────────────────────────────────────────────────────────
+  // ─── Loading ───────────────────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Spinner size="lg" />
-      </div>
-    );
+    return <div className="flex items-center justify-center py-16"><Spinner size="lg" /></div>;
   }
+
+  // ─── Asset library panel (shared) ─────────────────────────────────────────
+
+  const AssetLibraryPanel = ({ forTemplate }: { forTemplate: boolean }) => (
+    <CollapsibleSection title="Image & Asset Library" icon={ImagePlus}>
+      <div className="flex items-center justify-between gap-2">
+        <input
+          ref={assetInputRef} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) void handleUploadAsset(f); }}
+        />
+        <Button size="sm" variant="outline" isLoading={uploadingAsset} onClick={() => assetInputRef.current?.click()}>
+          <ImagePlus className="w-3.5 h-3.5" /> Upload Image
+        </Button>
+        <input
+          type="text" value={emailAssetSearch} onChange={e => setEmailAssetSearch(e.target.value)}
+          placeholder="Search assets..." className="flex-1 min-w-0 rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-3 py-1.5 text-xs text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
+        />
+      </div>
+      <div className="max-h-56 overflow-y-auto space-y-2 pr-0.5">
+        {filteredAssets.length === 0 && <p className="text-xs text-brand-cream/50 py-2">No assets yet.</p>}
+        {filteredAssets.map(asset => (
+          <div key={asset.path} className="rounded-lg border border-brand-brown/15 bg-brand-dark-grey/30 p-2">
+            <div className="flex gap-2">
+              {isImageAsset(asset) ? (
+                <img src={asset.file_url} alt={asset.name} className="h-10 w-10 rounded object-cover border border-brand-brown/20 shrink-0" />
+              ) : (
+                <div className="h-10 w-10 rounded border border-brand-brown/20 bg-brand-dark-grey/70 shrink-0" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-brand-cream truncate">{asset.name}</p>
+                <p className="text-[11px] text-brand-cream/50">{formatBytes(asset.file_size)}</p>
+              </div>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <button onClick={() => void copyAssetUrl(asset)} className="px-2 py-0.5 text-[11px] rounded border border-brand-brown/20 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/40 transition-colors">Copy URL</button>
+              {isImageAsset(asset) && (
+                <>
+                  <button onClick={() => insertAssetImage(asset, forTemplate)} className="px-2 py-0.5 text-[11px] rounded border border-brand-brown/20 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/40 transition-colors">Insert Image</button>
+                  <button
+                    onClick={() => {
+                      setHeader(p => ({ ...p, email_header_image_url: asset.file_url }));
+                      setMessage({ type: 'success', text: 'Header logo staged — go to Header & Footer tab to save.' });
+                    }}
+                    className="px-2 py-0.5 text-[11px] rounded border border-brand-brown/20 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/40 transition-colors"
+                  >Set as Logo</button>
+                </>
+              )}
+              <button onClick={() => insertAssetLink(asset, forTemplate)} className="px-2 py-0.5 text-[11px] rounded border border-brand-brown/20 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/40 transition-colors">Insert Link</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -501,11 +1282,11 @@ export default function AdminEmailsPage() {
       {/* Page header */}
       <div>
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Email</h1>
-        <p className="text-brand-cream/70">Manage campaigns, templates, and email branding.</p>
+        <p className="text-brand-cream/70">Compose campaigns, build templates, and manage email branding.</p>
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-brand-brown/20 pb-0">
+      <div className="flex gap-1 border-b border-brand-brown/20">
         {([
           { id: 'campaigns', label: 'Campaigns', icon: Mail },
           { id: 'templates', label: 'Templates', icon: BookTemplate },
@@ -520,8 +1301,7 @@ export default function AdminEmailsPage() {
                 : 'border-transparent text-brand-cream/60 hover:text-brand-cream hover:border-brand-brown/40'
             }`}
           >
-            <Icon className="w-4 h-4" />
-            {label}
+            <Icon className="w-4 h-4" />{label}
           </button>
         ))}
       </div>
@@ -536,7 +1316,7 @@ export default function AdminEmailsPage() {
         </Card>
       )}
 
-      {/* ── CAMPAIGNS TAB ─────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════ CAMPAIGNS */}
       {activeTab === 'campaigns' && (
         <>
           {/* Send confirmation modal */}
@@ -560,9 +1340,10 @@ export default function AdminEmailsPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {/* Compose / Edit panel */}
-            <Card className="h-fit">
+          <div className="grid grid-cols-1 xl:grid-cols-[58%_42%] gap-6 items-start">
+
+            {/* ── Compose / Edit panel ────────────────────────────────────── */}
+            <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   {editingCampaignId ? <Edit2 className="w-5 h-5 text-brand-brown" /> : <Plus className="w-5 h-5 text-brand-brown" />}
@@ -571,12 +1352,12 @@ export default function AdminEmailsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
 
-                {/* Load template button */}
+                {/* Load template */}
                 {templates.length > 0 && (
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setShowTemplatePicker((p) => !p)}
+                      onClick={() => setShowTemplatePicker(p => !p)}
                       className="flex items-center gap-2 text-sm text-brand-brown hover:text-brand-brown/80 transition-colors"
                     >
                       <BookTemplate className="w-4 h-4" />
@@ -587,25 +1368,17 @@ export default function AdminEmailsPage() {
                       <div className="absolute top-8 left-0 z-20 w-full sm:w-96 rounded-xl border border-brand-brown/30 bg-[#1a1a1a] shadow-2xl">
                         <div className="p-3 border-b border-brand-brown/20">
                           <input
-                            type="text"
-                            value={templatePickerSearch}
-                            onChange={(e) => setTemplatePickerSearch(e.target.value)}
-                            placeholder="Search templates..."
-                            autoFocus
+                            type="text" value={templatePickerSearch}
+                            onChange={e => setTemplatePickerSearch(e.target.value)}
+                            placeholder="Search templates..." autoFocus
                             className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-3 py-1.5 text-sm text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                           />
                         </div>
                         <div className="max-h-60 overflow-y-auto divide-y divide-brand-brown/10">
-                          {filteredTemplatesForPicker.length === 0 && (
-                            <p className="px-4 py-3 text-sm text-brand-cream/50">No templates found.</p>
-                          )}
-                          {filteredTemplatesForPicker.map((t) => (
-                            <button
-                              key={t.id}
-                              type="button"
-                              onClick={() => handleLoadTemplate(t)}
-                              className="w-full text-left px-4 py-3 hover:bg-brand-dark-grey/50 transition-colors"
-                            >
+                          {filteredTemplatePicker.length === 0 && <p className="px-4 py-3 text-sm text-brand-cream/50">No templates found.</p>}
+                          {filteredTemplatePicker.map(t => (
+                            <button key={t.id} type="button" onClick={() => handleLoadTemplate(t)}
+                              className="w-full text-left px-4 py-3 hover:bg-brand-dark-grey/50 transition-colors">
                               <p className="text-sm font-medium text-brand-cream">{t.name}</p>
                               {t.description && <p className="text-xs text-brand-cream/50 mt-0.5">{t.description}</p>}
                               <p className="text-xs text-brand-cream/40 mt-0.5 truncate">Subject: {t.subject}</p>
@@ -621,123 +1394,158 @@ export default function AdminEmailsPage() {
                 )}
 
                 {/* Subject */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium text-brand-cream/90">Subject line</label>
                   <input
-                    type="text"
-                    value={campaignForm.subject}
-                    onChange={(e) => setCampaignForm((p) => ({ ...p, subject: e.target.value }))}
+                    type="text" value={campaignForm.subject}
+                    onChange={e => setCampaignForm(p => ({ ...p, subject: e.target.value }))}
                     placeholder="e.g. Morocco 2027 – Important Update"
                     className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                   />
                 </div>
 
-                {/* Body */}
+                {/* Body editor */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-brand-cream/90">Body</label>
-                  <RichTextEditor
-                    ref={campaignEditorRef}
-                    value={campaignForm.body}
-                    onChange={(v) => setCampaignForm((p) => ({ ...p, body: v }))}
-                    placeholder="Write your email content here..."
-                  />
-                  <p className="text-xs text-brand-cream/50">The branded header and footer are added automatically.</p>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <label className="text-sm font-medium text-brand-cream/90">Email Body</label>
+                    <EditorModeToggle mode={campaignEditorMode} onSwitch={switchCampaignMode} />
+                  </div>
+
+                  {/* Builder toolbar (visual mode only) */}
+                  {campaignEditorMode === 'rich' && (
+                    <CollapsibleSection title="Insert Blocks" icon={Paintbrush} defaultOpen={false}>
+                      <BlockInsertBar
+                        onHero={campaignInsert.hero} onText={campaignInsert.text}
+                        onButton={campaignInsert.button} onColumns={campaignInsert.columns}
+                        onDivider={campaignInsert.divider} onLogo={campaignInsert.logo}
+                      />
+                      <ColorControls
+                        emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
+                        blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
+                        onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
+                        onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
+                        onApplyEmail={() => {
+                          setCampaignForm(p => ({ ...p, body: applyRichEmailCanvasBackground(p.body, richEmailBgColor) }));
+                          setMessage({ type: 'success', text: 'Email background updated.' });
+                        }}
+                        onApplySection={() => applyClosestStyle(campaignEditorRef, '[data-email-section="true"]', { 'background-color': richSectionBgColor }, 'section')}
+                        onApplyBlock={() => applyClosestStyle(campaignEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
+                        onApplyButton={() => applyClosestStyle(campaignEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
+                      />
+                      <p className="text-xs text-brand-cream/45">Tip: place cursor inside a section/block/button before applying a colour.</p>
+                    </CollapsibleSection>
+                  )}
+
+                  {campaignEditorMode === 'rich' ? (
+                    <RichTextEditor
+                      ref={campaignEditorRef}
+                      value={campaignForm.body}
+                      onChange={v => setCampaignForm(p => ({ ...p, body: v }))}
+                      placeholder="Write your email content here..."
+                    />
+                  ) : (
+                    <textarea
+                      ref={campaignHtmlRef}
+                      value={campaignForm.body}
+                      onChange={e => setCampaignForm(p => ({ ...p, body: e.target.value }))}
+                      rows={18} spellCheck={false}
+                      className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-3 text-brand-cream font-mono text-xs leading-relaxed focus:border-brand-brown focus:outline-none resize-y"
+                      placeholder="Paste or write full email HTML..."
+                    />
+                  )}
+                  <p className="text-xs text-brand-cream/45">
+                    {campaignEditorMode === 'html'
+                      ? 'HTML mode: full-email HTML (with <!DOCTYPE>) is sent as-is. Without it, branded header/footer are added automatically.'
+                      : 'Visual mode: branded header/footer wrap your content automatically when sent.'}
+                  </p>
                 </div>
 
+                {/* Asset library */}
+                <AssetLibraryPanel forTemplate={false} />
+
                 {/* Recipients */}
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-brand-cream/90">Recipients</p>
+                <CollapsibleSection title="Recipients" icon={Users} defaultOpen={true}>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={campaignForm.is_global}
-                        onChange={(e) => setCampaignForm((p) => ({ ...p, is_global: e.target.checked, trip_ids: e.target.checked ? [] : p.trip_ids }))}
-                        className="h-4 w-4 rounded border-brand-brown/40 bg-brand-dark-grey"
-                      />
+                      <input type="checkbox" checked={campaignForm.is_global}
+                        onChange={e => setCampaignForm(p => ({ ...p, is_global: e.target.checked, trip_ids: e.target.checked ? [] : p.trip_ids }))}
+                        className="h-4 w-4 rounded border-brand-brown/40 bg-brand-dark-grey" />
                       <span className="text-sm text-brand-cream/80">Not trip-specific</span>
                     </label>
                     <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={campaignForm.tag_all_members}
-                        onChange={(e) => setCampaignForm((p) => ({ ...p, tag_all_members: e.target.checked, member_ids: e.target.checked ? [] : p.member_ids }))}
-                        className="h-4 w-4 rounded border-brand-brown/40 bg-brand-dark-grey"
-                      />
+                      <input type="checkbox" checked={campaignForm.tag_all_members}
+                        onChange={e => setCampaignForm(p => ({ ...p, tag_all_members: e.target.checked, member_ids: e.target.checked ? [] : p.member_ids }))}
+                        className="h-4 w-4 rounded border-brand-brown/40 bg-brand-dark-grey" />
                       <span className="text-sm text-brand-cream/80">All Members</span>
                     </label>
                   </div>
-                </div>
 
-                {/* Target trips */}
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-brand-cream/90">Target Trips</p>
-                  <div className={`max-h-36 overflow-y-auto rounded-lg border border-brand-brown/20 p-2 space-y-1 ${campaignForm.is_global ? 'bg-brand-dark-grey/10 opacity-60 pointer-events-none' : 'bg-brand-dark-grey/30'}`}>
-                    {trips.length === 0 && <p className="text-xs text-brand-cream/50 py-2 px-1">No trips yet.</p>}
-                    {trips.map((trip) => {
-                      const selected = campaignForm.trip_ids.includes(trip.id);
-                      return (
-                        <label key={trip.id} className="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-brand-dark-grey/60 cursor-pointer">
-                          <span className="text-sm text-brand-cream/80 truncate">{trip.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => setCampaignForm((p) => ({ ...p, trip_ids: toggleSelection(p.trip_ids, trip.id) }))}
-                            className={`h-6 w-6 rounded border flex items-center justify-center shrink-0 ${selected ? 'border-brand-brown bg-brand-brown text-brand-black' : 'border-brand-brown/30 text-brand-cream/50'}`}
-                          >
-                            {selected && <Check className="w-4 h-4" />}
-                          </button>
-                        </label>
-                      );
-                    })}
+                  {/* Trips */}
+                  <div>
+                    <p className="text-xs font-medium text-brand-cream/70 mb-1.5">Target Trips</p>
+                    <div className={`max-h-32 overflow-y-auto rounded-lg border border-brand-brown/20 p-2 space-y-1 ${campaignForm.is_global ? 'opacity-50 pointer-events-none' : 'bg-brand-dark-grey/30'}`}>
+                      {trips.length === 0 && <p className="text-xs text-brand-cream/50 py-1 px-1">No trips yet.</p>}
+                      {trips.map(trip => {
+                        const sel = campaignForm.trip_ids.includes(trip.id);
+                        return (
+                          <label key={trip.id} className="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-brand-dark-grey/60 cursor-pointer">
+                            <span className="text-sm text-brand-cream/80 truncate">{trip.name}</span>
+                            <button type="button"
+                              onClick={() => setCampaignForm(p => ({ ...p, trip_ids: toggleId(p.trip_ids, trip.id) }))}
+                              className={`h-5 w-5 rounded border flex items-center justify-center shrink-0 ${sel ? 'border-brand-brown bg-brand-brown text-white' : 'border-brand-brown/30'}`}>
+                              {sel && <Check className="w-3 h-3" />}
+                            </button>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
 
-                {/* Target members */}
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-brand-cream/90">Target Specific Riders</p>
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-brand-cream/50 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={memberSearch}
-                      onChange={(e) => setMemberSearch(e.target.value)}
-                      placeholder="Search riders..."
-                      className={`w-full rounded-lg border border-brand-brown/20 py-2 pl-10 pr-4 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none ${campaignForm.tag_all_members ? 'bg-brand-dark-grey/20 opacity-60 pointer-events-none' : 'bg-brand-dark-grey/50'}`}
-                    />
+                  {/* Members */}
+                  <div>
+                    <p className="text-xs font-medium text-brand-cream/70 mb-1.5">Target Specific Riders</p>
+                    <div className="relative mb-1.5">
+                      <Search className="w-3.5 h-3.5 text-brand-cream/50 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" value={memberSearch} onChange={e => setMemberSearch(e.target.value)}
+                        placeholder="Search riders..."
+                        className={`w-full rounded-lg border border-brand-brown/20 py-2 pl-9 pr-4 text-sm text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none ${campaignForm.tag_all_members ? 'opacity-50 pointer-events-none bg-brand-dark-grey/20' : 'bg-brand-dark-grey/50'}`}
+                      />
+                    </div>
+                    <div className={`max-h-44 overflow-y-auto rounded-lg border border-brand-brown/20 p-2 space-y-1 ${campaignForm.tag_all_members ? 'opacity-50 pointer-events-none' : 'bg-brand-dark-grey/30'}`}>
+                      {filteredMembers.map(member => {
+                        const sel = campaignForm.member_ids.includes(member.id);
+                        return (
+                          <label key={member.id} className="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-brand-dark-grey/60 cursor-pointer">
+                            <span className="text-sm text-brand-cream/80 truncate">{getMemberDisplayName(member)}</span>
+                            <button type="button"
+                              onClick={() => setCampaignForm(p => ({ ...p, member_ids: toggleId(p.member_ids, member.id) }))}
+                              className={`h-5 w-5 rounded border flex items-center justify-center shrink-0 ${sel ? 'border-brand-brown bg-brand-brown text-white' : 'border-brand-brown/30'}`}>
+                              {sel && <Check className="w-3 h-3" />}
+                            </button>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {campaignForm.tag_all_members && <p className="text-xs text-brand-cream/50 mt-1">Sending to every active member account.</p>}
                   </div>
-                  <div className={`max-h-48 overflow-y-auto rounded-lg border border-brand-brown/20 p-2 space-y-1 ${campaignForm.tag_all_members ? 'bg-brand-dark-grey/10 opacity-60 pointer-events-none' : 'bg-brand-dark-grey/30'}`}>
-                    {filteredMembers.map((member) => {
-                      const selected = campaignForm.member_ids.includes(member.id);
-                      return (
-                        <label key={member.id} className="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-brand-dark-grey/60 cursor-pointer">
-                          <span className="text-sm text-brand-cream/80 truncate">{getMemberDisplayName(member)}</span>
-                          <button
-                            type="button"
-                            onClick={() => setCampaignForm((p) => ({ ...p, member_ids: toggleSelection(p.member_ids, member.id) }))}
-                            className={`h-6 w-6 rounded border flex items-center justify-center shrink-0 ${selected ? 'border-brand-brown bg-brand-brown text-brand-black' : 'border-brand-brown/30 text-brand-cream/50'}`}
-                          >
-                            {selected && <Check className="w-4 h-4" />}
-                          </button>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {campaignForm.tag_all_members && <p className="text-xs text-brand-cream/50">Sending to every active member account.</p>}
-                </div>
+                </CollapsibleSection>
 
                 {/* Actions */}
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <Button onClick={handleCampaignSave} isLoading={campaignSaving} variant="outline">Save Draft</Button>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button onClick={handleCampaignSave} isLoading={campaignSaving} variant="outline">
+                    <Check className="w-4 h-4" /> Save Draft
+                  </Button>
                   {editingCampaignId && (
                     <Button variant="ghost" onClick={resetCampaignForm}><X className="w-4 h-4" /> Cancel</Button>
                   )}
                 </div>
-                <p className="text-xs text-brand-cream/50">Drafts can be reviewed before sending. Use Send in the list to dispatch.</p>
+                <p className="text-xs text-brand-cream/45">Save as draft, review in the list, then send when ready.</p>
+
               </CardContent>
             </Card>
 
-            {/* Campaign list */}
-            <div className="space-y-6">
+            {/* ── Campaign list ───────────────────────────────────────────── */}
+            <div className="space-y-5">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -746,28 +1554,28 @@ export default function AdminEmailsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {drafts.length === 0 && <p className="text-sm text-brand-cream/60 py-4">No drafts yet.</p>}
-                  {drafts.map((campaign) => (
-                    <div key={campaign.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-3">
+                  {drafts.length === 0 && <p className="text-sm text-brand-cream/60 py-3">No drafts yet.</p>}
+                  {drafts.map(c => (
+                    <div key={c.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-3">
                       <div>
-                        <p className="font-semibold text-brand-cream truncate">{campaign.subject}</p>
+                        <p className="font-semibold text-brand-cream truncate">{c.subject}</p>
                         <p className="text-xs text-brand-cream/55 mt-1">
-                          Created {formatDate(campaign.created_at)}
-                          {campaign.is_global && ' · General'}
-                          {campaign.tag_all_members && ' · All Members'}
-                          {campaign.trip_tags.length > 0 && ` · ${campaign.trip_tags.map((t) => t.name).join(', ')}`}
-                          {campaign.member_tags.length > 0 && ` · ${campaign.member_tags.length} rider${campaign.member_tags.length !== 1 ? 's' : ''}`}
+                          {formatDate(c.created_at)}
+                          {c.is_global && ' · General'}
+                          {c.tag_all_members && ' · All Members'}
+                          {c.trip_tags.length > 0 && ` · ${c.trip_tags.map(t => t.name).join(', ')}`}
+                          {c.member_tags.length > 0 && ` · ${c.member_tags.length} rider${c.member_tags.length !== 1 ? 's' : ''}`}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button size="sm" onClick={() => setConfirmSend(campaign)} isLoading={sendingId === campaign.id}>
-                          <Send className="w-4 h-4" /> Send Now
+                        <Button size="sm" onClick={() => setConfirmSend(c)} isLoading={sendingId === c.id}>
+                          <Send className="w-3.5 h-3.5" /> Send Now
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleCampaignEdit(campaign)}>
-                          <Edit2 className="w-4 h-4" /> Edit
+                        <Button size="sm" variant="outline" onClick={() => handleCampaignEdit(c)}>
+                          <Edit2 className="w-3.5 h-3.5" /> Edit
                         </Button>
-                        <Button size="sm" variant="danger" onClick={() => handleCampaignDelete(campaign)} isLoading={deletingCampaignId === campaign.id}>
-                          <Trash2 className="w-4 h-4" /> Delete
+                        <Button size="sm" variant="danger" onClick={() => handleCampaignDelete(c)} isLoading={deletingCampaignId === c.id}>
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
                         </Button>
                       </div>
                     </div>
@@ -783,21 +1591,19 @@ export default function AdminEmailsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {sent.length === 0 && <p className="text-sm text-brand-cream/60 py-4">No campaigns sent yet.</p>}
-                  {sent.map((campaign) => (
-                    <div key={campaign.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-2">
-                      <p className="font-semibold text-brand-cream truncate">{campaign.subject}</p>
+                  {sent.length === 0 && <p className="text-sm text-brand-cream/60 py-3">No campaigns sent yet.</p>}
+                  {sent.map(c => (
+                    <div key={c.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-2">
+                      <p className="font-semibold text-brand-cream truncate">{c.subject}</p>
                       <p className="text-xs text-brand-cream/55">
-                        Sent {formatDate(campaign.sent_at)}
-                        {campaign.tag_all_members && ' · All Members'}
-                        {campaign.trip_tags.length > 0 && ` · ${campaign.trip_tags.map((t) => t.name).join(', ')}`}
-                        {campaign.member_tags.length > 0 && ` · ${campaign.member_tags.length} rider${campaign.member_tags.length !== 1 ? 's' : ''}`}
+                        Sent {formatDate(c.sent_at)}
+                        {c.tag_all_members && ' · All Members'}
+                        {c.trip_tags.length > 0 && ` · ${c.trip_tags.map(t => t.name).join(', ')}`}
+                        {c.member_tags.length > 0 && ` · ${c.member_tags.length} rider${c.member_tags.length !== 1 ? 's' : ''}`}
                       </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="danger" onClick={() => handleCampaignDelete(campaign)} isLoading={deletingCampaignId === campaign.id}>
-                          <Trash2 className="w-4 h-4" /> Delete
-                        </Button>
-                      </div>
+                      <Button size="sm" variant="danger" onClick={() => handleCampaignDelete(c)} isLoading={deletingCampaignId === c.id}>
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </Button>
                     </div>
                   ))}
                 </CardContent>
@@ -807,10 +1613,10 @@ export default function AdminEmailsPage() {
         </>
       )}
 
-      {/* ── TEMPLATES TAB ─────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════ TEMPLATES */}
       {activeTab === 'templates' && (
         <>
-          {/* Template preview modal */}
+          {/* Preview modal for saved templates */}
           {previewTemplate && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 overflow-y-auto">
               <div className="bg-[#1a1a1a] border border-brand-brown/30 rounded-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -819,27 +1625,12 @@ export default function AdminEmailsPage() {
                     <h2 className="text-lg font-semibold text-brand-cream">{previewTemplate.name}</h2>
                     <p className="text-xs text-brand-cream/55 mt-0.5">Subject: {previewTemplate.subject}</p>
                   </div>
-                  <button onClick={() => setPreviewTemplate(null)} className="text-brand-cream/60 hover:text-brand-cream transition-colors">
+                  <button onClick={() => setPreviewTemplate(null)} className="text-brand-cream/60 hover:text-brand-cream">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 <div className="overflow-y-auto flex-1 p-6">
-                  <div className="rounded-lg overflow-hidden border border-brand-brown/30 text-sm">
-                    <div className="bg-brand-brown px-6 py-4 text-center">
-                      <p className="text-white font-semibold tracking-widest text-xs uppercase">{header.email_header_title}</p>
-                      <p className="text-white/70 text-xs tracking-wide mt-1">{header.email_header_tagline}</p>
-                    </div>
-                    <div className="bg-[#111] px-6 py-6">
-                      <p className="text-[#C9B98A] mb-3 text-sm">Hi [Recipient],</p>
-                      <div
-                        className="prose prose-invert prose-sm max-w-none text-[#d4c9a8] leading-relaxed"
-                        dangerouslySetInnerHTML={{ __html: previewTemplate.body }}
-                      />
-                    </div>
-                    <div className="bg-[#111] border-t border-brand-brown/20 px-6 py-4 text-center">
-                      <p className="text-[#666] text-xs">{header.email_footer_text}</p>
-                    </div>
-                  </div>
+                  <LiveEmailPreview body={previewTemplate.body} mode={detectEditorMode(previewTemplate.body)} header={header} />
                 </div>
                 <div className="px-6 py-4 border-t border-brand-brown/20 shrink-0 flex gap-3 justify-end">
                   <Button variant="ghost" onClick={() => setPreviewTemplate(null)}>Close</Button>
@@ -851,117 +1642,228 @@ export default function AdminEmailsPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {/* Create / Edit */}
-            <Card className="h-fit">
+          <div className={`grid gap-6 items-start ${isEditingTemplate ? 'grid-cols-1 xl:grid-cols-[55%_45%]' : 'grid-cols-1 xl:grid-cols-2'}`}>
+
+            {/* ── Template editor ─────────────────────────────────────────── */}
+            <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  {editingTemplateId ? <Edit2 className="w-5 h-5 text-brand-brown" /> : <Plus className="w-5 h-5 text-brand-brown" />}
-                  {editingTemplateId ? 'Edit Template' : 'New Template'}
-                </CardTitle>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <CardTitle className="flex items-center gap-2">
+                    {editingTemplateId ? <Edit2 className="w-5 h-5 text-brand-brown" /> : <Plus className="w-5 h-5 text-brand-brown" />}
+                    {editingTemplateId ? 'Edit Template' : 'New Template'}
+                  </CardTitle>
+                  {isEditingTemplate && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLivePreview(p => !p)}
+                      className="flex items-center gap-1.5 text-xs text-brand-cream/60 hover:text-brand-cream transition-colors"
+                    >
+                      {showLivePreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showLivePreview ? 'Hide preview' : 'Show preview'}
+                    </button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-brand-cream/90">Template name</label>
-                  <input
-                    type="text"
-                    value={templateForm.name}
-                    onChange={(e) => setTemplateForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="e.g. Welcome to the Ride"
-                    className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
-                  />
+
+                {/* Name + description */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-brand-cream/90">Template name</label>
+                    <input type="text" value={templateForm.name}
+                      onChange={e => setTemplateForm(p => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g. Welcome to the Ride"
+                      className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-3 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-brand-cream/90">
+                      Description <span className="text-brand-cream/40 font-normal">(optional)</span>
+                    </label>
+                    <input type="text" value={templateForm.description}
+                      onChange={e => setTemplateForm(p => ({ ...p, description: e.target.value }))}
+                      placeholder="e.g. Used for new member emails"
+                      className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-3 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none text-sm"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-brand-cream/90">
-                    Description <span className="text-brand-cream/40 font-normal">(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={templateForm.description}
-                    onChange={(e) => setTemplateForm((p) => ({ ...p, description: e.target.value }))}
-                    placeholder="e.g. Used for new member welcome emails"
-                    className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
+
+                {/* Subject */}
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium text-brand-cream/90">Default subject line</label>
-                  <input
-                    type="text"
-                    value={templateForm.subject}
-                    onChange={(e) => setTemplateForm((p) => ({ ...p, subject: e.target.value }))}
+                  <input type="text" value={templateForm.subject}
+                    onChange={e => setTemplateForm(p => ({ ...p, subject: e.target.value }))}
                     placeholder="e.g. Welcome to The Whiskey Riders"
                     className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                   />
-                  <p className="text-xs text-brand-cream/50">Can be edited when the template is loaded into a campaign.</p>
+                  <p className="text-xs text-brand-cream/45">Editable when loaded into a campaign.</p>
                 </div>
+
+                {/* Body editor */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-brand-cream/90">Body</label>
-                  <RichTextEditor
-                    ref={templateEditorRef}
-                    value={templateForm.body}
-                    onChange={(v) => setTemplateForm((p) => ({ ...p, body: v }))}
-                    placeholder="Write your template content here..."
-                  />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <label className="text-sm font-medium text-brand-cream/90">Body</label>
+                    <EditorModeToggle mode={templateEditorMode} onSwitch={switchTemplateMode} />
+                  </div>
+
+                  {/* Builder toolbar */}
+                  {templateEditorMode === 'rich' && (
+                    <CollapsibleSection title="Insert Blocks" icon={Paintbrush} defaultOpen={true}>
+                      <BlockInsertBar
+                        onHero={templateInsert.hero} onText={templateInsert.text}
+                        onButton={templateInsert.button} onColumns={templateInsert.columns}
+                        onDivider={templateInsert.divider} onLogo={templateInsert.logo}
+                      />
+                      <ColorControls
+                        emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
+                        blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
+                        onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
+                        onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
+                        onApplyEmail={applyEmailBg}
+                        onApplySection={() => applyClosestStyle(templateEditorRef, '[data-email-section="true"]', { 'background-color': richSectionBgColor }, 'section')}
+                        onApplyBlock={() => applyClosestStyle(templateEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
+                        onApplyButton={() => applyClosestStyle(templateEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
+                      />
+                      <p className="text-xs text-brand-cream/45">Tip: place cursor inside a section/block/button before applying a colour.</p>
+                    </CollapsibleSection>
+                  )}
+
+                  {templateEditorMode === 'rich' ? (
+                    <RichTextEditor
+                      ref={templateEditorRef}
+                      value={templateForm.body}
+                      onChange={v => setTemplateForm(p => ({ ...p, body: v }))}
+                      placeholder="Write your template content here..."
+                    />
+                  ) : (
+                    <textarea
+                      ref={templateHtmlRef}
+                      value={templateForm.body}
+                      onChange={e => setTemplateForm(p => ({ ...p, body: e.target.value }))}
+                      rows={22} spellCheck={false}
+                      className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-3 text-brand-cream font-mono text-xs leading-relaxed focus:border-brand-brown focus:outline-none resize-y"
+                      placeholder="Paste or write full template HTML..."
+                    />
+                  )}
+                  <p className="text-xs text-brand-cream/45">
+                    {templateEditorMode === 'html'
+                      ? 'HTML mode: full control over every element, inline styles, and structure.'
+                      : 'Visual mode: insert blocks, reorder them, and style with the tools above.'}
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-2 pt-2">
+
+                {/* Block order (visual mode only) */}
+                {templateEditorMode === 'rich' && (
+                  <CollapsibleSection title="Block Order (Drag & Drop)" icon={Layout} defaultOpen={richTemplateBlocks.length > 0}>
+                    <BlockOrderPanel
+                      blocks={richTemplateBlocks}
+                      draggingId={draggingBlockId}
+                      dropTargetId={dropTargetBlockId}
+                      onDragStart={id => setDraggingBlockId(id)}
+                      onDragEnter={id => setDropTargetBlockId(id)}
+                      onDragLeave={() => setDropTargetBlockId(null)}
+                      onDrop={targetId => {
+                        if (draggingBlockId) handleReorderBlock(draggingBlockId, targetId);
+                        setDropTargetBlockId(null);
+                        setDraggingBlockId(null);
+                      }}
+                      onDragEnd={() => { setDraggingBlockId(null); setDropTargetBlockId(null); }}
+                      onMoveUp={index => {
+                        const prev = richTemplateBlocks[index - 1];
+                        if (prev) handleReorderBlock(richTemplateBlocks[index].id, prev.id);
+                      }}
+                      onMoveDown={index => {
+                        const next = richTemplateBlocks[index + 1];
+                        if (next) handleReorderBlock(richTemplateBlocks[index].id, next.id);
+                      }}
+                    />
+                  </CollapsibleSection>
+                )}
+
+                {/* Asset library */}
+                <AssetLibraryPanel forTemplate={true} />
+
+                {/* Save actions */}
+                <div className="flex flex-wrap gap-2 pt-1 border-t border-brand-brown/10">
                   <Button onClick={handleTemplateSave} isLoading={templateSaving}>
                     <Check className="w-4 h-4" />
                     {editingTemplateId ? 'Update Template' : 'Save Template'}
                   </Button>
-                  {editingTemplateId && (
+                  {(editingTemplateId || templateForm.name || templateForm.body) && (
                     <Button variant="ghost" onClick={resetTemplateForm}><X className="w-4 h-4" /> Cancel</Button>
                   )}
                 </div>
+
               </CardContent>
             </Card>
 
-            {/* Template list */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-brand-brown" />
-                  Saved Templates ({templates.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {templates.length === 0 && (
-                  <p className="text-sm text-brand-cream/60 py-4">No templates yet. Create one to get started.</p>
-                )}
-                {templates.map((template) => {
-                  const creatorName = template.creator
-                    ? getMemberDisplayName(template.creator as { full_name: string | null; nickname: string | null; avatar_url?: string | null; status?: string })
-                    : null;
-                  return (
-                    <div key={template.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-3">
-                      <div>
-                        <p className="font-semibold text-brand-cream">{template.name}</p>
-                        {template.description && <p className="text-sm text-brand-cream/60 mt-0.5">{template.description}</p>}
-                        <p className="text-xs text-brand-cream/40 mt-1">Subject: <span className="text-brand-cream/60">{template.subject}</span></p>
-                        <p className="text-xs text-brand-cream/40 mt-0.5">
-                          {creatorName ? `By ${creatorName} · ` : ''}Updated {formatDateShort(template.updated_at)}
-                        </p>
+            {/* ── Right column: live preview when editing, list otherwise ─── */}
+            {isEditingTemplate && showLivePreview ? (
+              <div className="xl:sticky xl:top-4 space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <Eye className="w-4 h-4 text-brand-brown" />
+                      Live Preview
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <LiveEmailPreview body={templateForm.body} mode={templateEditorMode} header={header} />
+                    <p className="text-xs text-brand-cream/40 mt-2 text-center">Updates as you type</p>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-brand-brown" />
+                    Saved Templates ({templates.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {templates.length === 0 && (
+                    <p className="text-sm text-brand-cream/60 py-4">No templates yet. Create one to get started.</p>
+                  )}
+                  {templates.map(template => {
+                    const creatorName = template.creator
+                      ? getMemberDisplayName(template.creator as { full_name: string | null; nickname: string | null; avatar_url?: string | null; status?: string })
+                      : null;
+                    return (
+                      <div key={template.id} className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-4 space-y-3">
+                        <div>
+                          <p className="font-semibold text-brand-cream">{template.name}</p>
+                          {template.description && <p className="text-sm text-brand-cream/60 mt-0.5">{template.description}</p>}
+                          <p className="text-xs text-brand-cream/40 mt-1">Subject: <span className="text-brand-cream/60">{template.subject}</span></p>
+                          <p className="text-xs text-brand-cream/40 mt-0.5">
+                            {creatorName ? `By ${creatorName} · ` : ''}Updated {formatDateShort(template.updated_at)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={() => setPreviewTemplate(template)}>
+                            <Eye className="w-3.5 h-3.5" /> Preview
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleTemplateEdit(template)}>
+                            <Edit2 className="w-3.5 h-3.5" /> Edit
+                          </Button>
+                          <Button size="sm" variant="danger" onClick={() => handleTemplateDelete(template)} isLoading={deletingTemplateId === template.id}>
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setPreviewTemplate(template)}>Preview</Button>
-                        <Button size="sm" variant="outline" onClick={() => handleTemplateEdit(template)}>
-                          <Edit2 className="w-4 h-4" /> Edit
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => handleTemplateDelete(template)} isLoading={deletingTemplateId === template.id}>
-                          <Trash2 className="w-4 h-4" /> Delete
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            )}
           </div>
         </>
       )}
 
-      {/* ── HEADER & FOOTER TAB ───────────────────────────────────────────── */}
+      {/* ════════════════════════════════════════════════ HEADER & FOOTER TAB */}
       {activeTab === 'header' && (
         <div className="max-w-2xl space-y-6">
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -971,38 +1873,63 @@ export default function AdminEmailsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-brand-cream/60">
-                This branded header appears at the top of every email sent from the portal.
+                The branded banner that appears at the top of every rich-text email.
               </p>
+
+              {/* Logo upload */}
               <div className="space-y-2">
+                <label className="text-sm font-medium text-brand-cream/90">Logo / Image</label>
+                {header.email_header_image_url && (
+                  <div className="flex items-center gap-3 rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-3">
+                    <img src={header.email_header_image_url} alt="Header" className="h-10 w-auto max-w-[140px] object-contain rounded" />
+                    <button type="button" onClick={() => setHeader(p => ({ ...p, email_header_image_url: null }))}
+                      className="ml-auto text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
+                      <X className="w-3.5 h-3.5" /> Remove
+                    </button>
+                  </div>
+                )}
+                <input ref={headerImgRef} type="file" accept="image/*" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) void handleImageUpload(f, 'header'); }} />
+                <Button variant="outline" size="sm" isLoading={uploadingHeaderImage} onClick={() => headerImgRef.current?.click()}>
+                  <ImagePlus className="w-4 h-4" />
+                  {header.email_header_image_url ? 'Replace image' : 'Upload image'}
+                </Button>
+                <p className="text-xs text-brand-cream/40">PNG, JPG, SVG — max 5 MB.</p>
+              </div>
+
+              {/* Title */}
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium text-brand-cream/90">Title</label>
-                <input
-                  type="text"
-                  value={header.email_header_title}
-                  onChange={(e) => setHeader((p) => ({ ...p, email_header_title: e.target.value }))}
+                <input type="text" value={header.email_header_title}
+                  onChange={e => setHeader(p => ({ ...p, email_header_title: e.target.value }))}
                   placeholder="The Whiskey Riders"
                   className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                 />
               </div>
-              <div className="space-y-2">
+
+              {/* Tagline */}
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium text-brand-cream/90">Tagline</label>
-                <input
-                  type="text"
-                  value={header.email_header_tagline}
-                  onChange={(e) => setHeader((p) => ({ ...p, email_header_tagline: e.target.value }))}
+                <input type="text" value={header.email_header_tagline}
+                  onChange={e => setHeader(p => ({ ...p, email_header_tagline: e.target.value }))}
                   placeholder="Ride. Bond. Remember."
                   className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                 />
               </div>
 
-              {/* Live header preview */}
-              <div className="rounded-lg overflow-hidden border border-brand-brown/30 mt-2">
+              {/* Live preview */}
+              <div className="rounded-lg overflow-hidden border border-brand-brown/30">
                 <div className="bg-brand-brown px-6 py-4 text-center">
-                  <p className="text-white font-semibold tracking-widest text-xs uppercase">
-                    {header.email_header_title || 'The Whiskey Riders'}
-                  </p>
-                  <p className="text-white/70 text-xs tracking-wide mt-1">
-                    {header.email_header_tagline || 'Ride. Bond. Remember.'}
-                  </p>
+                  {header.email_header_image_url && (
+                    <img src={header.email_header_image_url} alt="Header preview"
+                      className="mx-auto mb-2 max-h-[64px] max-w-[220px] w-auto h-auto object-contain" />
+                  )}
+                  {header.email_header_title && (
+                    <p className="text-white font-semibold tracking-widest text-xs uppercase">{header.email_header_title}</p>
+                  )}
+                  {header.email_header_tagline && (
+                    <p className="text-white/70 text-xs tracking-wide mt-1">{header.email_header_tagline}</p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -1017,22 +1944,46 @@ export default function AdminEmailsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-brand-cream/60">
-                This text appears at the bottom of every email as a brief explanation of why the recipient is receiving it.
+                Appears at the bottom of every rich-text email.
               </p>
+
+              {/* Footer image */}
               <div className="space-y-2">
+                <label className="text-sm font-medium text-brand-cream/90">Footer image <span className="text-brand-cream/40 font-normal">(optional)</span></label>
+                {header.email_footer_image_url && (
+                  <div className="flex items-center gap-3 rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-3">
+                    <img src={header.email_footer_image_url} alt="Footer" className="h-8 w-auto max-w-[120px] object-contain rounded" />
+                    <button type="button" onClick={() => setHeader(p => ({ ...p, email_footer_image_url: null }))}
+                      className="ml-auto text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
+                      <X className="w-3.5 h-3.5" /> Remove
+                    </button>
+                  </div>
+                )}
+                <input ref={footerImgRef} type="file" accept="image/*" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) void handleImageUpload(f, 'footer'); }} />
+                <Button variant="outline" size="sm" isLoading={uploadingFooterImage} onClick={() => footerImgRef.current?.click()}>
+                  <ImagePlus className="w-4 h-4" />
+                  {header.email_footer_image_url ? 'Replace image' : 'Upload image'}
+                </Button>
+                <p className="text-xs text-brand-cream/40">PNG, JPG, SVG — max 5 MB.</p>
+              </div>
+
+              {/* Footer text */}
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium text-brand-cream/90">Footer text</label>
-                <textarea
-                  rows={3}
-                  value={header.email_footer_text}
-                  onChange={(e) => setHeader((p) => ({ ...p, email_footer_text: e.target.value }))}
+                <textarea rows={3} value={header.email_footer_text}
+                  onChange={e => setHeader(p => ({ ...p, email_footer_text: e.target.value }))}
                   placeholder="You're receiving this because you're a member of The Whiskey Riders."
                   className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none resize-none"
                 />
               </div>
 
-              {/* Live footer preview */}
+              {/* Footer preview */}
               <div className="rounded-lg overflow-hidden border border-brand-brown/30">
                 <div className="bg-[#111] border-t border-brand-brown/20 px-6 py-4 text-center">
+                  {header.email_footer_image_url && (
+                    <img src={header.email_footer_image_url} alt="" className="mx-auto mb-2 max-h-[48px] max-w-[160px] w-auto h-auto object-contain" />
+                  )}
                   <p className="text-[#666] text-xs">
                     {header.email_footer_text || "You're receiving this because you're a member of The Whiskey Riders."}
                   </p>
@@ -1041,25 +1992,30 @@ export default function AdminEmailsPage() {
             </CardContent>
           </Card>
 
-          {/* Full email preview */}
+          {/* Full preview */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium text-brand-cream/70">Full Email Preview</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm text-brand-cream/70">
+                <Eye className="w-4 h-4 text-brand-brown" />
+                Full Email Preview
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="rounded-lg overflow-hidden border border-brand-brown/30 text-sm">
                 <div className="bg-brand-brown px-6 py-4 text-center">
-                  <p className="text-white font-semibold tracking-widest text-xs uppercase">{header.email_header_title || 'The Whiskey Riders'}</p>
-                  <p className="text-white/70 text-xs tracking-wide mt-1">{header.email_header_tagline || 'Ride. Bond. Remember.'}</p>
+                  {header.email_header_image_url && <img src={header.email_header_image_url} alt="" className="mx-auto mb-2 max-h-[64px] max-w-[220px] w-auto h-auto object-contain" />}
+                  {header.email_header_title && <p className="text-white font-semibold tracking-widest text-xs uppercase">{header.email_header_title}</p>}
+                  {header.email_header_tagline && <p className="text-white/70 text-xs tracking-wide mt-1">{header.email_header_tagline}</p>}
                 </div>
                 <div className="bg-[#111] px-6 py-6">
-                  <p className="text-[#C9B98A] mb-3 text-sm">Hi Gloorious,</p>
+                  <p className="text-[#C9B98A] mb-3 text-sm">Hi Rider,</p>
                   <p className="text-[#d4c9a8] text-sm leading-relaxed">Your email body content will appear here...</p>
                   <div className="mt-6 text-center">
                     <div className="inline-block bg-brand-brown text-white text-sm font-semibold px-7 py-3 rounded-lg">Visit the Portal</div>
                   </div>
                 </div>
                 <div className="bg-[#111] border-t border-brand-brown/20 px-6 py-4 text-center">
+                  {header.email_footer_image_url && <img src={header.email_footer_image_url} alt="" className="mx-auto mb-2 max-h-[48px] max-w-[160px] w-auto h-auto object-contain" />}
                   <p className="text-[#666] text-xs">{header.email_footer_text || "You're receiving this because you're a member of The Whiskey Riders."}</p>
                 </div>
               </div>
@@ -1068,8 +2024,7 @@ export default function AdminEmailsPage() {
 
           <div className="flex gap-3">
             <Button onClick={handleHeaderSave} isLoading={headerSaving} disabled={!headerChanged && !headerSaving}>
-              <Check className="w-4 h-4" />
-              Save Changes
+              <Check className="w-4 h-4" /> Save Changes
             </Button>
             {headerChanged && (
               <Button variant="ghost" onClick={() => setHeader({ ...headerOriginal })}>

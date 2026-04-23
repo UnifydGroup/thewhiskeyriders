@@ -31,6 +31,8 @@ export interface RichTextEditorHandle {
   focus: () => void;
   insertImage: (url: string, alt?: string) => void;
   insertLink: (url: string, text?: string) => void;
+  insertHtmlSnippet: (html: string) => void;
+  applyStylesToClosest: (selector: string, styles: Record<string, string>) => boolean;
 }
 
 interface RichTextEditorProps {
@@ -60,18 +62,97 @@ function ToolbarButton({ title, onClick, children }: ToolbarButtonProps) {
   );
 }
 
+const DISALLOWED_EDITOR_TAGS = new Set([
+  'style',
+  'script',
+  'iframe',
+  'object',
+  'embed',
+  'link',
+  'meta',
+  'head',
+  'html',
+  'body',
+  'title',
+  'base',
+  'form',
+  'input',
+  'textarea',
+  'select',
+  'option',
+  'button',
+]);
+
+function sanitizeEditorSurfaceHtml(raw: string): string {
+  if (typeof window === 'undefined') return raw;
+
+  const parser = new DOMParser();
+  const document = parser.parseFromString(`<div>${raw}</div>`, 'text/html');
+  const wrapper = document.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) return '';
+
+  const walk = (node: Node) => {
+    const children = Array.from(node.childNodes);
+    for (const child of children) {
+      if (child.nodeType === Node.TEXT_NODE) continue;
+      if (child.nodeType !== Node.ELEMENT_NODE) {
+        node.removeChild(child);
+        continue;
+      }
+
+      const element = child as HTMLElement;
+      const tag = element.tagName.toLowerCase();
+      if (DISALLOWED_EDITOR_TAGS.has(tag)) {
+        const fragment = document.createDocumentFragment();
+        while (element.firstChild) {
+          fragment.appendChild(element.firstChild);
+        }
+        element.replaceWith(fragment);
+        continue;
+      }
+
+      const attrs = Array.from(element.attributes);
+      for (const attr of attrs) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on')) {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+
+        if (name === 'href' || name === 'src') {
+          const safe = sanitizeLinkUrl(attr.value || '');
+          if (safe) {
+            element.setAttribute(attr.name, safe);
+          } else {
+            element.removeAttribute(attr.name);
+          }
+        }
+      }
+
+      walk(element);
+    }
+  };
+
+  walk(wrapper);
+
+  return wrapper.innerHTML;
+}
+
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(
   function RichTextEditor(
     { value, onChange, placeholder = 'Write your news update...', onRequestInsertImage },
     ref
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
-    const normalizedValue = toEditorHtml(value || '');
+    const normalizedValue = sanitizeEditorSurfaceHtml(toEditorHtml(value || ''));
     const isEmpty = !toSearchableNewsText(normalizedValue).trim();
 
     const syncEditorValue = useCallback(() => {
       const editor = editorRef.current;
       if (!editor) return;
+      // Skip the sync when the editor has focus — its DOM is the source of truth while
+      // the user is actively typing. Overwriting innerHTML mid-edit would reset the cursor.
+      if (document.activeElement === editor) return;
       if (editor.innerHTML !== normalizedValue) {
         editor.innerHTML = normalizedValue;
       }
@@ -84,7 +165,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     const refreshValue = useCallback(() => {
       const editor = editorRef.current;
       if (!editor) return;
-      onChange(editor.innerHTML);
+      const sanitized = sanitizeEditorSurfaceHtml(editor.innerHTML);
+      if (editor.innerHTML !== sanitized) {
+        editor.innerHTML = sanitized;
+      }
+      onChange(sanitized);
     }, [onChange]);
 
     const runCommand = useCallback((command: string, valueArg?: string) => {
@@ -101,6 +186,33 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       editor.focus();
       document.execCommand('insertHTML', false, html);
       refreshValue();
+    }, [refreshValue]);
+
+    const applyStylesToClosest = useCallback((selector: string, styles: Record<string, string>) => {
+      const editor = editorRef.current;
+      if (!editor || typeof window === 'undefined') return false;
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return false;
+
+      const anchor = selection.anchorNode;
+      if (!anchor) return false;
+
+      const startEl =
+        anchor.nodeType === Node.ELEMENT_NODE
+          ? (anchor as Element)
+          : anchor.parentElement;
+      if (!startEl) return false;
+
+      const target = startEl.closest(selector);
+      if (!(target instanceof HTMLElement) || !editor.contains(target)) return false;
+
+      for (const [prop, val] of Object.entries(styles)) {
+        if (!prop.trim()) continue;
+        target.style.setProperty(prop, val);
+      }
+
+      refreshValue();
+      return true;
     }, [refreshValue]);
 
     const insertImage = useCallback((url: string, alt = '') => {
@@ -140,7 +252,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       focus: () => editorRef.current?.focus(),
       insertImage,
       insertLink,
-    }), [insertImage, insertLink]);
+      insertHtmlSnippet: insertHtml,
+      applyStylesToClosest,
+    }), [insertImage, insertLink, insertHtml, applyStylesToClosest]);
 
     const promptInsertLink = () => {
       const provided = window.prompt('Enter link URL (https://...)');

@@ -93,7 +93,7 @@ export default async function Home() {
               href="/signup"
               className="px-4 py-2 rounded-lg border border-brand-brown/40 text-brand-tan hover:bg-brand-brown/15 transition-colors text-sm font-semibold"
             >
-              Member Signup
+              Request Member Access
             </Link>
             <Link
               href="/login"
@@ -158,12 +158,6 @@ export default async function Home() {
                 className="inline-block px-8 py-4 border border-brand-brown/60 hover:bg-brand-brown/15 text-brand-tan font-bold text-lg rounded-lg transition-colors"
               >
                 View Trip Galleries
-              </Link>
-              <Link
-                href="/signup"
-                className="inline-block px-8 py-4 border border-brand-brown/60 hover:bg-brand-brown/15 text-brand-tan font-bold text-lg rounded-lg transition-colors"
-              >
-                Request Member Access
               </Link>
               <Link
                 href="/login"

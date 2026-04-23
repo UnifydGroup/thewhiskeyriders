@@ -45,6 +45,17 @@ function getRecipientName(r: MemberRecipient): string {
   return r.nickname?.trim() || r.full_name?.trim() || r.email;
 }
 
+function isStandaloneEmailHtml(content: string): boolean {
+  const lower = (content || '').toLowerCase();
+  return (
+    lower.includes('<!doctype') ||
+    lower.includes('<html') ||
+    lower.includes('<body') ||
+    lower.includes('<style') ||
+    lower.includes('email-wrapper')
+  );
+}
+
 async function resolveRecipients(campaignId: string, campaignRow: {
   tag_all_members: boolean;
   is_global: boolean;
@@ -169,23 +180,28 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     for (const recipient of recipients) {
       const name = getRecipientName(recipient);
+      const standaloneHtml = isStandaloneEmailHtml(campaign.body);
 
-      const html = buildEmailHtml({
-        recipientName: name,
-        subject: campaign.subject,
-        bodyHtml: campaign.body,
-        ctaUrl: baseUrl ? `${baseUrl}/dashboard` : undefined,
-        ctaLabel: 'Visit the Portal',
-        headerTitle: emailHeader.email_header_title,
-        headerTagline: emailHeader.email_header_tagline,
-        footerText: emailHeader.email_footer_text,
-      });
+      const html = standaloneHtml
+        ? campaign.body
+        : buildEmailHtml({
+            recipientName: name,
+            subject: campaign.subject,
+            bodyHtml: campaign.body,
+            ctaUrl: baseUrl ? `${baseUrl}/dashboard` : undefined,
+            ctaLabel: 'Visit the Portal',
+            headerTitle: emailHeader.email_header_title,
+            headerTagline: emailHeader.email_header_tagline,
+            headerImageUrl: emailHeader.email_header_image_url ?? undefined,
+            footerText: emailHeader.email_footer_text,
+            footerImageUrl: emailHeader.email_footer_image_url ?? undefined,
+          });
 
       const text = buildEmailText({
         recipientName: name,
         bodyText: campaign.body.replace(/<[^>]+>/g, '').trim(),
-        ctaUrl: baseUrl ? `${baseUrl}/dashboard` : undefined,
-        ctaLabel: 'Visit the Portal',
+        ctaUrl: standaloneHtml ? undefined : (baseUrl ? `${baseUrl}/dashboard` : undefined),
+        ctaLabel: standaloneHtml ? undefined : 'Visit the Portal',
       });
 
       try {

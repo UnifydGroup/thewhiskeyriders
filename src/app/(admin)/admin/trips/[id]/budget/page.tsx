@@ -80,6 +80,7 @@ type TransactionNoteMeta = {
   transfer_direction?: 'in' | 'out' | null;
   linked_transaction_id?: string | null;
   counterparty_account_id?: string | null;
+  payment_category?: string | null;  // member payment type label
 };
 type ParsedCategoryNotes = {
   notes_text?: unknown;
@@ -257,7 +258,7 @@ function parsePaymentSourcesPayload(rawBankNotes: unknown): { notes: string; sou
 }
 
 function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
-  if (!rawNotes) return { text: '', account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null };
+  if (!rawNotes) return { text: '', account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null, payment_category: null };
   try {
     const parsed = JSON.parse(rawNotes) as {
       text?: unknown;
@@ -266,6 +267,7 @@ function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
       transfer_direction?: unknown;
       linked_transaction_id?: unknown;
       counterparty_account_id?: unknown;
+      payment_category?: unknown;
     };
     if (parsed && typeof parsed === 'object' && ('text' in parsed || 'account_source_id' in parsed)) {
       return {
@@ -275,18 +277,20 @@ function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
         transfer_direction: parsed.transfer_direction === 'in' || parsed.transfer_direction === 'out' ? parsed.transfer_direction : null,
         linked_transaction_id: typeof parsed.linked_transaction_id === 'string' ? parsed.linked_transaction_id : null,
         counterparty_account_id: typeof parsed.counterparty_account_id === 'string' ? parsed.counterparty_account_id : null,
+        payment_category: typeof parsed.payment_category === 'string' ? parsed.payment_category : null,
       };
     }
   } catch {
     // Backwards compatibility for plain text notes.
   }
-  return { text: rawNotes, account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null };
+  return { text: rawNotes, account_source_id: null, transfer_link_id: null, transfer_direction: null, linked_transaction_id: null, counterparty_account_id: null, payment_category: null };
 }
 
 function encodeTransactionNote(
   text: string,
   accountSourceId: string | null,
-  transferMeta?: Partial<Pick<TransactionNoteMeta, 'transfer_link_id' | 'transfer_direction' | 'linked_transaction_id' | 'counterparty_account_id'>>
+  transferMeta?: Partial<Pick<TransactionNoteMeta, 'transfer_link_id' | 'transfer_direction' | 'linked_transaction_id' | 'counterparty_account_id'>>,
+  paymentCategory?: string | null,
 ): string | null {
   const noteText = text.trim();
   const hasTransferMeta = Boolean(
@@ -295,7 +299,7 @@ function encodeTransactionNote(
     transferMeta?.linked_transaction_id ||
     transferMeta?.counterparty_account_id
   );
-  if (!noteText && !accountSourceId && !hasTransferMeta) return null;
+  if (!noteText && !accountSourceId && !hasTransferMeta && !paymentCategory) return null;
   return JSON.stringify({
     text: noteText || '',
     account_source_id: accountSourceId || null,
@@ -303,11 +307,26 @@ function encodeTransactionNote(
     transfer_direction: transferMeta?.transfer_direction || null,
     linked_transaction_id: transferMeta?.linked_transaction_id || null,
     counterparty_account_id: transferMeta?.counterparty_account_id || null,
+    ...(paymentCategory ? { payment_category: paymentCategory } : {}),
   });
 }
 
 function getTransactionNoteText(rawNotes: string | null): string {
   return parseTransactionNote(rawNotes).text;
+}
+
+const PAYMENT_TYPE_LABELS: Record<string, string> = {
+  instalment: 'Instalment',
+  deposit: 'Deposit',
+  final: 'Final',
+  catchup: 'Catch-up',
+  other: 'Other',
+};
+
+function getPaymentTypeLabel(rawNotes: string | null): string | null {
+  const cat = parseTransactionNote(rawNotes).payment_category;
+  if (!cat) return null;
+  return PAYMENT_TYPE_LABELS[cat] ?? cat;
 }
 
 function isLinkedTransferNote(note: TransactionNoteMeta): boolean {
@@ -534,12 +553,15 @@ export default function AdminBudgetPage() {
   const [showLegacyPaymentSection, setShowLegacyPaymentSection] = useState(true);
   const [showPlannerIncomeSection, setShowPlannerIncomeSection] = useState(true);
   const [expandedMemberPayments, setExpandedMemberPayments] = useState<Record<string, boolean>>({});
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: '', notes: '' });
   const [paymentForm, setPaymentForm] = useState({
     member_id: '',
     amount: '',
     payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'bank_transfer',
+    payment_type: 'instalment',   // payment category / type label
     account_source_id: '',
     notes: '',
   });
@@ -554,6 +576,8 @@ export default function AdminBudgetPage() {
   });
   const [editingLedgerRow, setEditingLedgerRow] = useState<LedgerRow | null>(null);
   const [showLedgerEditForm, setShowLedgerEditForm] = useState(false);
+  const [selectedLedgerIds, setSelectedLedgerIds] = useState<Set<string>>(new Set());
+  const [bulkDeletingLedger, setBulkDeletingLedger] = useState(false);
   const [ledgerEditForm, setLedgerEditForm] = useState({
     description: '',
     date: new Date().toISOString().split('T')[0],
@@ -633,6 +657,7 @@ export default function AdminBudgetPage() {
       amount: '',
       payment_date: new Date().toISOString().split('T')[0],
       payment_method: 'bank_transfer',
+      payment_type: 'instalment',
       account_source_id: getMemberPortalAccountId(paymentSettings.payment_sources) || '',
       notes: '',
     });
@@ -899,7 +924,7 @@ export default function AdminBudgetPage() {
           payment_date: paymentForm.payment_date,
           amount: parseFloat(paymentForm.amount),
           payment_method: paymentForm.payment_method || 'bank_transfer',
-          notes: encodeTransactionNote(paymentForm.notes, paymentForm.account_source_id || null),
+          notes: encodeTransactionNote(paymentForm.notes, paymentForm.account_source_id || null, undefined, paymentForm.payment_type || null),
         }),
       });
       if (!res.ok) throw new Error();
@@ -925,6 +950,7 @@ export default function AdminBudgetPage() {
       payment_method: payment.payment_method || 'bank_transfer',
       account_source_id: parsedPaymentNote.account_source_id || getMemberPortalAccountId(paymentSettings.payment_sources) || '',
       notes: parsedPaymentNote.text,
+      payment_type: parsedPaymentNote.payment_category || 'instalment',
     });
     setShowPaymentForm(true);
     setShowPaymentImport(false);
@@ -944,9 +970,41 @@ export default function AdminBudgetPage() {
         resetPaymentForm();
         setShowPaymentForm(false);
       }
+      setSelectedPaymentIds((prev) => { const next = new Set(prev); next.delete(paymentId); return next; });
       fetchData();
     } catch {
       showToast('error', 'Failed to delete payment');
+    }
+  };
+
+  const handleBulkDeletePayments = async () => {
+    const ids = Array.from(selectedPaymentIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} selected payment${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    try {
+      const h = await getAuthHeader();
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          fetch(`/api/payments/member-payment/${id}?trip_id=${encodeURIComponent(tripId)}`, { method: 'DELETE', headers: h })
+        )
+      );
+      const failed = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)).length;
+      if (failed > 0) {
+        showToast('error', `${failed} deletion${failed === 1 ? '' : 's'} failed`);
+      } else {
+        showToast('success', `${ids.length} payment${ids.length === 1 ? '' : 's'} deleted`);
+      }
+      setSelectedPaymentIds(new Set());
+      if (editingPayment && ids.includes(editingPayment.id)) {
+        resetPaymentForm();
+        setShowPaymentForm(false);
+      }
+      fetchData();
+    } catch {
+      showToast('error', 'Bulk delete failed');
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -1285,6 +1343,59 @@ export default function AdminBudgetPage() {
       showToast('error', 'Failed to update transaction');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteLedgerRowById = async (row: LedgerRow, h: Record<string, string>): Promise<boolean> => {
+    if (row.sub_type === 'member_payment') {
+      const res = await fetch(`/api/payments/member-payment/${row.id}?trip_id=${encodeURIComponent(tripId)}`, { method: 'DELETE', headers: h });
+      return res.ok;
+    } else if (row.type === 'income') {
+      const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${encodeURIComponent(row.id)}`, { method: 'DELETE', headers: h });
+      return res.ok;
+    } else {
+      const res = await fetch(`/api/trips/${tripId}/budget/expenses/${encodeURIComponent(row.id)}`, { method: 'DELETE', headers: h });
+      return res.ok;
+    }
+  };
+
+  const handleDeleteLedgerRow = async (row: LedgerRow) => {
+    if (!confirm(`Delete "${row.description}"? This cannot be undone.`)) return;
+    try {
+      const h = await getAuthHeader();
+      const ok = await deleteLedgerRowById(row, h);
+      if (!ok) throw new Error();
+      showToast('success', 'Transaction deleted');
+      if (editingLedgerRow?.id === row.id) resetLedgerEditor();
+      setSelectedLedgerIds((prev) => { const next = new Set(prev); next.delete(row.id); return next; });
+      fetchData();
+    } catch {
+      showToast('error', 'Failed to delete transaction');
+    }
+  };
+
+  const handleBulkDeleteLedgerRows = async () => {
+    const ids = Array.from(selectedLedgerIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Permanently delete ${ids.length} selected transaction${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setBulkDeletingLedger(true);
+    try {
+      const h = await getAuthHeader();
+      const rowsToDelete = ledger.filter((r) => ids.includes(r.id));
+      const results = await Promise.allSettled(rowsToDelete.map((r) => deleteLedgerRowById(r, h)));
+      const failed = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value)).length;
+      if (failed > 0) {
+        showToast('error', `${failed} deletion${failed === 1 ? '' : 's'} failed`);
+      } else {
+        showToast('success', `${ids.length} transaction${ids.length === 1 ? '' : 's'} deleted`);
+      }
+      setSelectedLedgerIds(new Set());
+      if (editingLedgerRow && ids.includes(editingLedgerRow.id)) resetLedgerEditor();
+      fetchData();
+    } catch {
+      showToast('error', 'Bulk delete failed');
+    } finally {
+      setBulkDeletingLedger(false);
     }
   };
 
@@ -3076,9 +3187,18 @@ export default function AdminBudgetPage() {
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-3">
-                <button onClick={resetLedgerEditor} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                <button onClick={handleSaveLedgerEdit} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Save Changes'}</button>
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => editingLedgerRow && handleDeleteLedgerRow(editingLedgerRow)}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 border border-red-600/40 text-red-400 hover:bg-red-900/20 rounded-lg text-sm font-semibold disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete
+                </button>
+                <div className="flex gap-3">
+                  <button onClick={resetLedgerEditor} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                  <button onClick={handleSaveLedgerEdit} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Save Changes'}</button>
+                </div>
               </div>
             </div>
           )}
@@ -3278,10 +3398,64 @@ export default function AdminBudgetPage() {
             <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg py-12 text-center text-brand-cream/40">No transactions yet</div>
           ) : (
             <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+              {/* Bulk action toolbar */}
+              {selectedLedgerIds.size > 0 && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-brand-black/60 border-b border-brand-tan/20">
+                  <span className="text-xs text-brand-cream/50">{selectedLedgerIds.size} selected</span>
+                  <button
+                    onClick={handleBulkDeleteLedgerRows}
+                    disabled={bulkDeletingLedger}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-red-900/30 border border-red-600/40 text-red-400 hover:bg-red-900/50 rounded-lg text-xs font-semibold disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {bulkDeletingLedger ? 'Deleting…' : `Delete ${selectedLedgerIds.size}`}
+                  </button>
+                  <button
+                    onClick={() => setSelectedLedgerIds(new Set())}
+                    className="text-xs text-brand-cream/40 hover:text-brand-cream/70"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1200px] text-sm">
                   <thead className="bg-brand-black">
-                    <tr>{['Date','Description','Type','Account','Currency','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                    <tr>
+                      {(() => {
+                        const filteredIds = ledger
+                          .filter((row) => {
+                            if (ledgerDateFrom && row.date < ledgerDateFrom) return false;
+                            if (ledgerDateTo && row.date > ledgerDateTo) return false;
+                            if (ledgerAccountFilter) {
+                              const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                              if (acctId !== ledgerAccountFilter) return false;
+                            }
+                            return true;
+                          })
+                          .map((r) => r.id);
+                        const allChecked = filteredIds.length > 0 && filteredIds.every((id) => selectedLedgerIds.has(id));
+                        const someChecked = filteredIds.some((id) => selectedLedgerIds.has(id)) && !allChecked;
+                        return (
+                          <th className="px-4 py-3 w-8">
+                            <input
+                              type="checkbox"
+                              checked={allChecked}
+                              ref={(el) => { if (el) el.indeterminate = someChecked; }}
+                              onChange={(e) => {
+                                setSelectedLedgerIds((prev) => {
+                                  const next = new Set(prev);
+                                  filteredIds.forEach((id) => e.target.checked ? next.add(id) : next.delete(id));
+                                  return next;
+                                });
+                              }}
+                              className="accent-brand-tan cursor-pointer"
+                            />
+                          </th>
+                        );
+                      })()}
+                      {['Date','Description','Type','Account','Currency','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
                     {(() => {
@@ -3301,17 +3475,40 @@ export default function AdminBudgetPage() {
                         const reconcileKey = getReconcileChangeKey(reconcileType, row.id);
                         const pendingReconcile = pendingReconcileChanges[reconcileKey];
                         const reconciledDisplay = pendingReconcile ? pendingReconcile.reconciled : row.reconciled;
+                        const isChecked = selectedLedgerIds.has(row.id);
+                        const rowNote = parseTransactionNote(row.notes ?? null);
+                        const isTransfer = Boolean(rowNote.transfer_link_id);
                         return (
-                          <tr key={`${row.id}-${i}`} className={`hover:bg-brand-tan/5 ${!row.reconciled && row.source === 'manual' ? 'border-l-2 border-amber-500/50' : ''}`}>
+                          <tr key={`${row.id}-${i}`} className={`hover:bg-brand-tan/5 ${isChecked ? 'bg-brand-tan/5' : ''} ${!row.reconciled && row.source === 'manual' ? 'border-l-2 border-amber-500/50' : ''}`}>
+                            <td className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  setSelectedLedgerIds((prev) => {
+                                    const next = new Set(prev);
+                                    e.target.checked ? next.add(row.id) : next.delete(row.id);
+                                    return next;
+                                  });
+                                }}
+                                className="accent-brand-tan cursor-pointer"
+                              />
+                            </td>
                             <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(row.date)}</td>
                             <td className="px-4 py-3 text-brand-cream max-w-[220px]">
                               <p className="truncate">{row.description}</p>
                               {row.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(row.notes)}</p>}
                             </td>
                             <td className="px-4 py-3">
-                              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${row.type === 'income' ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-red-900/20 text-red-400 border-red-600/30'}`}>
-                                {row.type === 'income' ? '↓' : '↑'} {row.type}
-                              </span>
+                              {isTransfer ? (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border bg-brand-tan/10 text-brand-tan border-brand-tan/30">
+                                  ↔ transfer {rowNote.transfer_direction === 'out' ? '(out)' : rowNote.transfer_direction === 'in' ? '(in)' : ''}
+                                </span>
+                              ) : (
+                                <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${row.type === 'income' ? 'bg-green-900/20 text-green-400 border-green-600/30' : 'bg-red-900/20 text-red-400 border-red-600/30'}`}>
+                                  {row.type === 'income' ? '↓' : '↑'} {row.type}
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">{getAccountDisplayName(accountId)}</td>
                             <td className="px-4 py-3 text-brand-cream/60 text-xs whitespace-nowrap">
@@ -3357,9 +3554,14 @@ export default function AdminBudgetPage() {
                               )}
                             </td>
                             <td className="px-4 py-3">
-                              <button onClick={() => openLedgerEditor(row)} className="p-1 text-brand-cream/30 hover:text-brand-tan rounded" title="Edit transaction">
-                                <Edit2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => openLedgerEditor(row)} className="p-1 text-brand-cream/30 hover:text-brand-tan rounded" title="Edit transaction">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteLedgerRow(row)} className="p-1 text-brand-cream/30 hover:text-red-400 rounded" title="Delete transaction">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -3469,6 +3671,162 @@ export default function AdminBudgetPage() {
             </div>
           </div>
 
+          {/* ── Record Member Payment form ─────────────────────────────── */}
+          {showPaymentForm && (() => {
+            const selSummary = memberPaymentSummary.find((m) => m.member_id === paymentForm.member_id);
+            const selBreakdown = memberBreakdown.find((b) => b.user_id === paymentForm.member_id);
+            const selPaid = selSummary?.total_paid ?? 0;
+            const selShare = selBreakdown?.cost_share_aud ?? 0;
+            const selRemaining = selShare > 0 ? selShare - selPaid : null;
+            return (
+              <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-brand-cream">{editingPayment ? 'Edit Member Payment' : 'Record Member Payment'}</h3>
+                  <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="text-brand-cream/40 hover:text-brand-cream">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Member balance info */}
+                {paymentForm.member_id && selSummary && (
+                  <div className="mb-4 flex items-center gap-4 px-4 py-3 rounded-lg bg-brand-black/40 border border-brand-tan/20 text-sm">
+                    <div>
+                      <p className="text-brand-cream/40 text-xs uppercase tracking-wide">Paid so far</p>
+                      <p className="text-brand-tan font-bold">{fmt(selPaid)}</p>
+                    </div>
+                    {selShare > 0 && (
+                      <>
+                        <div className="h-8 w-px bg-brand-tan/20" />
+                        <div>
+                          <p className="text-brand-cream/40 text-xs uppercase tracking-wide">Target</p>
+                          <p className="text-brand-cream font-semibold">{fmt(selShare)}</p>
+                        </div>
+                        <div className="h-8 w-px bg-brand-tan/20" />
+                        <div>
+                          <p className="text-brand-cream/40 text-xs uppercase tracking-wide">Remaining</p>
+                          <p className={`font-semibold ${selRemaining !== null && selRemaining <= 0 ? 'text-green-400' : 'text-amber-400'}`}>
+                            {selRemaining !== null && selRemaining <= 0 ? 'Fully paid ✓' : selRemaining !== null ? fmt(selRemaining) : '—'}
+                          </p>
+                        </div>
+                        <div className="flex-1">
+                          <div className="w-full h-1.5 bg-brand-black rounded-full overflow-hidden mt-1">
+                            <div
+                              className={`h-full rounded-full ${selRemaining !== null && selRemaining <= 0 ? 'bg-green-500' : 'bg-brand-tan'}`}
+                              style={{ width: `${Math.min(100, selShare > 0 ? (selPaid / selShare) * 100 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Member <span className="text-red-400">*</span></label>
+                    <select
+                      value={paymentForm.member_id}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, member_id: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="">— Select member —</option>
+                      {memberPaymentSummary.length > 0
+                        ? memberPaymentSummary.map((m) => (
+                            <option key={m.member_id} value={m.member_id}>
+                              {getMemberListName(m)}
+                            </option>
+                          ))
+                        : tripMembers.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.nickname || m.full_name || m.id}
+                            </option>
+                          ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Type</label>
+                    <select
+                      value={paymentForm.payment_type}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, payment_type: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="instalment">Regular Instalment</option>
+                      <option value="deposit">Initial Deposit</option>
+                      <option value="final">Final Payment</option>
+                      <option value="catchup">Catch-up Payment</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD) <span className="text-red-400">*</span></label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={paymentForm.amount}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Date <span className="text-red-400">*</span></label>
+                    <input
+                      type="date"
+                      value={paymentForm.payment_date}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Method</label>
+                    <select
+                      value={paymentForm.payment_method}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, payment_method: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="payid">PayID</option>
+                      <option value="cash">Cash</option>
+                      <option value="credit_card">Credit Card</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Account</label>
+                    <select
+                      value={paymentForm.account_source_id}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, account_source_id: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                    >
+                      <option value="">— Unassigned —</option>
+                      {accountOptions
+                        .filter((option) => option.accountType === 'bank_account')
+                        .map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
+                    <input
+                      value={paymentForm.notes}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
+                      placeholder="Optional note about this payment…"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-4">
+                  <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                  <button onClick={handleSavePayment} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : editingPayment ? 'Save Changes' : 'Record Payment'}</button>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
             <button
               onClick={() => setShowLegacyPaymentSection((prev) => !prev)}
@@ -3502,104 +3860,6 @@ export default function AdminBudgetPage() {
                 fetchData();
               }}
             />
-          )}
-
-          {showPaymentForm && (
-            <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-lg p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-brand-cream">{editingPayment ? 'Edit Member Payment' : 'Record Member Payment'}</h3>
-                <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="text-brand-cream/40 hover:text-brand-cream">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Member</label>
-                  <select
-                    value={paymentForm.member_id}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, member_id: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  >
-                    <option value="">— Select member —</option>
-                    {memberPaymentSummary.length > 0
-                      ? memberPaymentSummary.map((m) => (
-                          <option key={m.member_id} value={m.member_id}>
-                            {getMemberListName(m)}
-                          </option>
-                        ))
-                      : tripMembers.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.nickname || m.full_name || m.id}
-                          </option>
-                        ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={paymentForm.amount}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Date</label>
-                  <input
-                    type="date"
-                    value={paymentForm.payment_date}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Method</label>
-                  <select
-                    value={paymentForm.payment_method}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, payment_method: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  >
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="payid">PayID</option>
-                    <option value="cash">Cash</option>
-                    <option value="credit_card">Credit Card</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Payment Account</label>
-                  <select
-                    value={paymentForm.account_source_id}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, account_source_id: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  >
-                    <option value="">— Unassigned —</option>
-                    {accountOptions
-                      .filter((option) => option.accountType === 'bank_account')
-                      .map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
-                  <input
-                    value={paymentForm.notes}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                    className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 mt-4">
-                <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                <button onClick={handleSavePayment} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : editingPayment ? 'Save Changes' : 'Record Payment'}</button>
-              </div>
-            </div>
           )}
 
           {/* Member Collections Status */}
@@ -3801,41 +4061,111 @@ export default function AdminBudgetPage() {
                               <td colSpan={6} className="px-6 py-4">
                                 {memberTransactions.length === 0 ? (
                                   <p className="text-sm text-brand-cream/40">No transactions recorded for this member.</p>
-                                ) : (
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                      <thead>
-                                        <tr className="text-brand-cream/40 uppercase text-xs">
-                                          <th className="px-3 py-2 text-left font-semibold">Date</th>
-                                          <th className="px-3 py-2 text-left font-semibold">Amount</th>
-                                          <th className="px-3 py-2 text-left font-semibold">Method</th>
-                                          <th className="px-3 py-2 text-left font-semibold">Notes</th>
-                                          <th className="px-3 py-2 text-left font-semibold">Actions</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-brand-tan/10">
-                                        {memberTransactions.map((payment) => (
-                                          <tr key={payment.id}>
-                                            <td className="px-3 py-2 text-brand-cream/70">{fmtShort(payment.payment_date)}</td>
-                                            <td className="px-3 py-2 font-semibold text-green-400">{fmt(payment.amount)}</td>
-                                            <td className="px-3 py-2 text-brand-cream/50 capitalize">{(payment.payment_method ?? '—').replace('_', ' ')}</td>
-                                            <td className="px-3 py-2 text-brand-cream/50">{getTransactionNoteText(payment.notes) || '—'}</td>
-                                            <td className="px-3 py-2">
-                                              <div className="flex items-center gap-2">
-                                                <button onClick={() => handleEditPayment(payment)} className="p-1 text-brand-cream/40 hover:text-brand-tan" title="Edit payment">
-                                                  <Edit2 className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleDeletePayment(payment.id)} className="p-1 text-brand-cream/40 hover:text-red-400" title="Delete payment">
-                                                  <Trash2 className="w-4 h-4" />
-                                                </button>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
+                                ) : (() => {
+                                  const memberSelectedIds = memberTransactions.map((p) => p.id).filter((id) => selectedPaymentIds.has(id));
+                                  const allChecked = memberTransactions.length > 0 && memberSelectedIds.length === memberTransactions.length;
+                                  const someChecked = memberSelectedIds.length > 0 && !allChecked;
+                                  return (
+                                    <div>
+                                      {/* Bulk toolbar */}
+                                      {memberSelectedIds.length > 0 && (
+                                        <div className="flex items-center gap-3 mb-2 px-1">
+                                          <span className="text-xs text-brand-cream/50">{memberSelectedIds.length} selected</span>
+                                          <button
+                                            onClick={handleBulkDeletePayments}
+                                            disabled={bulkDeleting}
+                                            className="flex items-center gap-1.5 px-3 py-1 bg-red-900/30 border border-red-600/40 text-red-400 hover:bg-red-900/50 rounded-lg text-xs font-semibold disabled:opacity-50"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            {bulkDeleting ? 'Deleting…' : `Delete ${memberSelectedIds.length}`}
+                                          </button>
+                                          <button
+                                            onClick={() => setSelectedPaymentIds((prev) => { const next = new Set(prev); memberTransactions.forEach((p) => next.delete(p.id)); return next; })}
+                                            className="text-xs text-brand-cream/40 hover:text-brand-cream/70"
+                                          >
+                                            Clear
+                                          </button>
+                                        </div>
+                                      )}
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                          <thead>
+                                            <tr className="text-brand-cream/40 uppercase text-xs">
+                                              <th className="px-3 py-2 w-8">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={allChecked}
+                                                  ref={(el) => { if (el) el.indeterminate = someChecked; }}
+                                                  onChange={(e) => {
+                                                    setSelectedPaymentIds((prev) => {
+                                                      const next = new Set(prev);
+                                                      memberTransactions.forEach((p) => e.target.checked ? next.add(p.id) : next.delete(p.id));
+                                                      return next;
+                                                    });
+                                                  }}
+                                                  className="accent-brand-tan cursor-pointer"
+                                                />
+                                              </th>
+                                              <th className="px-3 py-2 text-left font-semibold">Date</th>
+                                              <th className="px-3 py-2 text-left font-semibold">Amount</th>
+                                              <th className="px-3 py-2 text-left font-semibold">Type</th>
+                                              <th className="px-3 py-2 text-left font-semibold">Method</th>
+                                              <th className="px-3 py-2 text-left font-semibold">Notes</th>
+                                              <th className="px-3 py-2 text-left font-semibold">Actions</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-brand-tan/10">
+                                            {memberTransactions.map((payment) => {
+                                              const isChecked = selectedPaymentIds.has(payment.id);
+                                              const typeLabel = getPaymentTypeLabel(payment.notes);
+                                              return (
+                                                <tr key={payment.id} className={isChecked ? 'bg-brand-tan/5' : ''}>
+                                                  <td className="px-3 py-2">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isChecked}
+                                                      onChange={(e) => {
+                                                        setSelectedPaymentIds((prev) => {
+                                                          const next = new Set(prev);
+                                                          e.target.checked ? next.add(payment.id) : next.delete(payment.id);
+                                                          return next;
+                                                        });
+                                                      }}
+                                                      className="accent-brand-tan cursor-pointer"
+                                                    />
+                                                  </td>
+                                                  <td className="px-3 py-2 text-brand-cream/70">{fmtShort(payment.payment_date)}</td>
+                                                  <td className="px-3 py-2 font-semibold text-green-400">{fmt(payment.amount)}</td>
+                                                  <td className="px-3 py-2">
+                                                    {typeLabel ? (
+                                                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-tan/10 text-brand-tan border border-brand-tan/20">
+                                                        {typeLabel}
+                                                      </span>
+                                                    ) : (
+                                                      <span className="text-brand-cream/30">—</span>
+                                                    )}
+                                                  </td>
+                                                  <td className="px-3 py-2 text-brand-cream/50 capitalize">{(payment.payment_method ?? '—').replace('_', ' ')}</td>
+                                                  <td className="px-3 py-2 text-brand-cream/50">{getTransactionNoteText(payment.notes) || '—'}</td>
+                                                  <td className="px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                      <button onClick={() => handleEditPayment(payment)} className="p-1 text-brand-cream/40 hover:text-brand-tan" title="Edit payment">
+                                                        <Edit2 className="w-4 h-4" />
+                                                      </button>
+                                                      <button onClick={() => handleDeletePayment(payment.id)} className="p-1 text-brand-cream/40 hover:text-red-400" title="Delete payment">
+                                                        <Trash2 className="w-4 h-4" />
+                                                      </button>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                           )}

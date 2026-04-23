@@ -89,11 +89,18 @@ export async function GET(request: NextRequest, { params }: Params) {
       expenseList = hasAdminBudgetAccess ? (expenses ?? []) : [];
 
       for (const e of expenses ?? []) {
+        // Exclude internal transfers — they are not real expenditure
+        const isTransfer = (() => {
+          if (!e.notes) return false;
+          try { return Boolean((JSON.parse(e.notes) as { transfer_link_id?: unknown }).transfer_link_id); } catch { return false; }
+        })();
         const amountAud = Math.abs(toNumber(e.amount_aud));
-        totalSpentAud += amountAud;
-        const key = e.category_id ?? '__uncategorised__';
-        expensesByCategory[key] = (expensesByCategory[key] ?? 0) + amountAud;
-        if (!e.reconciled && e.source === 'manual') unreconciled_count++;
+        if (!isTransfer) {
+          totalSpentAud += amountAud;
+          const key = e.category_id ?? '__uncategorised__';
+          expensesByCategory[key] = (expensesByCategory[key] ?? 0) + amountAud;
+        }
+        if (!e.reconciled && e.source === 'manual' && !isTransfer) unreconciled_count++;
       }
     }
 
@@ -117,7 +124,14 @@ export async function GET(request: NextRequest, { params }: Params) {
         .eq('trip_id', tripId)
         .order('income_date', { ascending: false });
       manualIncomeEntries = incomeData ?? [];
-      totalManualIncome = manualIncomeEntries.reduce((s: number, e: any) => s + toNumber(e.amount_aud), 0);
+      totalManualIncome = manualIncomeEntries.reduce((s: number, e: any) => {
+        // Exclude transfer income legs — they are not real income
+        const isTransfer = e.category === 'transfer' || (() => {
+          if (!e.notes) return false;
+          try { return Boolean((JSON.parse(e.notes) as { transfer_link_id?: unknown }).transfer_link_id); } catch { return false; }
+        })();
+        return isTransfer ? s : s + toNumber(e.amount_aud);
+      }, 0);
     }
 
     const totalIncomeAud = totalCollectedFromMembers + totalManualIncome;

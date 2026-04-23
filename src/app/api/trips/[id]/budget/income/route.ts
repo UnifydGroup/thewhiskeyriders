@@ -3,6 +3,19 @@ import { verifyRole, errorResponse, successResponse, ApiErrors, getJsonBody, sup
 
 type Params = { params: Promise<{ id: string }> };
 
+const parseTransferNoteMeta = (rawNotes: unknown): { transfer_link_id: string | null; transfer_direction: 'in' | 'out' | null } => {
+  if (typeof rawNotes !== 'string' || !rawNotes.trim()) return { transfer_link_id: null, transfer_direction: null };
+  try {
+    const parsed = JSON.parse(rawNotes) as { transfer_link_id?: unknown; transfer_direction?: unknown };
+    return {
+      transfer_link_id: typeof parsed.transfer_link_id === 'string' ? parsed.transfer_link_id : null,
+      transfer_direction: parsed.transfer_direction === 'in' || parsed.transfer_direction === 'out' ? parsed.transfer_direction : null,
+    };
+  } catch {
+    return { transfer_link_id: null, transfer_direction: null };
+  }
+};
+
 // GET /api/trips/[id]/budget/income — all income entries + member payments
 export async function GET(request: NextRequest, { params }: Params) {
   try {
@@ -53,13 +66,24 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!description || amount_aud === undefined || !income_date) {
       return errorResponse({ code: 'VALIDATION_ERROR', message: 'description, amount_aud and income_date are required', status: 400 });
     }
+    const parsedAmountAud = Number(amount_aud);
+    const isCurrencyChange = category === 'currency_change';
+    if (!Number.isFinite(parsedAmountAud) || parsedAmountAud === 0 || (!isCurrencyChange && parsedAmountAud < 0)) {
+      return errorResponse({ code: 'VALIDATION_ERROR', message: isCurrencyChange ? 'amount_aud must be non-zero' : 'amount_aud must be greater than zero', status: 400 });
+    }
+    if (category === 'transfer') {
+      const transferMeta = parseTransferNoteMeta(notes);
+      if (!transferMeta.transfer_link_id || transferMeta.transfer_direction !== 'in') {
+        return errorResponse({ code: 'VALIDATION_ERROR', message: 'transfer income must include linked transfer metadata', status: 400 });
+      }
+    }
 
     const { data, error } = await supabase
       .from('trip_income_entries')
       .insert({
         trip_id: tripId,
         description,
-        amount_aud: Number(amount_aud),
+        amount_aud: parsedAmountAud,
         income_date,
         category: category ?? 'other',
         member_id: member_id ?? null,
@@ -123,7 +147,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const updateData: Record<string, unknown> = {};
 
     if (body.description !== undefined) updateData.description = body.description;
-    if (body.amount_aud !== undefined) updateData.amount_aud = Number(body.amount_aud);
+    if (body.amount_aud !== undefined) {
+      const parsedAmountAud = Number(body.amount_aud);
+      const updatingCategory = body.category ?? null;
+      const isCurrencyChangeUpdate = updatingCategory === 'currency_change';
+      if (!Number.isFinite(parsedAmountAud) || parsedAmountAud === 0 || (!isCurrencyChangeUpdate && parsedAmountAud < 0)) {
+        return errorResponse({ code: 'VALIDATION_ERROR', message: isCurrencyChangeUpdate ? 'amount_aud must be non-zero' : 'amount_aud must be greater than zero', status: 400 });
+      }
+      updateData.amount_aud = parsedAmountAud;
+    }
     if (body.income_date !== undefined) updateData.income_date = body.income_date;
     if (body.category !== undefined) updateData.category = body.category ?? 'other';
     if (body.member_id !== undefined) updateData.member_id = body.member_id || null;

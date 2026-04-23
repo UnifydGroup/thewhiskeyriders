@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: 'THE WHISKEY RIDERS',
   description: 'Private members portal for Whiskey Riders motorcycle adventures',
   icons: {
-    icon: '/6.png',
+    icon: '/5.png',
   },
 };
 

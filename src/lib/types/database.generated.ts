@@ -983,7 +983,9 @@ export type Database = {
           background_position_y: number
           background_video_url: string | null
           background_zoom: number
+          email_footer_image_url: string | null
           email_footer_text: string
+          email_header_image_url: string | null
           email_header_tagline: string
           email_header_title: string
           id: string
@@ -1000,7 +1002,9 @@ export type Database = {
           background_position_y?: number
           background_video_url?: string | null
           background_zoom?: number
+          email_footer_image_url?: string | null
           email_footer_text?: string
+          email_header_image_url?: string | null
           email_header_tagline?: string
           email_header_title?: string
           id?: string
@@ -1017,7 +1021,9 @@ export type Database = {
           background_position_y?: number
           background_video_url?: string | null
           background_zoom?: number
+          email_footer_image_url?: string | null
           email_footer_text?: string
+          email_header_image_url?: string | null
           email_header_tagline?: string
           email_header_title?: string
           id?: string
