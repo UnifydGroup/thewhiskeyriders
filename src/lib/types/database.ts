@@ -360,11 +360,11 @@ export interface SiteSettings {
   updated_at: string;
 }
 
-export type ActivityAction = 
-  | 'create' | 'update' | 'delete' | 'view' 
+export type ActivityAction =
+  | 'create' | 'update' | 'delete' | 'view'
   | 'upload' | 'download' | 'login' | 'logout'
   | 'vote' | 'comment' | 'like' | 'bulkupload'
-  | 'interact';
+  | 'interact' | 'test_send';
 
 export interface ActivityLog {
   id: string;

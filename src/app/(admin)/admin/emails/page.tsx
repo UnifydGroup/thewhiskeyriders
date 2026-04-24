@@ -42,6 +42,7 @@ import { sanitizeLinkUrl, toEditorHtml } from '@/lib/news/content';
 type Trip = { id: string; name: string; slug: string; status: string };
 type Member = {
   id: string;
+  email: string;
   full_name: string | null;
   nickname: string | null;
   avatar_url: string | null;
@@ -645,6 +646,12 @@ export default function AdminEmailsPage() {
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
   const [confirmSend, setConfirmSend] = useState<Campaign | null>(null);
 
+  // Test send state
+  const [testSendModal, setTestSendModal] = useState<Campaign | null>(null);
+  const [testMemberIds, setTestMemberIds] = useState<string[]>([]);
+  const [testMemberSearch, setTestMemberSearch] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+
   // Template state
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateForm, setTemplateForm] = useState(emptyTemplateForm);
@@ -860,6 +867,37 @@ export default function AdminEmailsPage() {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to send campaign' });
     } finally {
       setSendingId(null);
+    }
+  };
+
+  const openTestSendModal = (campaign: Campaign) => {
+    setTestSendModal(campaign);
+    setTestMemberIds([]);
+    setTestMemberSearch('');
+  };
+
+  const handleTestSend = async () => {
+    if (!testSendModal || testMemberIds.length === 0) return;
+    try {
+      setSendingTest(true);
+      const token = await getAccessToken();
+      const res = await fetch(`/api/emails/${testSendModal.id}/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_ids: testMemberIds }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to send test');
+      const { sent, failed, attempted } = payload.data || { sent: 0, failed: 0, attempted: 0 };
+      setMessage({
+        type: failed > 0 && sent === 0 ? 'error' : 'success',
+        text: `Test sent to ${sent} of ${attempted} member${attempted !== 1 ? 's' : ''}.${failed > 0 ? ` ${failed} failed.` : ''}`,
+      });
+      setTestSendModal(null);
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to send test email' });
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -1281,6 +1319,10 @@ export default function AdminEmailsPage() {
     !memberSearch.trim() || getMemberDisplayName(m).toLowerCase().includes(memberSearch.toLowerCase())
   );
 
+  const filteredTestMembers = members.filter(m =>
+    !testMemberSearch.trim() || getMemberDisplayName(m).toLowerCase().includes(testMemberSearch.toLowerCase())
+  );
+
   const filteredTemplatePicker = templates.filter(t =>
     !templatePickerSearch.trim() ||
     [t.name, t.subject, t.description].some(s => s.toLowerCase().includes(templatePickerSearch.toLowerCase()))
@@ -1422,6 +1464,121 @@ export default function AdminEmailsPage() {
                   <Button onClick={() => handleSendCampaign(confirmSend)} isLoading={sendingId === confirmSend.id}>
                     <Send className="w-4 h-4" /> Yes, Send Now
                   </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Test Send Modal ─────────────────────────────────────────────── */}
+          {testSendModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+              <div className="bg-[#1a1a1a] border border-brand-brown/30 rounded-xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Send className="w-5 h-5 text-violet-400 shrink-0" />
+                    <h2 className="text-lg font-semibold text-brand-cream">Send Test Email</h2>
+                  </div>
+                  <button type="button" onClick={() => setTestSendModal(null)} className="text-brand-cream/50 hover:text-brand-cream">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="rounded-lg border border-violet-700/30 bg-violet-900/15 px-4 py-3 text-sm text-violet-300/90">
+                  A copy of <strong className="text-violet-200">{testSendModal.subject}</strong> will be sent with a{' '}
+                  <code className="text-[11px] bg-violet-900/40 px-1.5 py-0.5 rounded">[TEST]</code> prefix and a preview banner.
+                  Campaign status stays draft and no deliveries are recorded.
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-brand-cream/90">Send to</p>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-brand-cream/50 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={testMemberSearch}
+                      onChange={e => setTestMemberSearch(e.target.value)}
+                      placeholder="Search riders..."
+                      className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 py-2 pl-9 pr-4 text-sm text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-brand-brown/20 bg-brand-dark-grey/30 p-2 space-y-0.5">
+                    {filteredTestMembers.length === 0 && (
+                      <p className="text-xs text-brand-cream/50 py-2 px-1">No riders found.</p>
+                    )}
+                    {filteredTestMembers.map(member => {
+                      const sel = testMemberIds.includes(member.id);
+                      return (
+                        <label
+                          key={member.id}
+                          className="flex items-center justify-between gap-3 rounded px-2 py-1.5 hover:bg-brand-dark-grey/60 cursor-pointer"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm text-brand-cream/90 truncate">{getMemberDisplayName(member)}</p>
+                            {member.email && <p className="text-xs text-brand-cream/45 truncate">{member.email}</p>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setTestMemberIds(prev =>
+                                sel ? prev.filter(id => id !== member.id) : [...prev, member.id]
+                              )
+                            }
+                            className={`h-5 w-5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                              sel
+                                ? 'border-violet-500 bg-violet-600 text-white'
+                                : 'border-brand-brown/30 hover:border-violet-500/50'
+                            }`}
+                          >
+                            {sel && <Check className="w-3 h-3" />}
+                          </button>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected chips */}
+                  {testMemberIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {testMemberIds.map(id => {
+                        const m = members.find(x => x.id === id);
+                        if (!m) return null;
+                        return (
+                          <span
+                            key={id}
+                            className="flex items-center gap-1 rounded-full bg-violet-800/40 border border-violet-600/40 px-2.5 py-0.5 text-xs text-violet-200"
+                          >
+                            {getMemberDisplayName(m)}
+                            <button
+                              type="button"
+                              onClick={() => setTestMemberIds(prev => prev.filter(x => x !== id))}
+                              className="text-violet-300/60 hover:text-violet-200"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <p className="text-xs text-brand-cream/45">
+                    {testMemberIds.length === 0
+                      ? 'Select at least one rider above.'
+                      : `${testMemberIds.length} rider${testMemberIds.length !== 1 ? 's' : ''} selected · max 10`}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" onClick={() => setTestSendModal(null)}>Cancel</Button>
+                    <Button
+                      onClick={handleTestSend}
+                      isLoading={sendingTest}
+                      disabled={testMemberIds.length === 0}
+                      className="bg-violet-700 hover:bg-violet-600 border-violet-600"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Send Test
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1627,6 +1784,18 @@ export default function AdminEmailsPage() {
                   <Button onClick={handleCampaignSave} isLoading={campaignSaving} variant="outline">
                     <Check className="w-4 h-4" /> Save Draft
                   </Button>
+                  {editingCampaignId && (() => {
+                    const draft = campaigns.find(c => c.id === editingCampaignId);
+                    return draft ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() => openTestSendModal(draft)}
+                        className="border border-violet-700/40 text-violet-300 hover:bg-violet-900/30 hover:text-violet-200"
+                      >
+                        <Send className="w-4 h-4" /> Send Test
+                      </Button>
+                    ) : null;
+                  })()}
                   {editingCampaignId && (
                     <Button variant="ghost" onClick={resetCampaignForm}><X className="w-4 h-4" /> Cancel</Button>
                   )}
@@ -1662,6 +1831,14 @@ export default function AdminEmailsPage() {
                       <div className="flex flex-wrap gap-2">
                         <Button size="sm" onClick={() => setConfirmSend(c)} isLoading={sendingId === c.id}>
                           <Send className="w-3.5 h-3.5" /> Send Now
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openTestSendModal(c)}
+                          className="border border-violet-700/40 text-violet-300 hover:bg-violet-900/30 hover:text-violet-200"
+                        >
+                          <Send className="w-3.5 h-3.5" /> Test
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => handleCampaignEdit(c)}>
                           <Edit2 className="w-3.5 h-3.5" /> Edit

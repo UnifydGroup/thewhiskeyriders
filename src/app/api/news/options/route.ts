@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
         .order('start_date', { ascending: false }),
       supabase
         .from('profiles')
-        .select('id, full_name, nickname, avatar_url, status')
+        .select('id, email, full_name, nickname, avatar_url, status')
         .eq('status', 'active')
         .order('nickname', { ascending: true }),
     ]);
