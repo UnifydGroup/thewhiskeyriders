@@ -35,6 +35,7 @@ export interface RichTextEditorHandle {
   insertLink: (url: string, text?: string) => void;
   insertHtmlSnippet: (html: string) => void;
   applyStylesToClosest: (selector: string, styles: Record<string, string>) => boolean;
+  setElementHref: (selector: string, href: string) => boolean;
 }
 
 interface RichTextEditorProps {
@@ -157,6 +158,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     ref
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
+    // Saved range lets applyStylesToClosest / setElementHref work even after the
+    // editor loses focus (e.g. when the user clicks an "Apply" button outside it).
+    const savedRangeRef = useRef<Range | null>(null);
     const [textColor, setTextColor] = useState('#ffffff');
     const [fontSize, setFontSize] = useState('');
     const normalizedValue = sanitizeEditorSurfaceHtml(toEditorHtml(value || ''));
@@ -203,13 +207,24 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       refreshValue();
     }, [refreshValue]);
 
+    /** Resolve anchor node from active selection, falling back to last saved range. */
+    const resolveAnchorNode = useCallback((): Node | null => {
+      if (typeof window === 'undefined') return null;
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        return selection.anchorNode;
+      }
+      if (savedRangeRef.current) {
+        return savedRangeRef.current.startContainer;
+      }
+      return null;
+    }, []);
+
     const applyStylesToClosest = useCallback((selector: string, styles: Record<string, string>) => {
       const editor = editorRef.current;
       if (!editor || typeof window === 'undefined') return false;
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return false;
 
-      const anchor = selection.anchorNode;
+      const anchor = resolveAnchorNode();
       if (!anchor) return false;
 
       const startEl =
@@ -228,7 +243,39 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
       refreshValue();
       return true;
-    }, [refreshValue]);
+    }, [refreshValue, resolveAnchorNode]);
+
+    /** Set the href of the closest matching element to the cursor (or the first in the editor). */
+    const setElementHref = useCallback((selector: string, href: string) => {
+      const editor = editorRef.current;
+      if (!editor || typeof window === 'undefined') return false;
+
+      const anchor = resolveAnchorNode();
+      if (anchor) {
+        const startEl =
+          anchor.nodeType === Node.ELEMENT_NODE
+            ? (anchor as Element)
+            : anchor.parentElement;
+        if (startEl) {
+          const closest = startEl.closest(selector);
+          if (closest instanceof HTMLAnchorElement && editor.contains(closest)) {
+            closest.href = href;
+            refreshValue();
+            return true;
+          }
+        }
+      }
+
+      // Fallback: first matching element in the entire editor
+      const fallback = editor.querySelector(selector);
+      if (fallback instanceof HTMLAnchorElement) {
+        fallback.href = href;
+        refreshValue();
+        return true;
+      }
+
+      return false;
+    }, [refreshValue, resolveAnchorNode]);
 
     const insertImage = useCallback((url: string, alt = '') => {
       const safeUrl = sanitizeLinkUrl(url);
@@ -269,7 +316,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       insertLink,
       insertHtmlSnippet: insertHtml,
       applyStylesToClosest,
-    }), [insertImage, insertLink, insertHtml, applyStylesToClosest]);
+      setElementHref,
+    }), [insertImage, insertLink, insertHtml, applyStylesToClosest, setElementHref]);
 
     /** Apply font size to selected text via a styled span.
      *  Falls back to appending a span if surroundContents throws (cross-element selection). */
@@ -452,7 +500,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             contentEditable
             suppressContentEditableWarning
             onInput={refreshValue}
-            onBlur={refreshValue}
+            onBlur={() => {
+              // Save the current selection so Apply-style controls work after focus leaves
+              if (typeof window !== 'undefined') {
+                const sel = window.getSelection();
+                savedRangeRef.current = (sel && sel.rangeCount > 0)
+                  ? sel.getRangeAt(0).cloneRange()
+                  : null;
+              }
+              refreshValue();
+            }}
             className="min-h-[220px] w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-3 text-brand-cream focus:border-brand-brown focus:outline-none [&_a]:text-brand-brown [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-brand-brown/60 [&_blockquote]:pl-3 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-md [&_img]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:my-2"
           />
         </div>

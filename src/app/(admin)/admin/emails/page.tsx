@@ -421,17 +421,18 @@ function BlockInsertBar({
 
 /** Color styling controls */
 function ColorControls({
-  emailBg, sectionBg, blockBg, buttonBg, buttonTextColor,
-  onEmailBg, onSectionBg, onBlockBg, onButtonBg, onButtonTextColor,
-  onApplyEmail, onApplySection, onApplyBlock, onApplyButton, onApplyButtonText,
+  emailBg, sectionBg, blockBg, buttonBg, buttonTextColor, buttonLink,
+  onEmailBg, onSectionBg, onBlockBg, onButtonBg, onButtonTextColor, onButtonLink,
+  onApplyEmail, onApplySection, onApplyBlock, onApplyButton, onApplyButtonText, onApplyButtonLink,
 }: {
-  emailBg: string; sectionBg: string; blockBg: string; buttonBg: string; buttonTextColor: string;
+  emailBg: string; sectionBg: string; blockBg: string; buttonBg: string; buttonTextColor: string; buttonLink: string;
   onEmailBg: (v: string) => void; onSectionBg: (v: string) => void;
   onBlockBg: (v: string) => void; onButtonBg: (v: string) => void; onButtonTextColor: (v: string) => void;
+  onButtonLink: (v: string) => void;
   onApplyEmail: () => void; onApplySection: () => void;
-  onApplyBlock: () => void; onApplyButton: () => void; onApplyButtonText: () => void;
+  onApplyBlock: () => void; onApplyButton: () => void; onApplyButtonText: () => void; onApplyButtonLink: () => void;
 }) {
-  const row = (label: string, color: string, onChange: (v: string) => void, onApply: () => void) => (
+  const colorRow = (label: string, color: string, onChange: (v: string) => void, onApply: () => void) => (
     <div className="flex items-center gap-2">
       <input
         type="color" value={color} onChange={e => onChange(e.target.value)}
@@ -449,14 +450,31 @@ function ColorControls({
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {row('Email Background', emailBg, onEmailBg, onApplyEmail)}
-        {row('Section Background', sectionBg, onSectionBg, onApplySection)}
-        {row('Block Background', blockBg, onBlockBg, onApplyBlock)}
-        {row('Button Background', buttonBg, onButtonBg, onApplyButton)}
+        {colorRow('Email Background', emailBg, onEmailBg, onApplyEmail)}
+        {colorRow('Section Background', sectionBg, onSectionBg, onApplySection)}
+        {colorRow('Block Background', blockBg, onBlockBg, onApplyBlock)}
+        {colorRow('Button Background', buttonBg, onButtonBg, onApplyButton)}
       </div>
-      <div className="border-t border-brand-brown/10 pt-2">
-        {row('Button Text Color', buttonTextColor, onButtonTextColor, onApplyButtonText)}
-        <p className="text-[11px] text-brand-cream/35 mt-1">Place cursor inside the button, then click Apply.</p>
+      <div className="border-t border-brand-brown/10 pt-2 space-y-2">
+        {colorRow('Button Text Color', buttonTextColor, onButtonTextColor, onApplyButtonText)}
+        {/* Button link URL */}
+        <div className="flex items-center gap-2">
+          <input
+            type="url"
+            value={buttonLink}
+            onChange={e => onButtonLink(e.target.value)}
+            placeholder="https://..."
+            className="flex-1 min-w-0 h-7 rounded border border-brand-brown/20 bg-brand-dark-grey/50 px-2 text-xs text-brand-cream/80 placeholder:text-brand-cream/30 focus:border-brand-brown focus:outline-none"
+          />
+          <span className="text-xs text-brand-cream/50 shrink-0">Button URL</span>
+          <button
+            type="button" onClick={onApplyButtonLink}
+            className="px-2 py-0.5 rounded text-[11px] border border-brand-brown/30 text-brand-cream/70 hover:text-brand-cream hover:border-brand-brown/50 transition-colors shrink-0"
+          >
+            Apply
+          </button>
+        </div>
+        <p className="text-[11px] text-brand-cream/35">Click inside the button to target it, then Apply — or Apply will update the first button found.</p>
       </div>
     </div>
   );
@@ -683,6 +701,7 @@ export default function AdminEmailsPage() {
   const [richBlockBgColor, setRichBlockBgColor] = useState('#171717');
   const [richButtonBgColor, setRichButtonBgColor] = useState('#B5621E');
   const [richButtonTextColor, setRichButtonTextColor] = useState('#ffffff');
+  const [richButtonLink, setRichButtonLink] = useState('https://www.thewhiskeyriders.com');
 
   // Assets
   const [emailAssets, setEmailAssets] = useState<EmailAsset[]>([]);
@@ -1215,8 +1234,14 @@ export default function AdminEmailsPage() {
     label: string
   ) => {
     const updated = editorRef.current?.applyStylesToClosest(selector, styles);
-    if (!updated) setMessage({ type: 'error', text: `Place your cursor inside a ${label} first.` });
-    else setMessage({ type: 'success', text: `${label} background updated.` });
+    if (!updated) setMessage({ type: 'error', text: `Place your cursor inside a ${label} first, then click Apply.` });
+    else setMessage({ type: 'success', text: `${label} style updated.` });
+  };
+
+  const applyButtonHref = (editorRef: React.RefObject<RichTextEditorHandle | null>, href: string) => {
+    const updated = editorRef.current?.setElementHref('[data-email-button="true"]', href);
+    if (!updated) setMessage({ type: 'error', text: 'No button found in this email. Add a Button CTA block first.' });
+    else setMessage({ type: 'success', text: 'Button link updated.' });
   };
 
   // ─── Assets ───────────────────────────────────────────────────────────────
@@ -1692,10 +1717,10 @@ export default function AdminEmailsPage() {
                       <ColorControls
                         emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
                         blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
-                        buttonTextColor={richButtonTextColor}
+                        buttonTextColor={richButtonTextColor} buttonLink={richButtonLink}
                         onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
                         onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
-                        onButtonTextColor={setRichButtonTextColor}
+                        onButtonTextColor={setRichButtonTextColor} onButtonLink={setRichButtonLink}
                         onApplyEmail={() => {
                           setCampaignForm(p => ({ ...p, body: applyRichEmailCanvasBackground(p.body, richEmailBgColor) }));
                           setMessage({ type: 'success', text: 'Email background updated.' });
@@ -1704,6 +1729,7 @@ export default function AdminEmailsPage() {
                         onApplyBlock={() => applyClosestStyle(campaignEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
                         onApplyButton={() => applyClosestStyle(campaignEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
                         onApplyButtonText={() => applyClosestStyle(campaignEditorRef, '[data-email-button="true"]', { 'color': richButtonTextColor }, 'button text')}
+                        onApplyButtonLink={() => applyButtonHref(campaignEditorRef, richButtonLink)}
                       />
                     </CollapsibleSection>
                   )}
@@ -2042,15 +2068,16 @@ export default function AdminEmailsPage() {
                       <ColorControls
                         emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
                         blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
-                        buttonTextColor={richButtonTextColor}
+                        buttonTextColor={richButtonTextColor} buttonLink={richButtonLink}
                         onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
                         onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
-                        onButtonTextColor={setRichButtonTextColor}
+                        onButtonTextColor={setRichButtonTextColor} onButtonLink={setRichButtonLink}
                         onApplyEmail={applyEmailBg}
                         onApplySection={() => applyClosestStyle(templateEditorRef, '[data-email-section="true"]', { 'background-color': richSectionBgColor }, 'section')}
                         onApplyBlock={() => applyClosestStyle(templateEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
                         onApplyButton={() => applyClosestStyle(templateEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
                         onApplyButtonText={() => applyClosestStyle(templateEditorRef, '[data-email-button="true"]', { 'color': richButtonTextColor }, 'button text')}
+                        onApplyButtonLink={() => applyButtonHref(templateEditorRef, richButtonLink)}
                       />
                     </CollapsibleSection>
                   )}
