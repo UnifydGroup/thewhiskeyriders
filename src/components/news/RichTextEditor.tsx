@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from 'react';
 import {
   AlignCenter,
@@ -22,6 +23,7 @@ import {
   ListOrdered,
   Pilcrow,
   Quote,
+  Strikethrough,
   Unlink,
   Underline,
 } from 'lucide-react';
@@ -138,12 +140,25 @@ function sanitizeEditorSurfaceHtml(raw: string): string {
   return wrapper.innerHTML;
 }
 
+const FONT_SIZES = [
+  { label: '12px', value: '12px' },
+  { label: '14px', value: '14px' },
+  { label: '16px', value: '16px' },
+  { label: '18px', value: '18px' },
+  { label: '22px', value: '22px' },
+  { label: '28px', value: '28px' },
+  { label: '36px', value: '36px' },
+  { label: '48px', value: '48px' },
+];
+
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(
   function RichTextEditor(
     { value, onChange, placeholder = 'Write your news update...', onRequestInsertImage },
     ref
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
+    const [textColor, setTextColor] = useState('#ffffff');
+    const [fontSize, setFontSize] = useState('');
     const normalizedValue = sanitizeEditorSurfaceHtml(toEditorHtml(value || ''));
     const isEmpty = !toSearchableNewsText(normalizedValue).trim();
 
@@ -256,6 +271,45 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       applyStylesToClosest,
     }), [insertImage, insertLink, insertHtml, applyStylesToClosest]);
 
+    /** Apply font size to selected text via a styled span.
+     *  Falls back to appending a span if surroundContents throws (cross-element selection). */
+    const applyFontSize = useCallback((size: string) => {
+      const editor = editorRef.current;
+      if (!editor || !size) return;
+      editor.focus();
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
+      const range = selection.getRangeAt(0);
+      if (range.collapsed) return; // nothing selected — no-op rather than silently wrapping empty span
+      try {
+        const span = document.createElement('span');
+        span.style.fontSize = size;
+        span.style.lineHeight = '1.4';
+        range.surroundContents(span);
+      } catch {
+        // selection spans multiple block elements — use execCommand fallback
+        document.execCommand('styleWithCSS', false, 'true');
+        document.execCommand('fontSize', false, '4'); // sets a base size we can find
+        // find the fontSize spans and replace with our px size
+        const nodes = editor.querySelectorAll('[style*="font-size"]');
+        nodes.forEach(n => {
+          (n as HTMLElement).style.fontSize = size;
+        });
+      }
+      refreshValue();
+      setFontSize('');
+    }, [refreshValue]);
+
+    /** Apply foreground colour to selected text. */
+    const applyTextColor = useCallback((color: string) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      document.execCommand('styleWithCSS', false, 'true');
+      document.execCommand('foreColor', false, color);
+      refreshValue();
+    }, [refreshValue]);
+
     const promptInsertLink = () => {
       const provided = window.prompt('Enter link URL (https://...)');
       if (!provided) return;
@@ -284,55 +338,107 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap gap-2 rounded-lg border border-brand-brown/20 bg-brand-dark-grey/20 p-2">
-          <ToolbarButton title="Paragraph" onClick={() => runCommand('formatBlock', 'P')}>
-            <Pilcrow className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Heading 2" onClick={() => runCommand('formatBlock', 'H2')}>
-            <Heading2 className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Heading 3" onClick={() => runCommand('formatBlock', 'H3')}>
-            <Heading3 className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Bold" onClick={() => runCommand('bold')}>
-            <Bold className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Italic" onClick={() => runCommand('italic')}>
-            <Italic className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Underline" onClick={() => runCommand('underline')}>
-            <Underline className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Quote" onClick={() => runCommand('formatBlock', 'BLOCKQUOTE')}>
-            <Quote className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Bulleted list" onClick={() => runCommand('insertUnorderedList')}>
-            <List className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Numbered list" onClick={() => runCommand('insertOrderedList')}>
-            <ListOrdered className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Align left" onClick={() => runCommand('justifyLeft')}>
-            <AlignLeft className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Align center" onClick={() => runCommand('justifyCenter')}>
-            <AlignCenter className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Align right" onClick={() => runCommand('justifyRight')}>
-            <AlignRight className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Insert link" onClick={promptInsertLink}>
-            <LinkIcon className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Remove link" onClick={() => runCommand('unlink')}>
-            <Unlink className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Insert image URL" onClick={promptInsertImage}>
-            <ImageIcon className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton title="Clear formatting" onClick={() => runCommand('removeFormat')}>
-            <Eraser className="w-4 h-4" />
-          </ToolbarButton>
+        <div className="rounded-lg border border-brand-brown/20 bg-brand-dark-grey/20 p-2 space-y-2">
+          {/* Row 1 — block format, inline format, lists, alignment, links, image */}
+          <div className="flex flex-wrap gap-1.5">
+            <ToolbarButton title="Paragraph" onClick={() => runCommand('formatBlock', 'P')}>
+              <Pilcrow className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Heading 2" onClick={() => runCommand('formatBlock', 'H2')}>
+              <Heading2 className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Heading 3" onClick={() => runCommand('formatBlock', 'H3')}>
+              <Heading3 className="w-4 h-4" />
+            </ToolbarButton>
+            <span className="w-px bg-brand-brown/20 self-stretch mx-0.5" />
+            <ToolbarButton title="Bold" onClick={() => runCommand('bold')}>
+              <Bold className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Italic" onClick={() => runCommand('italic')}>
+              <Italic className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Underline" onClick={() => runCommand('underline')}>
+              <Underline className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Strikethrough" onClick={() => runCommand('strikeThrough')}>
+              <Strikethrough className="w-4 h-4" />
+            </ToolbarButton>
+            <span className="w-px bg-brand-brown/20 self-stretch mx-0.5" />
+            <ToolbarButton title="Quote" onClick={() => runCommand('formatBlock', 'BLOCKQUOTE')}>
+              <Quote className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Bulleted list" onClick={() => runCommand('insertUnorderedList')}>
+              <List className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Numbered list" onClick={() => runCommand('insertOrderedList')}>
+              <ListOrdered className="w-4 h-4" />
+            </ToolbarButton>
+            <span className="w-px bg-brand-brown/20 self-stretch mx-0.5" />
+            <ToolbarButton title="Align left" onClick={() => runCommand('justifyLeft')}>
+              <AlignLeft className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Align center" onClick={() => runCommand('justifyCenter')}>
+              <AlignCenter className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Align right" onClick={() => runCommand('justifyRight')}>
+              <AlignRight className="w-4 h-4" />
+            </ToolbarButton>
+            <span className="w-px bg-brand-brown/20 self-stretch mx-0.5" />
+            <ToolbarButton title="Insert link" onClick={promptInsertLink}>
+              <LinkIcon className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Remove link" onClick={() => runCommand('unlink')}>
+              <Unlink className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Insert image URL" onClick={promptInsertImage}>
+              <ImageIcon className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton title="Clear formatting" onClick={() => runCommand('removeFormat')}>
+              <Eraser className="w-4 h-4" />
+            </ToolbarButton>
+          </div>
+
+          {/* Row 2 — font size + text colour */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-brand-brown/15">
+            <span className="text-[11px] text-brand-cream/50 shrink-0">Font size:</span>
+            <select
+              value={fontSize}
+              onChange={e => {
+                const size = e.target.value;
+                setFontSize(size);
+                if (size) applyFontSize(size);
+              }}
+              onMouseDown={e => e.stopPropagation()}
+              className="h-7 rounded border border-brand-brown/20 bg-brand-dark-grey/50 px-1.5 text-xs text-brand-cream/80 focus:border-brand-brown focus:outline-none cursor-pointer"
+            >
+              <option value="">— select —</option>
+              {FONT_SIZES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+
+            <span className="w-px bg-brand-brown/20 self-stretch mx-1" />
+
+            <span className="text-[11px] text-brand-cream/50 shrink-0">Text colour:</span>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="color"
+                value={textColor}
+                onChange={e => setTextColor(e.target.value)}
+                onMouseDown={e => e.stopPropagation()}
+                className="h-7 w-8 rounded border border-brand-brown/20 bg-transparent cursor-pointer p-0.5"
+                title="Pick text colour"
+              />
+              <button
+                type="button"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => applyTextColor(textColor)}
+                className="h-7 px-2 rounded border border-brand-brown/20 bg-brand-dark-grey/40 text-xs text-brand-cream/80 hover:bg-brand-dark-grey/80 hover:text-brand-cream transition-colors"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="relative">

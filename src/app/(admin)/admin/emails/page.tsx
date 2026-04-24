@@ -1181,6 +1181,14 @@ export default function AdminEmailsPage() {
     }));
   }, []);
 
+  const handleReorderCampaignBlock = useCallback((sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setCampaignForm(prev => ({
+      ...prev,
+      body: reorderRichTemplateBlocks(prev.body, sourceId, targetId),
+    }));
+  }, []);
+
   // ─── Color apply ──────────────────────────────────────────────────────────
 
   const applyEmailBg = () => {
@@ -1336,6 +1344,11 @@ export default function AdminEmailsPage() {
   const richTemplateBlocks = useMemo(
     () => templateEditorMode === 'rich' ? getRichTemplateBlocks(templateForm.body) : [],
     [templateEditorMode, templateForm.body]
+  );
+
+  const richCampaignBlocks = useMemo(
+    () => campaignEditorMode === 'rich' ? getRichTemplateBlocks(campaignForm.body) : [],
+    [campaignEditorMode, campaignForm.body]
   );
 
   const drafts = campaigns.filter(c => c.status === 'draft');
@@ -1708,6 +1721,34 @@ export default function AdminEmailsPage() {
                       : 'Visual mode: branded header/footer wrap your content automatically when sent.'}
                   </p>
                 </div>
+
+                {/* Block order (visual mode only) */}
+                {campaignEditorMode === 'rich' && (
+                  <CollapsibleSection title="Block Order (Drag & Drop)" icon={Layout} defaultOpen={richCampaignBlocks.length > 0}>
+                    <BlockOrderPanel
+                      blocks={richCampaignBlocks}
+                      draggingId={draggingBlockId}
+                      dropTargetId={dropTargetBlockId}
+                      onDragStart={id => setDraggingBlockId(id)}
+                      onDragEnter={id => setDropTargetBlockId(id)}
+                      onDragLeave={() => setDropTargetBlockId(null)}
+                      onDrop={targetId => {
+                        if (draggingBlockId) handleReorderCampaignBlock(draggingBlockId, targetId);
+                        setDropTargetBlockId(null);
+                        setDraggingBlockId(null);
+                      }}
+                      onDragEnd={() => { setDraggingBlockId(null); setDropTargetBlockId(null); }}
+                      onMoveUp={index => {
+                        const prev = richCampaignBlocks[index - 1];
+                        if (prev) handleReorderCampaignBlock(richCampaignBlocks[index].id, prev.id);
+                      }}
+                      onMoveDown={index => {
+                        const next = richCampaignBlocks[index + 1];
+                        if (next) handleReorderCampaignBlock(richCampaignBlocks[index].id, next.id);
+                      }}
+                    />
+                  </CollapsibleSection>
+                )}
 
                 {/* Asset library */}
                 <AssetLibraryPanel forTemplate={false} />
