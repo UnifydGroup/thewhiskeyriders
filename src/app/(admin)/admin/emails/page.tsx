@@ -21,6 +21,7 @@ import {
   EyeOff,
   FileText,
   GripVertical,
+  Hash,
   ImagePlus,
   Layout,
   Mail,
@@ -447,6 +448,40 @@ function ColorControls({
       {row('Section Background', sectionBg, onSectionBg, onApplySection)}
       {row('Block Background', blockBg, onBlockBg, onApplyBlock)}
       {row('Button Color', buttonBg, onButtonBg, onApplyButton)}
+    </div>
+  );
+}
+
+/** Personalisation / merge-tag insert panel */
+const MERGE_TAGS = [
+  { label: 'First name', tag: '{{member.first_name}}' },
+  { label: 'Full name',  tag: '{{member.full_name}}' },
+  { label: 'Nickname',   tag: '{{member.nickname}}' },
+  { label: 'Email',      tag: '{{member.email}}' },
+] as const;
+
+function MergeTagsPanel({ onInsert }: { onInsert: (tag: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-brand-cream/50">
+        Click a tag to insert it at the cursor. Each tag is replaced with the recipient&apos;s real value when the email is sent.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {MERGE_TAGS.map(({ label, tag }) => (
+          <button
+            key={tag}
+            type="button"
+            onClick={() => onInsert(tag)}
+            title={label}
+            className="flex items-center gap-1 px-2.5 py-1 rounded border border-amber-700/40 bg-amber-900/20 text-xs text-amber-300/80 hover:bg-amber-800/30 hover:text-amber-200 hover:border-amber-600/60 font-mono transition-colors"
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-brand-cream/35">
+        Falls back gracefully: <span className="font-mono text-amber-400/60">first_name</span> uses the first word of full name, then email prefix if no name is set.
+      </p>
     </div>
   );
 }
@@ -1011,6 +1046,58 @@ export default function AdminEmailsPage() {
     });
   }, [templateEditorMode]);
 
+  // ─── Merge-tag insertion ───────────────────────────────────────────────────
+  // Unlike block insertion, merge tags are inserted inline at the cursor
+  // position. In rich mode we delegate to the editor's insertHtmlSnippet so
+  // the tag lands exactly where the cursor is. In HTML mode we use the same
+  // textarea cursor logic as the block inserters.
+
+  const insertCampaignMergeTag = useCallback((tag: string) => {
+    if (campaignEditorMode === 'rich') {
+      // Insert inline at cursor via the editor's execCommand path
+      campaignEditorRef.current?.insertHtmlSnippet(tag);
+      return;
+    }
+    // HTML textarea: insert at cursor
+    const el = campaignHtmlRef.current;
+    if (!el) { setCampaignForm(p => ({ ...p, body: p.body + tag })); return; }
+    const start = el.selectionStart ?? el.value.length;
+    const end   = el.selectionEnd   ?? start;
+    const next  = start + tag.length;
+    setCampaignForm(p => ({
+      ...p,
+      body: `${p.body.slice(0, start)}${tag}${p.body.slice(end)}`,
+    }));
+    requestAnimationFrame(() => {
+      if (!campaignHtmlRef.current) return;
+      campaignHtmlRef.current.focus();
+      campaignHtmlRef.current.selectionStart = next;
+      campaignHtmlRef.current.selectionEnd   = next;
+    });
+  }, [campaignEditorMode]);
+
+  const insertTemplateMergeTag = useCallback((tag: string) => {
+    if (templateEditorMode === 'rich') {
+      templateEditorRef.current?.insertHtmlSnippet(tag);
+      return;
+    }
+    const el = templateHtmlRef.current;
+    if (!el) { setTemplateForm(p => ({ ...p, body: p.body + tag })); return; }
+    const start = el.selectionStart ?? el.value.length;
+    const end   = el.selectionEnd   ?? start;
+    const next  = start + tag.length;
+    setTemplateForm(p => ({
+      ...p,
+      body: `${p.body.slice(0, start)}${tag}${p.body.slice(end)}`,
+    }));
+    requestAnimationFrame(() => {
+      if (!templateHtmlRef.current) return;
+      templateHtmlRef.current.focus();
+      templateHtmlRef.current.selectionStart = next;
+      templateHtmlRef.current.selectionEnd   = next;
+    });
+  }, [templateEditorMode]);
+
   // Block snippets factory (uses current color state)
   const makeHeroSnippet = () => `<div data-email-section="true" style="background-color:${richSectionBgColor};padding:24px;border-radius:10px;margin:0 0 16px"><h2 style="margin:0 0 10px;color:#f2e8d1;font-size:24px;line-height:1.2">Your Big Update Title</h2><p style="margin:0;color:#c8bfb0;line-height:1.6">Start with a clear summary so riders know exactly what changed.</p></div>`;
   const makeTextSnippet = () => `<div data-email-block="true" style="background-color:${richBlockBgColor};padding:16px 18px;border-radius:8px;margin:0 0 12px"><p style="margin:0;color:#d4c9a8;line-height:1.65">Drop in a focused content block for itinerary notes, reminders, or announcements.</p></div>`;
@@ -1436,6 +1523,11 @@ export default function AdminEmailsPage() {
                     </CollapsibleSection>
                   )}
 
+                  {/* Merge tags — always visible in both modes */}
+                  <CollapsibleSection title="Personalisation" icon={Hash} defaultOpen={false}>
+                    <MergeTagsPanel onInsert={insertCampaignMergeTag} />
+                  </CollapsibleSection>
+
                   {campaignEditorMode === 'rich' ? (
                     <RichTextEditor
                       ref={campaignEditorRef}
@@ -1727,6 +1819,11 @@ export default function AdminEmailsPage() {
                       <p className="text-xs text-brand-cream/45">Tip: place cursor inside a section/block/button before applying a colour.</p>
                     </CollapsibleSection>
                   )}
+
+                  {/* Merge tags — always visible in both modes */}
+                  <CollapsibleSection title="Personalisation" icon={Hash} defaultOpen={false}>
+                    <MergeTagsPanel onInsert={insertTemplateMergeTag} />
+                  </CollapsibleSection>
 
                   {templateEditorMode === 'rich' ? (
                     <RichTextEditor

@@ -45,6 +45,25 @@ function getRecipientName(r: MemberRecipient): string {
   return r.nickname?.trim() || r.full_name?.trim() || r.email;
 }
 
+/**
+ * Replace {{member.*}} merge tags in email body with recipient-specific values.
+ * Applied per-recipient before the email is built and sent.
+ */
+function personaliseMergeTags(body: string, recipient: MemberRecipient): string {
+  const firstName =
+    recipient.full_name?.split(' ')[0]?.trim() ||
+    recipient.nickname?.trim() ||
+    recipient.email.split('@')[0];
+  const fullName = recipient.full_name?.trim() || firstName;
+  const nickname = recipient.nickname?.trim() || firstName;
+
+  return body
+    .replace(/\{\{member\.first_name\}\}/gi, firstName)
+    .replace(/\{\{member\.full_name\}\}/gi, fullName)
+    .replace(/\{\{member\.nickname\}\}/gi, nickname)
+    .replace(/\{\{member\.email\}\}/gi, recipient.email);
+}
+
 function isStandaloneEmailHtml(content: string): boolean {
   const lower = (content || '').toLowerCase();
   return (
@@ -180,14 +199,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     for (const recipient of recipients) {
       const name = getRecipientName(recipient);
-      const standaloneHtml = isStandaloneEmailHtml(campaign.body);
+      const personalisedBody = personaliseMergeTags(campaign.body, recipient);
+      const standaloneHtml = isStandaloneEmailHtml(personalisedBody);
 
       const html = standaloneHtml
-        ? campaign.body
+        ? personalisedBody
         : buildEmailHtml({
             recipientName: name,
             subject: campaign.subject,
-            bodyHtml: campaign.body,
+            bodyHtml: personalisedBody,
             ctaUrl: baseUrl ? `${baseUrl}/dashboard` : undefined,
             ctaLabel: 'Visit the Portal',
             headerTitle: emailHeader.email_header_title,
@@ -199,7 +219,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
       const text = buildEmailText({
         recipientName: name,
-        bodyText: campaign.body.replace(/<[^>]+>/g, '').trim(),
+        bodyText: personalisedBody.replace(/<[^>]+>/g, '').trim(),
         ctaUrl: standaloneHtml ? undefined : (baseUrl ? `${baseUrl}/dashboard` : undefined),
         ctaLabel: standaloneHtml ? undefined : 'Visit the Portal',
       });

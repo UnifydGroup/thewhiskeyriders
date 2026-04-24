@@ -507,6 +507,8 @@ export default function AdminBudgetPage() {
   const [memberPayments, setMemberPayments] = useState<MemberPayment[]>([]);
   const [paymentSchedule, setPaymentSchedule] = useState<PaymentMilestone[]>([]);
   const [memberPaymentSummary, setMemberPaymentSummary] = useState<MemberPaymentSummary[]>([]);
+  const [memberSortKey, setMemberSortKey] = useState<'name' | 'paid' | 'remaining'>('name');
+  const [memberSortDir, setMemberSortDir] = useState<'asc' | 'desc'>('asc');
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [memberBreakdown, setMemberBreakdown] = useState<MemberBreakdown[]>([]);
   const [tripMembers, setTripMembers] = useState<{ id: string; full_name: string | null; nickname: string | null }[]>([]);
@@ -2213,6 +2215,33 @@ export default function AdminBudgetPage() {
     return accountNameById.get(accountId) || 'Unknown';
   };
   const membersPaidCount = memberPaymentSummary.filter((m) => m.total_paid > 0).length;
+
+  const handleMemberSort = (key: 'name' | 'paid' | 'remaining') => {
+    if (memberSortKey === key) {
+      setMemberSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setMemberSortKey(key);
+      setMemberSortDir('asc');
+    }
+  };
+
+  const sortedMemberPaymentSummary = [...memberPaymentSummary].sort((a, b) => {
+    const getRemainingFor = (m: MemberPaymentSummary) => {
+      const share = memberBreakdown.find((bd) => bd.user_id === m.member_id)?.cost_share_aud ?? 0;
+      return Math.max(0, share - m.total_paid);
+    };
+    let cmp = 0;
+    if (memberSortKey === 'name') {
+      const nameA = (a.nickname || a.full_name || '').toLowerCase();
+      const nameB = (b.nickname || b.full_name || '').toLowerCase();
+      cmp = nameA.localeCompare(nameB);
+    } else if (memberSortKey === 'paid') {
+      cmp = a.total_paid - b.total_paid;
+    } else if (memberSortKey === 'remaining') {
+      cmp = getRemainingFor(a) - getRemainingFor(b);
+    }
+    return memberSortDir === 'asc' ? cmp : -cmp;
+  });
   const paymentsByMember = memberPayments.reduce<Record<string, MemberPayment[]>>((acc, payment) => {
     const memberId = payment.member_id || '__unknown__';
     if (!acc[memberId]) acc[memberId] = [];
@@ -3864,15 +3893,37 @@ export default function AdminBudgetPage() {
 
           {/* Member Collections Status */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <h3 className="font-semibold text-brand-cream">Member Payment Status</h3>
-              <p className="text-xs text-brand-cream/40">{memberPaymentSummary.length} member{memberPaymentSummary.length !== 1 ? 's' : ''} tracked</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-brand-cream/40 mr-1">Sort:</span>
+                {(['name', 'paid', 'remaining'] as const).map((key) => {
+                  const labels = { name: 'Name', paid: 'Amount Paid', remaining: 'Amount Owing' };
+                  const active = memberSortKey === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleMemberSort(key)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                        active
+                          ? 'bg-brand-tan/20 border-brand-tan/50 text-brand-tan'
+                          : 'bg-transparent border-brand-tan/20 text-brand-cream/50 hover:text-brand-cream/80 hover:border-brand-tan/30'
+                      }`}
+                    >
+                      {labels[key]}
+                      {active ? (memberSortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                    </button>
+                  );
+                })}
+                <span className="text-xs text-brand-cream/25 ml-1">{memberPaymentSummary.length} tracked</span>
+              </div>
             </div>
 
             {/* Member payment summary cards */}
-            {memberPaymentSummary.length > 0 && (
+            {sortedMemberPaymentSummary.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
-                {memberPaymentSummary.map((m) => {
+                {sortedMemberPaymentSummary.map((m) => {
                   const breakdown = memberBreakdown.find((b) => b.user_id === m.member_id);
                   const share = breakdown?.cost_share_aud ?? 0;
                   const paid = m.total_paid;
@@ -3929,28 +3980,31 @@ export default function AdminBudgetPage() {
 	                <table className="w-full min-w-[980px]">
                   <thead className="bg-brand-black border-b border-brand-tan/20">
                     <tr>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Member
-                      </th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Total Paid
-                      </th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Remaining
-                      </th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Payments
-                      </th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Last Payment
-                      </th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">
-                        Milestone Status
-                      </th>
+                      {([
+                        { key: 'name', label: 'Member' },
+                        { key: 'paid', label: 'Total Paid' },
+                        { key: 'remaining', label: 'Remaining' },
+                      ] as { key: 'name' | 'paid' | 'remaining'; label: string }[]).map(({ key, label }) => (
+                        <th key={key} className="px-6 py-4 text-left">
+                          <button
+                            type="button"
+                            onClick={() => handleMemberSort(key)}
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-brand-cream hover:text-brand-tan transition-colors group"
+                          >
+                            {label}
+                            <span className={`text-xs transition-opacity ${memberSortKey === key ? 'opacity-100 text-brand-tan' : 'opacity-0 group-hover:opacity-40'}`}>
+                              {memberSortKey === key ? (memberSortDir === 'asc' ? '↑' : '↓') : '↕'}
+                            </span>
+                          </button>
+                        </th>
+                      ))}
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Payments</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Last Payment</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Milestone Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {memberPaymentSummary.map((member) => {
+                    {sortedMemberPaymentSummary.map((member) => {
                       const hasSchedule = targetAmount > 0;
                       const memberTransactions = [...(paymentsByMember[member.member_id] ?? [])]
                         .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
