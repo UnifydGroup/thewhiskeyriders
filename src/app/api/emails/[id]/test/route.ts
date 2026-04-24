@@ -191,6 +191,7 @@ export async function POST(
             headerImageUrl: emailHeader.email_header_image_url ?? undefined,
             footerText: emailHeader.email_footer_text,
             footerImageUrl: emailHeader.email_footer_image_url ?? undefined,
+            greetingPrefix: emailHeader.email_greeting,
           });
 
       const text = buildEmailText({
@@ -198,6 +199,7 @@ export async function POST(
         bodyText: `[TEST EMAIL — preview only]\n\n${personalisedBody.replace(/<[^>]+>/g, '').trim()}`,
         ctaUrl: standaloneHtml ? undefined : (baseUrl ? `${baseUrl}/dashboard` : undefined),
         ctaLabel: standaloneHtml ? undefined : 'Visit the Portal',
+        greetingPrefix: emailHeader.email_greeting,
       });
 
       try {

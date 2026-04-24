@@ -114,6 +114,7 @@ export function buildEmailHtml(args: {
   headerImageUrl?: string;
   footerText?: string;
   footerImageUrl?: string;
+  greetingPrefix?: string;
 }): string {
   const { recipientName, subject, bodyHtml, ctaUrl, ctaLabel, previewText } = args;
   const headerTitle = args.headerTitle?.trim() || 'The Whiskey Riders';
@@ -121,6 +122,7 @@ export function buildEmailHtml(args: {
   const headerImageUrl = args.headerImageUrl?.trim() || '';
   const footerText = args.footerText?.trim() || "You're receiving this because you're a member of The Whiskey Riders.";
   const footerImageUrl = args.footerImageUrl?.trim() || '';
+  const greetingPrefix = args.greetingPrefix?.trim() || 'Hi';
 
   const ctaBlock =
     ctaUrl && ctaLabel
@@ -160,7 +162,7 @@ export function buildEmailHtml(args: {
           <!-- Body -->
           <tr>
             <td style="padding:32px;color:#C9B98A">
-              <p style="margin:0 0 16px;color:#C9B98A;font-size:15px">Hi ${escapeHtml(recipientName)},</p>
+              <p style="margin:0 0 16px;color:#C9B98A;font-size:15px">${escapeHtml(greetingPrefix)} ${escapeHtml(recipientName)},</p>
               <div style="color:#d4c9a8;font-size:15px;line-height:1.6">
                 ${bodyHtml}
               </div>
@@ -190,6 +192,7 @@ export type EmailHeaderSettings = {
   email_header_image_url: string | null;
   email_footer_text: string;
   email_footer_image_url: string | null;
+  email_greeting: string;
 };
 
 const DEFAULT_EMAIL_HEADER: EmailHeaderSettings = {
@@ -198,6 +201,7 @@ const DEFAULT_EMAIL_HEADER: EmailHeaderSettings = {
   email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
   email_footer_image_url: null,
+  email_greeting: 'Hi',
 };
 
 /**
@@ -211,7 +215,7 @@ export async function fetchEmailHeaderSettings(
   try {
     const { data, error } = await db
       .from('site_settings')
-      .select('email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url')
+      .select('email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url, email_greeting')
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -224,6 +228,7 @@ export async function fetchEmailHeaderSettings(
       email_header_image_url: data.email_header_image_url?.trim() || null,
       email_footer_text: data.email_footer_text?.trim() || DEFAULT_EMAIL_HEADER.email_footer_text,
       email_footer_image_url: data.email_footer_image_url?.trim() || null,
+      email_greeting: data.email_greeting?.trim() || DEFAULT_EMAIL_HEADER.email_greeting,
     };
   } catch {
     return DEFAULT_EMAIL_HEADER;
@@ -235,9 +240,11 @@ export function buildEmailText(args: {
   bodyText: string;
   ctaUrl?: string;
   ctaLabel?: string;
+  greetingPrefix?: string;
 }): string {
+  const greeting = args.greetingPrefix?.trim() || 'Hi';
   const lines: string[] = [
-    `Hi ${args.recipientName},`,
+    `${greeting} ${args.recipientName},`,
     '',
     args.bodyText,
   ];

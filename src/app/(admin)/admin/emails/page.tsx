@@ -25,6 +25,7 @@ import {
   ImagePlus,
   Layout,
   Mail,
+  MessageSquare,
   Paintbrush,
   Plus,
   Search,
@@ -78,6 +79,7 @@ type HeaderSettings = {
   email_header_image_url: string | null;
   email_footer_text: string;
   email_footer_image_url: string | null;
+  email_greeting: string;
 };
 type EditorMode = 'rich' | 'html';
 type EmailAsset = {
@@ -124,6 +126,7 @@ const defaultHeader: HeaderSettings = {
   email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
   email_footer_image_url: null,
+  email_greeting: 'Hi',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -418,15 +421,15 @@ function BlockInsertBar({
 
 /** Color styling controls */
 function ColorControls({
-  emailBg, sectionBg, blockBg, buttonBg,
-  onEmailBg, onSectionBg, onBlockBg, onButtonBg,
-  onApplyEmail, onApplySection, onApplyBlock, onApplyButton,
+  emailBg, sectionBg, blockBg, buttonBg, buttonTextColor,
+  onEmailBg, onSectionBg, onBlockBg, onButtonBg, onButtonTextColor,
+  onApplyEmail, onApplySection, onApplyBlock, onApplyButton, onApplyButtonText,
 }: {
-  emailBg: string; sectionBg: string; blockBg: string; buttonBg: string;
+  emailBg: string; sectionBg: string; blockBg: string; buttonBg: string; buttonTextColor: string;
   onEmailBg: (v: string) => void; onSectionBg: (v: string) => void;
-  onBlockBg: (v: string) => void; onButtonBg: (v: string) => void;
+  onBlockBg: (v: string) => void; onButtonBg: (v: string) => void; onButtonTextColor: (v: string) => void;
   onApplyEmail: () => void; onApplySection: () => void;
-  onApplyBlock: () => void; onApplyButton: () => void;
+  onApplyBlock: () => void; onApplyButton: () => void; onApplyButtonText: () => void;
 }) {
   const row = (label: string, color: string, onChange: (v: string) => void, onApply: () => void) => (
     <div className="flex items-center gap-2">
@@ -444,11 +447,17 @@ function ColorControls({
     </div>
   );
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {row('Email Background', emailBg, onEmailBg, onApplyEmail)}
-      {row('Section Background', sectionBg, onSectionBg, onApplySection)}
-      {row('Block Background', blockBg, onBlockBg, onApplyBlock)}
-      {row('Button Color', buttonBg, onButtonBg, onApplyButton)}
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {row('Email Background', emailBg, onEmailBg, onApplyEmail)}
+        {row('Section Background', sectionBg, onSectionBg, onApplySection)}
+        {row('Block Background', blockBg, onBlockBg, onApplyBlock)}
+        {row('Button Background', buttonBg, onButtonBg, onApplyButton)}
+      </div>
+      <div className="border-t border-brand-brown/10 pt-2">
+        {row('Button Text Color', buttonTextColor, onButtonTextColor, onApplyButtonText)}
+        <p className="text-[11px] text-brand-cream/35 mt-1">Place cursor inside the button, then click Apply.</p>
+      </div>
     </div>
   );
 }
@@ -603,7 +612,7 @@ function LiveEmailPreview({
         )}
       </div>
       <div className="bg-[#111] px-5 py-5">
-        <p className="text-[#C9B98A] mb-3 text-xs">Hi Rider,</p>
+        <p className="text-[#C9B98A] mb-3 text-xs">{header.email_greeting || 'Hi'} Rider,</p>
         <div
           className="text-[#d4c9a8] text-xs leading-relaxed [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-[#f2e8d1] [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-[#f2e8d1] [&_h3]:text-sm [&_h3]:font-semibold [&_a]:text-brand-brown [&_a]:underline [&_img]:max-w-full [&_img]:rounded [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
           dangerouslySetInnerHTML={{ __html: body }}
@@ -673,6 +682,7 @@ export default function AdminEmailsPage() {
   const [richSectionBgColor, setRichSectionBgColor] = useState('#1f1f1f');
   const [richBlockBgColor, setRichBlockBgColor] = useState('#171717');
   const [richButtonBgColor, setRichButtonBgColor] = useState('#B5621E');
+  const [richButtonTextColor, setRichButtonTextColor] = useState('#ffffff');
 
   // Assets
   const [emailAssets, setEmailAssets] = useState<EmailAsset[]>([]);
@@ -725,9 +735,10 @@ export default function AdminEmailsPage() {
       setTemplates(tData.data?.templates || []);
       setEmailAssets(aData.data?.assets || []);
 
-      const { data: settingsRow } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: settingsRow } = await (supabase as any)
         .from('site_settings')
-        .select('id, email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url')
+        .select('id, email_header_title, email_header_tagline, email_header_image_url, email_footer_text, email_footer_image_url, email_greeting')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle();
       if (settingsRow) {
         const loaded: HeaderSettings = {
@@ -736,6 +747,7 @@ export default function AdminEmailsPage() {
           email_header_image_url: settingsRow.email_header_image_url?.trim() || null,
           email_footer_text: settingsRow.email_footer_text?.trim() || defaultHeader.email_footer_text,
           email_footer_image_url: settingsRow.email_footer_image_url?.trim() || null,
+          email_greeting: settingsRow.email_greeting?.trim() || defaultHeader.email_greeting,
         };
         setSiteSettingsId(settingsRow.id);
         setHeader(loaded);
@@ -1275,6 +1287,7 @@ export default function AdminEmailsPage() {
         email_header_image_url: header.email_header_image_url || null,
         email_footer_text: header.email_footer_text.trim() || defaultHeader.email_footer_text,
         email_footer_image_url: header.email_footer_image_url || null,
+        email_greeting: header.email_greeting.trim() || defaultHeader.email_greeting,
         updated_by: userResult.user.id,
       };
       if (siteSettingsId) {
@@ -1679,8 +1692,10 @@ export default function AdminEmailsPage() {
                       <ColorControls
                         emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
                         blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
+                        buttonTextColor={richButtonTextColor}
                         onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
                         onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
+                        onButtonTextColor={setRichButtonTextColor}
                         onApplyEmail={() => {
                           setCampaignForm(p => ({ ...p, body: applyRichEmailCanvasBackground(p.body, richEmailBgColor) }));
                           setMessage({ type: 'success', text: 'Email background updated.' });
@@ -1688,8 +1703,8 @@ export default function AdminEmailsPage() {
                         onApplySection={() => applyClosestStyle(campaignEditorRef, '[data-email-section="true"]', { 'background-color': richSectionBgColor }, 'section')}
                         onApplyBlock={() => applyClosestStyle(campaignEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
                         onApplyButton={() => applyClosestStyle(campaignEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
+                        onApplyButtonText={() => applyClosestStyle(campaignEditorRef, '[data-email-button="true"]', { 'color': richButtonTextColor }, 'button text')}
                       />
-                      <p className="text-xs text-brand-cream/45">Tip: place cursor inside a section/block/button before applying a colour.</p>
                     </CollapsibleSection>
                   )}
 
@@ -2027,14 +2042,16 @@ export default function AdminEmailsPage() {
                       <ColorControls
                         emailBg={richEmailBgColor} sectionBg={richSectionBgColor}
                         blockBg={richBlockBgColor} buttonBg={richButtonBgColor}
+                        buttonTextColor={richButtonTextColor}
                         onEmailBg={setRichEmailBgColor} onSectionBg={setRichSectionBgColor}
                         onBlockBg={setRichBlockBgColor} onButtonBg={setRichButtonBgColor}
+                        onButtonTextColor={setRichButtonTextColor}
                         onApplyEmail={applyEmailBg}
                         onApplySection={() => applyClosestStyle(templateEditorRef, '[data-email-section="true"]', { 'background-color': richSectionBgColor }, 'section')}
                         onApplyBlock={() => applyClosestStyle(templateEditorRef, '[data-email-block="true"]', { 'background-color': richBlockBgColor }, 'block')}
                         onApplyButton={() => applyClosestStyle(templateEditorRef, '[data-email-button="true"]', { 'background-color': richButtonBgColor }, 'button')}
+                        onApplyButtonText={() => applyClosestStyle(templateEditorRef, '[data-email-button="true"]', { 'color': richButtonTextColor }, 'button text')}
                       />
-                      <p className="text-xs text-brand-cream/45">Tip: place cursor inside a section/block/button before applying a colour.</p>
                     </CollapsibleSection>
                   )}
 
@@ -2250,6 +2267,36 @@ export default function AdminEmailsPage() {
             </CardContent>
           </Card>
 
+          {/* Greeting prefix */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-brand-brown" />
+                Greeting
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-brand-cream/60">
+                The opening word used before each recipient&apos;s name — e.g. <span className="text-brand-cream/80 font-medium">&ldquo;Hi Andreas,&rdquo;</span>
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-brand-cream/90">Greeting prefix</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={header.email_greeting}
+                    onChange={e => setHeader(p => ({ ...p, email_greeting: e.target.value }))}
+                    placeholder="Hi"
+                    maxLength={30}
+                    className="w-40 rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
+                  />
+                  <span className="text-brand-cream/40 text-sm">[Recipient name],</span>
+                </div>
+                <p className="text-xs text-brand-cream/40">Appears as: <span className="text-brand-cream/60 italic">{header.email_greeting || 'Hi'} Andreas,</span></p>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2323,7 +2370,7 @@ export default function AdminEmailsPage() {
                   {header.email_header_tagline && <p className="text-white/70 text-xs tracking-wide mt-1">{header.email_header_tagline}</p>}
                 </div>
                 <div className="bg-[#111] px-6 py-6">
-                  <p className="text-[#C9B98A] mb-3 text-sm">Hi Rider,</p>
+                  <p className="text-[#C9B98A] mb-3 text-sm">{header.email_greeting || 'Hi'} Rider,</p>
                   <p className="text-[#d4c9a8] text-sm leading-relaxed">Your email body content will appear here...</p>
                   <div className="mt-6 text-center">
                     <div className="inline-block bg-brand-brown text-white text-sm font-semibold px-7 py-3 rounded-lg">Visit the Portal</div>
