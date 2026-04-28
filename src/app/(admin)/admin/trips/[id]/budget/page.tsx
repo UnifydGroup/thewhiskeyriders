@@ -33,8 +33,8 @@ interface MemberPayment { id: string; member_id: string; payment_date: string; a
 interface PaymentMilestone { id: string; trip_id: string; milestone_date: string; accumulated_amount: number; description: string | null; }
 interface MemberPaymentSummary { member_id: string; full_name: string; nickname?: string | null; total_paid: number; payment_count: number; last_payment_date: string | null; }
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
-interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; remaining_aud: number; }
-interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; unreconciled_count: number; }
+interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
+interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_interest_income_aud?: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; kitty_per_member_aud?: number; personal_budget_per_member_aud?: number; total_group_planned_aud?: number; total_personal_planned_aud?: number; kitty_requirement_aud?: number; unreconciled_count: number; }
 interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; }
 interface AccountBalances { westpac_choice: number; westpac_life: number; paypal: number; balance_date: string; }
 interface TripPaymentSettings {
@@ -2239,7 +2239,8 @@ export default function AdminBudgetPage() {
 
   const sortedMemberPaymentSummary = [...memberPaymentSummary].sort((a, b) => {
     const getRemainingFor = (m: MemberPaymentSummary) => {
-      const share = memberBreakdown.find((bd) => bd.user_id === m.member_id)?.cost_share_aud ?? 0;
+      const bd = memberBreakdown.find((bd) => bd.user_id === m.member_id);
+      const share = bd?.kitty_share_aud ?? bd?.cost_share_aud ?? 0;
       return Math.max(0, share - m.total_paid);
     };
     let cmp = 0;
@@ -2604,23 +2605,33 @@ export default function AdminBudgetPage() {
             <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-brand-tan/20">
                 <h3 className="font-semibold text-brand-cream">Member Contributions</h3>
-                <p className="text-xs text-brand-cream/40 mt-0.5">Cost share: {fmt(overview.cost_share_per_member_aud)} per member</p>
+                <p className="text-xs text-brand-cream/40 mt-0.5">
+                  Kitty target: {fmt(overview.kitty_per_member_aud ?? overview.cost_share_per_member_aud)} per member
+                  {(overview.personal_budget_per_member_aud ?? 0) > 0 && (
+                    <span className="ml-2 text-purple-300/60">· {fmt(overview.personal_budget_per_member_aud ?? 0)} personal per member</span>
+                  )}
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px]">
                   <thead className="bg-brand-black">
-                    <tr>{['Member','Share','Paid','Remaining','Status'].map((h) => <th key={h} className="px-5 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                    <tr>{['Member','Kitty Target','Personal','Paid','Remaining','Status'].map((h) => <th key={h} className="px-5 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
-                    {memberBreakdown.map((m) => (
-                      <tr key={m.user_id} className="hover:bg-brand-tan/5">
-                        <td className="px-5 py-3 font-medium text-brand-cream">{m.nickname || m.full_name || '—'}</td>
-                        <td className="px-5 py-3 text-brand-cream/70">{fmt(m.cost_share_aud)}</td>
-                        <td className="px-5 py-3 text-brand-tan font-semibold">{fmt(m.total_paid_aud)}</td>
-                        <td className="px-5 py-3"><span className={m.remaining_aud <= 0 ? 'text-green-400' : 'text-amber-400'}>{fmt(m.remaining_aud)}</span></td>
-                        <td className="px-5 py-3">{m.remaining_aud <= 0 ? <span className="px-2 py-0.5 rounded-full text-xs bg-green-900/30 text-green-400 border border-green-600/30">Paid</span> : <span className="px-2 py-0.5 rounded-full text-xs bg-amber-900/30 text-amber-400 border border-amber-600/30">Outstanding</span>}</td>
-                      </tr>
-                    ))}
+                    {memberBreakdown.map((m) => {
+                      const kittyTarget = m.kitty_share_aud ?? m.cost_share_aud;
+                      const personalBudget = m.personal_budget_aud ?? 0;
+                      return (
+                        <tr key={m.user_id} className="hover:bg-brand-tan/5">
+                          <td className="px-5 py-3 font-medium text-brand-cream">{m.nickname || m.full_name || '—'}</td>
+                          <td className="px-5 py-3 text-brand-cream/70">{fmt(kittyTarget)}</td>
+                          <td className="px-5 py-3">{personalBudget > 0 ? <span className="text-purple-300">{fmt(personalBudget)}</span> : <span className="text-brand-cream/20">—</span>}</td>
+                          <td className="px-5 py-3 text-brand-tan font-semibold">{fmt(m.total_paid_aud)}</td>
+                          <td className="px-5 py-3"><span className={m.remaining_aud <= 0 ? 'text-green-400' : 'text-amber-400'}>{fmt(m.remaining_aud)}</span></td>
+                          <td className="px-5 py-3">{m.remaining_aud <= 0 ? <span className="px-2 py-0.5 rounded-full text-xs bg-green-900/30 text-green-400 border border-green-600/30">Paid</span> : <span className="px-2 py-0.5 rounded-full text-xs bg-amber-900/30 text-amber-400 border border-amber-600/30">Outstanding</span>}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -3717,7 +3728,7 @@ export default function AdminBudgetPage() {
             const selSummary = memberPaymentSummary.find((m) => m.member_id === paymentForm.member_id);
             const selBreakdown = memberBreakdown.find((b) => b.user_id === paymentForm.member_id);
             const selPaid = selSummary?.total_paid ?? 0;
-            const selShare = selBreakdown?.cost_share_aud ?? 0;
+            const selShare = selBreakdown?.kitty_share_aud ?? selBreakdown?.cost_share_aud ?? 0;
             const selRemaining = selShare > 0 ? selShare - selPaid : null;
             return (
               <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-xl p-5">
@@ -3937,7 +3948,7 @@ export default function AdminBudgetPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
                 {sortedMemberPaymentSummary.map((m) => {
                   const breakdown = memberBreakdown.find((b) => b.user_id === m.member_id);
-                  const share = breakdown?.cost_share_aud ?? 0;
+                  const share = breakdown?.kitty_share_aud ?? breakdown?.cost_share_aud ?? 0;
                   const paid = m.total_paid;
                   const remaining = share > 0 ? share - paid : 0;
                   const pct = share > 0 ? Math.min(100, (paid / share) * 100) : 0;
