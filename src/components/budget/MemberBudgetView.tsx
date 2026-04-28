@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { DollarSign, CheckCircle2, EyeOff, TrendingUp } from 'lucide-react';
+import { DollarSign, CheckCircle2, EyeOff, TrendingUp, Users, User } from 'lucide-react';
 
 interface BudgetCategory {
   id: string;
@@ -12,6 +12,8 @@ interface BudgetCategory {
   spent_aud: number;
   remaining_aud: number;
   over_budget: boolean;
+  group_planned_aud?: number;
+  personal_planned_aud?: number;
 }
 
 interface BudgetOverview {
@@ -24,6 +26,13 @@ interface BudgetOverview {
   collection_gap_aud: number;
   member_count: number;
   cost_share_per_member_aud: number;
+  // New fields
+  total_group_planned_aud?: number;
+  total_personal_planned_aud?: number;
+  total_interest_income_aud?: number;
+  kitty_requirement_aud?: number;
+  kitty_per_member_aud?: number;
+  personal_budget_per_member_aud?: number;
 }
 
 interface MemberPayment {
@@ -34,6 +43,10 @@ interface MemberPayment {
   cost_share_aud: number;
   remaining_aud: number;
   is_current_user: boolean;
+  // New fields
+  kitty_share_aud?: number;
+  personal_budget_aud?: number;
+  total_trip_cost_aud?: number;
 }
 
 interface BudgetData {
@@ -41,6 +54,7 @@ interface BudgetData {
   overview: BudgetOverview | null;
   categories: BudgetCategory[];
   member_payments: MemberPayment[];
+  member_breakdown: MemberPayment[];
   settings: { exchange_rate_mad_aud: number; notes: string | null };
 }
 
@@ -99,67 +113,113 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
     );
   }
 
-  const { overview, categories, member_payments, visibility, settings } = data;
+  const { overview, categories, member_payments, member_breakdown, visibility, settings } = data;
   const totalCollected = overview
     ? (overview.total_collected_aud ?? overview.total_collected_from_members_aud ?? 0)
     : 0;
 
-  // The current user's own row
-  const myPayment = member_payments.find((m) => m.is_current_user);
+  // The current user's own row — check both member_payments and member_breakdown
+  const allMemberRows = [...(member_payments ?? []), ...(member_breakdown ?? [])];
+  const myPayment = allMemberRows.find((m) => m.is_current_user);
+
+  const kittyShare = myPayment?.kitty_share_aud ?? myPayment?.cost_share_aud ?? 0;
+  const personalBudget = myPayment?.personal_budget_aud ?? overview?.personal_budget_per_member_aud ?? 0;
+  const totalTripCost = myPayment?.total_trip_cost_aud ?? (kittyShare + personalBudget);
+  const paid = myPayment?.total_paid_aud ?? 0;
+  const kittyRemaining = Math.max(0, kittyShare - paid);
+  const hasPersonalCosts = personalBudget > 0;
+  const hasSplit = hasPersonalCosts && kittyShare > 0;
 
   return (
     <div className="space-y-6">
 
-      {/* ── My Cost Share ─────────────────────────────────────────────────── */}
+      {/* ── My Trip Budget ────────────────────────────────────────────────── */}
       {visibility.show_individual && myPayment && (
-        <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-brand-cream mb-4 flex items-center gap-2">
+        <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-5">
+          <h2 className="text-lg font-semibold text-brand-cream flex items-center gap-2">
             <DollarSign className="w-5 h-5 text-brand-tan" />
-            My Cost Share
+            My Trip Budget
           </h2>
-          <div className="grid grid-cols-3 gap-4 mb-5">
-            <div>
-              <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Total Share</p>
-              <p className="text-2xl font-bold text-brand-cream">{fmt(myPayment.cost_share_aud)}</p>
+
+          {/* Total trip cost summary */}
+          {hasSplit ? (
+            <div className="bg-brand-black/40 border border-brand-tan/10 rounded-lg px-5 py-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Estimated Total Trip Cost</p>
+                <p className="text-3xl font-bold text-brand-cream">{fmt(totalTripCost)}</p>
+                <p className="text-xs text-brand-cream/40 mt-1">Group kitty + personal expenses</p>
+              </div>
+              {paid >= kittyShare && (
+                <span className="flex items-center gap-1.5 text-green-400 font-semibold text-sm">
+                  <CheckCircle2 className="w-4 h-4" /> Kitty fully paid
+                </span>
+              )}
             </div>
-            <div>
-              <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Paid</p>
-              <p className="text-2xl font-bold text-brand-tan">{fmt(myPayment.total_paid_aud)}</p>
+          ) : null}
+
+          {/* Group kitty section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-brand-tan/70" />
+              <p className="text-sm font-semibold text-brand-cream/80">Group Kitty Contribution</p>
             </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-brand-black/30 rounded-lg px-4 py-3">
+                <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Your Share</p>
+                <p className="text-xl font-bold text-brand-cream">{fmt(kittyShare)}</p>
+              </div>
+              <div className="bg-brand-black/30 rounded-lg px-4 py-3">
+                <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Paid</p>
+                <p className="text-xl font-bold text-brand-tan">{fmt(paid)}</p>
+              </div>
+              <div className="bg-brand-black/30 rounded-lg px-4 py-3">
+                <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Remaining</p>
+                <p className={`text-xl font-bold ${kittyRemaining <= 0 ? 'text-green-400' : 'text-amber-400'}`}>
+                  {fmt(kittyRemaining)}
+                </p>
+              </div>
+            </div>
+
+            {/* Progress bar */}
             <div>
-              <p className="text-xs text-brand-cream/50 uppercase tracking-wider mb-1">Remaining</p>
-              <p className={`text-2xl font-bold ${myPayment.remaining_aud <= 0 ? 'text-green-400' : 'text-amber-400'}`}>
-                {fmt(myPayment.remaining_aud)}
-              </p>
+              <div className="w-full h-3 bg-brand-black rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${kittyRemaining <= 0 ? 'bg-green-500' : 'bg-brand-tan'}`}
+                  style={{
+                    width: `${Math.min(100, kittyShare > 0 ? (paid / kittyShare) * 100 : 0)}%`,
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs mt-1.5">
+                <span className="text-brand-cream/50">
+                  {kittyShare > 0 ? Math.round((paid / kittyShare) * 100) : 0}% paid toward kitty
+                </span>
+                {kittyRemaining <= 0 && (
+                  <span className="flex items-center gap-1 text-green-400 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Fully paid
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="mb-2">
-            <div className="w-full h-3 bg-brand-black rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${myPayment.remaining_aud <= 0 ? 'bg-green-500' : 'bg-brand-tan'}`}
-                style={{
-                  width: `${Math.min(100, myPayment.cost_share_aud > 0
-                    ? (myPayment.total_paid_aud / myPayment.cost_share_aud) * 100
-                    : 0)}%`,
-                }}
-              />
+          {/* Personal expenses section */}
+          {hasPersonalCosts && (
+            <div className="space-y-2 border-t border-brand-tan/10 pt-4">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-purple-400/70" />
+                <p className="text-sm font-semibold text-brand-cream/80">Personal Expenses (Budget Yourself)</p>
+              </div>
+              <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg px-5 py-4 flex items-center justify-between">
+                <div>
+                  <p className="text-2xl font-bold text-purple-200">{fmt(personalBudget)}</p>
+                  <p className="text-xs text-brand-cream/40 mt-1">
+                    Covers personal components — international flights and any other personal items. You&apos;ll arrange and pay for these directly.
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-brand-cream/50">
-              {myPayment.cost_share_aud > 0
-                ? Math.round((myPayment.total_paid_aud / myPayment.cost_share_aud) * 100)
-                : 0}% paid
-            </span>
-            {myPayment.remaining_aud <= 0 && (
-              <span className="flex items-center gap-1.5 text-green-400 font-semibold">
-                <CheckCircle2 className="w-4 h-4" /> Fully paid
-              </span>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -170,6 +230,41 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
             <TrendingUp className="w-5 h-5 text-brand-tan" />
             Group Budget
           </h2>
+
+          {/* Budget split summary (group vs personal) */}
+          {(overview.total_group_planned_aud !== undefined || overview.total_personal_planned_aud !== undefined) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-4">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Users className="w-3.5 h-3.5 text-brand-tan/60" />
+                  <p className="text-xs text-brand-cream/50 uppercase tracking-wider">Group Kitty</p>
+                </div>
+                <p className="text-xl font-bold text-brand-cream">{fmt(overview.total_group_planned_aud ?? 0)}</p>
+                {(overview.total_interest_income_aud ?? 0) > 0 && (
+                  <p className="text-xs text-amber-300/70 mt-1">
+                    −{fmt(overview.total_interest_income_aud ?? 0)} interest offset
+                  </p>
+                )}
+                {overview.kitty_per_member_aud !== undefined && (
+                  <p className="text-xs text-brand-cream/40 mt-0.5">
+                    {fmt(overview.kitty_per_member_aud)} per person
+                  </p>
+                )}
+              </div>
+              <div className="bg-brand-dark-grey border border-purple-500/20 rounded-lg p-4">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <User className="w-3.5 h-3.5 text-purple-400/60" />
+                  <p className="text-xs text-brand-cream/50 uppercase tracking-wider">Personal</p>
+                </div>
+                <p className="text-xl font-bold text-purple-200">{fmt(overview.total_personal_planned_aud ?? 0)}</p>
+                {overview.personal_budget_per_member_aud !== undefined && (
+                  <p className="text-xs text-brand-cream/40 mt-0.5">
+                    ~{fmt(overview.personal_budget_per_member_aud)} per person
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* KPI strip */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -244,30 +339,54 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
               </div>
               <div className="divide-y divide-brand-tan/10">
                 {categories.map((cat) => {
+                  const groupPlanned = cat.group_planned_aud ?? cat.planned_aud;
+                  const personalPlanned = cat.personal_planned_aud ?? 0;
+                  const isPersonalOnly = personalPlanned > 0 && groupPlanned === 0;
+                  const isMixed = personalPlanned > 0 && groupPlanned > 0;
                   const pct = cat.planned_aud > 0 ? Math.min(100, (cat.spent_aud / cat.planned_aud) * 100) : 0;
                   return (
-                    <div key={cat.id} className="px-5 py-4">
+                    <div key={cat.id} className={`px-5 py-4 ${isPersonalOnly ? 'bg-purple-900/5' : ''}`}>
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
                           <span className="text-brand-cream font-medium text-sm">{cat.name}</span>
+                          {isPersonalOnly && (
+                            <span className="text-xs text-purple-300 border border-purple-500/30 rounded-full px-2 py-0.5">Personal</span>
+                          )}
+                          {isMixed && (
+                            <span className="text-xs text-brand-cream/40 border border-brand-tan/20 rounded-full px-2 py-0.5">Mixed</span>
+                          )}
                           {cat.over_budget && (
                             <span className="text-xs text-red-400 border border-red-400/40 rounded-full px-2 py-0.5">Over budget</span>
                           )}
                         </div>
-                        <span className="text-sm text-brand-cream/60">
-                          {fmt(cat.spent_aud)} / {fmt(cat.planned_aud)}
-                        </span>
+                        <div className="text-right">
+                          <span className="text-sm text-brand-cream/60">
+                            {fmt(cat.spent_aud)} / {fmt(cat.planned_aud)}
+                          </span>
+                          {isMixed && (
+                            <p className="text-xs text-brand-cream/30 mt-0.5">
+                              <span className="text-brand-tan/60">{fmt(groupPlanned)} kitty</span>
+                              {' · '}
+                              <span className="text-purple-400/60">{fmt(personalPlanned)} personal</span>
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div className="w-full h-1.5 bg-brand-black rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${pct}%`,
-                            backgroundColor: cat.over_budget ? '#ef4444' : cat.color,
-                          }}
-                        />
-                      </div>
+                      {!isPersonalOnly && (
+                        <div className="w-full h-1.5 bg-brand-black rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: cat.over_budget ? '#ef4444' : cat.color,
+                            }}
+                          />
+                        </div>
+                      )}
+                      {isPersonalOnly && (
+                        <p className="text-xs text-purple-300/50 mt-1">Members arrange and pay for this directly</p>
+                      )}
                     </div>
                   );
                 })}

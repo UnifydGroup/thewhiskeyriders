@@ -117,6 +117,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     // ── Manual income entries ─────────────────────────────────────────────────
     let manualIncomeEntries: any[] = [];
     let totalManualIncome = 0;
+    let totalInterestIncome = 0;
     if (hasAdminBudgetAccess) {
       const { data: incomeData } = await supabase
         .from('trip_income_entries')
@@ -124,17 +125,50 @@ export async function GET(request: NextRequest, { params }: Params) {
         .eq('trip_id', tripId)
         .order('income_date', { ascending: false });
       manualIncomeEntries = incomeData ?? [];
-      totalManualIncome = manualIncomeEntries.reduce((s: number, e: any) => {
-        // Exclude transfer income legs — they are not real income
+      for (const e of manualIncomeEntries) {
         const isTransfer = e.category === 'transfer' || (() => {
           if (!e.notes) return false;
           try { return Boolean((JSON.parse(e.notes) as { transfer_link_id?: unknown }).transfer_link_id); } catch { return false; }
         })();
-        return isTransfer ? s : s + toNumber(e.amount_aud);
-      }, 0);
+        if (!isTransfer) {
+          totalManualIncome += toNumber(e.amount_aud);
+          if (e.category === 'interest') totalInterestIncome += toNumber(e.amount_aud);
+        }
+      }
     }
 
     const totalIncomeAud = totalCollectedFromMembers + totalManualIncome;
+
+    // ── Group vs personal planned split ─────────────────────────────────────
+    // Parse each category's notes JSON to get parts with payment_type
+    let totalGroupPlannedAud = 0;
+    let totalPersonalPlannedAud = 0;
+    let personalBudgetPerMemberAud = 0; // calculated after memberCount is known
+
+    for (const cat of categories) {
+      let parts: any[] = [];
+      if (cat.notes) {
+        try {
+          const parsed = JSON.parse(cat.notes);
+          if (parsed && Array.isArray(parsed.parts)) parts = parsed.parts;
+        } catch { /* ignore */ }
+      }
+      // Fallback: if no parts, treat entire category as group
+      if (parts.length === 0) {
+        totalGroupPlannedAud += toNumber(cat.planned_aud);
+      } else {
+        for (const part of parts) {
+          const partTotal = part.basis === 'group'
+            ? toNumber(part.amount_aud)
+            : toNumber(part.amount_aud) * Math.max(1, toNumber(part.member_count));
+          if (part.payment_type === 'personal') {
+            totalPersonalPlannedAud += partTotal;
+          } else {
+            totalGroupPlannedAud += partTotal;
+          }
+        }
+      }
+    }
 
     // ── Trip members for per-member cost share ────────────────────────────────
     const { data: tripMembers } = await supabase
@@ -144,7 +178,32 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const memberCount = (tripMembers ?? []).length;
     const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
+
+    // Kitty requirement = group budget minus interest that offsets it
+    const kittyRequirementAud = Math.max(0, totalGroupPlannedAud - totalInterestIncome);
+    const kittyPerMemberAud = memberCount > 0 ? kittyRequirementAud / memberCount : 0;
     const costSharePerMember = memberCount > 0 ? totalBudgetAud / memberCount : 0;
+
+    // Personal budget per member: sum of per_person personal parts' amount_aud
+    // (group-basis personal parts split by memberCount)
+    if (memberCount > 0) {
+      for (const cat of categories) {
+        let parts: any[] = [];
+        if (cat.notes) {
+          try {
+            const parsed = JSON.parse(cat.notes);
+            if (parsed && Array.isArray(parsed.parts)) parts = parsed.parts;
+          } catch { /* ignore */ }
+        }
+        for (const part of parts) {
+          if (part.payment_type === 'personal') {
+            personalBudgetPerMemberAud += part.basis === 'group'
+              ? toNumber(part.amount_aud) / memberCount
+              : toNumber(part.amount_aud);
+          }
+        }
+      }
+    }
 
     // Per-member payment totals
     const memberTotalsMap: Record<string, number> = {};
@@ -157,7 +216,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (showIndividual && tripMembers) {
       memberBreakdown = tripMembers.map((tm: any) => {
         const paid = memberTotalsMap[tm.user_id] ?? 0;
-        const remaining = Math.max(0, costSharePerMember - paid);
+        const remaining = Math.max(0, kittyPerMemberAud - paid);
         return {
           user_id: tm.user_id,
           full_name: tm.profiles?.full_name ?? null,
@@ -165,7 +224,10 @@ export async function GET(request: NextRequest, { params }: Params) {
           avatar_url: tm.profiles?.avatar_url ?? null,
           total_paid_aud: paid,
           cost_share_aud: costSharePerMember,
+          kitty_share_aud: kittyPerMemberAud,
           remaining_aud: remaining,
+          personal_budget_aud: personalBudgetPerMemberAud,
+          total_trip_cost_aud: kittyPerMemberAud + personalBudgetPerMemberAud,
           is_current_user: tm.user_id === profile?.id,
         };
       });
@@ -178,11 +240,34 @@ export async function GET(request: NextRequest, { params }: Params) {
     const categoriesWithActuals = categories.map((cat: any) => {
       const plannedAud = toNumber(cat.planned_aud);
       const spentAud = expensesByCategory[cat.id] ?? 0;
+      // Parse parts for group/personal split
+      let groupPlanned = plannedAud;
+      let personalPlanned = 0;
+      if (cat.notes) {
+        try {
+          const parsed = JSON.parse(cat.notes);
+          if (parsed && Array.isArray(parsed.parts) && parsed.parts.length > 0) {
+            groupPlanned = 0;
+            for (const part of parsed.parts) {
+              const partTotal = part.basis === 'group'
+                ? toNumber(part.amount_aud)
+                : toNumber(part.amount_aud) * Math.max(1, toNumber(part.member_count));
+              if (part.payment_type === 'personal') {
+                personalPlanned += partTotal;
+              } else {
+                groupPlanned += partTotal;
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
       return {
         ...cat,
         spent_aud: spentAud,
         remaining_aud: Math.max(0, plannedAud - spentAud),
         over_budget: spentAud > plannedAud,
+        group_planned_aud: groupPlanned,
+        personal_planned_aud: personalPlanned,
       };
     });
 
@@ -272,13 +357,19 @@ export async function GET(request: NextRequest, { params }: Params) {
       overview: showGroup ? {
         total_budget_aud: totalBudgetAud,
         total_planned_aud: categories.reduce((s: number, c: any) => s + toNumber(c.planned_aud), 0),
+        total_group_planned_aud: totalGroupPlannedAud,
+        total_personal_planned_aud: totalPersonalPlannedAud,
         total_income_aud: totalIncomeAud,
         total_collected_from_members_aud: totalCollectedFromMembers,
         total_manual_income_aud: totalManualIncome,
+        total_interest_income_aud: totalInterestIncome,
         total_spent_aud: totalSpentAud,
         net_position_aud: totalIncomeAud - totalSpentAud,
         budget_remaining_aud: totalBudgetAud - totalSpentAud,
         collection_gap_aud: totalBudgetAud - totalCollectedFromMembers,
+        kitty_requirement_aud: kittyRequirementAud,
+        kitty_per_member_aud: kittyPerMemberAud,
+        personal_budget_per_member_aud: personalBudgetPerMemberAud,
         member_count: memberCount,
         cost_share_per_member_aud: costSharePerMember,
         uncategorised_spend_aud: expensesByCategory['__uncategorised__'] ?? 0,

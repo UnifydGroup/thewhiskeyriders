@@ -19,7 +19,8 @@ import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 
 interface Category { id: string; name: string; planned_aud: number; color: string; sort_order: number; notes: string | null; spent_aud?: number; remaining_aud?: number; over_budget?: boolean; }
 type BudgetPartBasis = 'per_person' | 'group';
-interface BudgetPart { id: string; name: string; basis: BudgetPartBasis; amount_aud: number; member_count: number; }
+type BudgetPaymentType = 'group' | 'personal';
+interface BudgetPart { id: string; name: string; basis: BudgetPartBasis; amount_aud: number; member_count: number; payment_type: BudgetPaymentType; }
 interface Expense {
   id: string; description: string; amount: number; currency: string; amount_aud: number;
   expense_date: string; category: { id: string; name: string; color: string } | null;
@@ -340,6 +341,7 @@ function createBudgetPart(defaultMemberCount: number): BudgetPart {
     basis: 'per_person',
     amount_aud: 0,
     member_count: Math.max(1, defaultMemberCount),
+    payment_type: 'group',
   };
 }
 
@@ -352,8 +354,17 @@ function normaliseBudgetParts(parts: BudgetPart[], defaultMemberCount: number): 
       basis: (part.basis === 'group' ? 'group' : 'per_person') as BudgetPartBasis,
       amount_aud: Number.isFinite(Number(part.amount_aud)) ? Math.max(0, Number(part.amount_aud)) : 0,
       member_count: Number.isFinite(Number(part.member_count)) ? Math.max(1, Math.floor(Number(part.member_count))) : safeDefault,
+      payment_type: (part.payment_type === 'personal' ? 'personal' : 'group') as BudgetPaymentType,
     }))
     .filter((part) => part.name.length > 0 || part.amount_aud > 0);
+}
+
+function getCategoryGroupTotal(parts: BudgetPart[]): number {
+  return parts.filter((p) => p.payment_type !== 'personal').reduce((sum, p) => sum + getBudgetPartTotal(p), 0);
+}
+
+function getCategoryPersonalTotal(parts: BudgetPart[]): number {
+  return parts.filter((p) => p.payment_type === 'personal').reduce((sum, p) => sum + getBudgetPartTotal(p), 0);
 }
 
 function getBudgetPartTotal(part: BudgetPart) {
@@ -377,6 +388,7 @@ function parseCategoryNotes(
     basis: 'group',
     amount_aud: Number(plannedAud) || 0,
     member_count: Math.max(1, defaultMemberCount),
+    payment_type: 'group',
   };
   if (!rawNotes) {
     return { notesText: '', parts: [fallbackPart], committed_aud: 0 };
@@ -5179,7 +5191,7 @@ export default function AdminBudgetPage() {
                   <div className="divide-y divide-brand-tan/10">
                     {catForm.parts.map((part) => (
                       <div key={part.id} className="p-4 space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                           <div className="md:col-span-2">
                             <label className="block text-xs font-medium text-brand-cream/60 mb-1">Part Name</label>
                             <input
@@ -5188,6 +5200,17 @@ export default function AdminBudgetPage() {
                               placeholder="e.g. International flight"
                               className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
                             />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Who Pays?</label>
+                            <select
+                              value={part.payment_type ?? 'group'}
+                              onChange={(e) => updateCatPart(part.id, { payment_type: e.target.value as BudgetPaymentType })}
+                              className={`w-full px-3 py-2 bg-brand-black border rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan text-sm font-medium ${part.payment_type === 'personal' ? 'border-purple-500/50 text-purple-300' : 'border-brand-tan/30'}`}
+                            >
+                              <option value="group">Group Kitty</option>
+                              <option value="personal">Personal</option>
+                            </select>
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-brand-cream/60 mb-1">Pricing</label>
@@ -5226,7 +5249,13 @@ export default function AdminBudgetPage() {
                         </div>
 
                         <div className="flex items-center justify-between text-sm">
-                          <p className="text-brand-cream/50">Part total: <span className="text-brand-tan font-semibold">{fmt(getBudgetPartTotal(part))}</span></p>
+                          <div className="flex items-center gap-3">
+                            <p className="text-brand-cream/50">Part total: <span className="text-brand-tan font-semibold">{fmt(getBudgetPartTotal(part))}</span></p>
+                            {part.payment_type === 'personal'
+                              ? <span className="text-xs px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-500/30 text-purple-300">Personal expense</span>
+                              : <span className="text-xs px-2 py-0.5 rounded-full bg-brand-tan/10 border border-brand-tan/20 text-brand-tan/70">Group kitty</span>
+                            }
+                          </div>
                           <button onClick={() => removeCatPart(part.id)} className="text-brand-cream/40 hover:text-red-400 text-xs">
                             <Trash2 className="w-3.5 h-3.5 inline mr-1" />
                             Remove part
@@ -5255,18 +5284,21 @@ export default function AdminBudgetPage() {
 	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
 	              <div className="overflow-x-auto">
 	                <table className="w-full min-w-[900px] text-sm">
-	                  <thead className="bg-brand-black"><tr>{['','Category','Budget (Group)','Budget (Per Person)','Spent','Committed','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+	                  <thead className="bg-brand-black"><tr>{['','Category','Group Kitty','Personal','Budget (Per Person)','Spent','Committed','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
 	                  <tbody className="divide-y divide-brand-tan/10">
 	                    {categories.map((cat) => {
 	                      const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
+	                      const groupTotal = getCategoryGroupTotal(parsed.parts);
+	                      const personalTotal = getCategoryPersonalTotal(parsed.parts);
 	                      return (
 	                        <tr key={cat.id} className="hover:bg-brand-tan/5">
 	                          <td className="px-4 py-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} /></td>
 	                          <td className="px-4 py-3">
 	                            <p className="font-medium text-brand-cream">{cat.name}</p>
-	                            <p className="text-xs text-brand-cream/40">{parsed.parts.length} part{parsed.parts.length === 1 ? '' : 's'}</p>
+	                            <p className="text-xs text-brand-cream/40">{parsed.parts.length} part{parsed.parts.length === 1 ? '' : 's'}{personalTotal > 0 && groupTotal > 0 ? ' · mixed' : personalTotal > 0 ? ' · personal' : ''}</p>
 	                          </td>
-	                          <td className="px-4 py-3 text-brand-cream/70">{fmt(cat.planned_aud)}</td>
+	                          <td className="px-4 py-3 text-brand-cream/70">{groupTotal > 0 ? fmt(groupTotal) : <span className="text-brand-cream/20">—</span>}</td>
+	                          <td className="px-4 py-3">{personalTotal > 0 ? <span className="text-purple-300 font-medium">{fmt(personalTotal)}</span> : <span className="text-brand-cream/20">—</span>}</td>
 	                          <td className="px-4 py-3 text-brand-cream/60">{fmt(cat.planned_aud / participantCount)}</td>
 	                          <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400' : 'text-brand-cream/70'}>{fmt(cat.spent_aud ?? 0)}</span></td>
 	                          <td className="px-4 py-3 text-amber-300/70">
@@ -5285,7 +5317,8 @@ export default function AdminBudgetPage() {
 	                    <tr>
 	                      <td className="px-4 py-3" />
 	                      <td className="px-4 py-3 font-semibold text-brand-cream">Totals</td>
-	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categoriesBudgetTotal)}</td>
+	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categories.reduce((s, c) => s + getCategoryGroupTotal(parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).parts), 0))}</td>
+	                      <td className="px-4 py-3 font-semibold text-purple-300">{fmt(categories.reduce((s, c) => s + getCategoryPersonalTotal(parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).parts), 0))}</td>
 	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categoriesBudgetTotal / participantCount)}</td>
 	                      <td className="px-4 py-3 font-semibold text-brand-cream">{fmt(categoriesSpentTotal)}</td>
 	                      <td className="px-4 py-3 font-semibold text-amber-300/70">{fmt(categories.reduce((s, c) => s + parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).committed_aud, 0))}</td>
