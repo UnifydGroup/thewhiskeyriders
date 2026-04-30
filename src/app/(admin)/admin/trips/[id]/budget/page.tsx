@@ -2406,37 +2406,49 @@ export default function AdminBudgetPage() {
           </div>
 
           {/* Cash Position Strip */}
-          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Landmark className="w-5 h-5 text-brand-tan" />
-                <h3 className="font-semibold text-brand-cream">Cash Position</h3>
-                {accountBalances.balance_date && <span className="text-xs text-brand-cream/40 ml-2">as at {fmtDate(accountBalances.balance_date)}</span>}
+          {(() => {
+            const wcNet  = accountFlowSummary.find((r) => r.id === 'westpac_choice')?.net ?? 0;
+            const wlNet  = accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0;
+            const ppNet  = accountFlowSummary.find((r) => r.id === 'paypal')?.net ?? 0;
+            const totalNet = wcNet + wlNet + ppNet;
+            const wcVar  = accountBalances.westpac_choice - wcNet;
+            const wlVar  = accountBalances.westpac_life - wlNet;
+            return (
+              <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="w-5 h-5 text-brand-tan" />
+                    <h3 className="font-semibold text-brand-cream">Cash Position</h3>
+                    <span className="text-xs text-brand-cream/30 ml-1">from recorded transactions</span>
+                  </div>
+                  <button onClick={() => { setTab('accounts'); setEditingBalances(true); }} className="text-xs text-brand-tan hover:underline flex items-center gap-1">
+                    <Edit2 className="w-3 h-3" /> Set reconciliation balances
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
+                    <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Choice</p></div>
+                    <p className="text-lg font-semibold text-brand-cream">{fmt(wcNet)}</p>
+                    {accountBalances.westpac_choice > 0 && <p className={`text-[10px] mt-0.5 ${Math.abs(wcVar) < 1 ? 'text-green-400/60' : Math.abs(wcVar) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>Bank: {fmt(accountBalances.westpac_choice)} ({wcVar >= 0 ? '+' : ''}{fmt(wcVar)})</p>}
+                  </div>
+                  <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
+                    <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Life</p></div>
+                    <p className="text-lg font-semibold text-brand-cream">{fmt(wlNet)}</p>
+                    {accountBalances.westpac_life > 0 && <p className={`text-[10px] mt-0.5 ${Math.abs(wlVar) < 1 ? 'text-green-400/60' : Math.abs(wlVar) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>Bank: {fmt(accountBalances.westpac_life)} ({wlVar >= 0 ? '+' : ''}{fmt(wlVar)})</p>}
+                  </div>
+                  <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 px-4 py-3">
+                    <div className="flex items-center gap-1.5 mb-1"><Wallet className="w-3.5 h-3.5 text-amber-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">PayPal</p></div>
+                    <p className="text-lg font-semibold text-amber-300">{fmt(ppNet)}</p>
+                    {accountBalances.paypal > 0 && <p className="text-[10px] text-brand-cream/30 mt-0.5">Manual: {fmt(accountBalances.paypal)}</p>}
+                  </div>
+                  <div className="rounded-lg border border-green-600/30 bg-green-900/15 px-4 py-3">
+                    <div className="flex items-center gap-1.5 mb-1"><DollarSign className="w-3.5 h-3.5 text-green-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Total Funds</p></div>
+                    <p className="text-lg font-semibold text-green-400">{fmt(totalNet)}</p>
+                  </div>
+                </div>
               </div>
-              <button onClick={() => { setTab('accounts'); setEditingBalances(true); }} className="text-xs text-brand-tan hover:underline flex items-center gap-1">
-                <Edit2 className="w-3 h-3" /> Update balances
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
-                <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Choice</p></div>
-                <p className="text-lg font-semibold text-brand-cream">{fmt(accountBalances.westpac_choice)}</p>
-              </div>
-              <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
-                <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Life</p></div>
-                <p className="text-lg font-semibold text-brand-cream">{fmt(accountBalances.westpac_life)}</p>
-              </div>
-              <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 px-4 py-3">
-                <div className="flex items-center gap-1.5 mb-1"><Wallet className="w-3.5 h-3.5 text-amber-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">PayPal</p></div>
-                <p className="text-lg font-semibold text-amber-300">{fmt(accountBalances.paypal)}</p>
-                <p className="text-[10px] text-brand-cream/30 mt-0.5">Manually entered</p>
-              </div>
-              <div className="rounded-lg border border-green-600/30 bg-green-900/15 px-4 py-3">
-                <div className="flex items-center gap-1.5 mb-1"><DollarSign className="w-3.5 h-3.5 text-green-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Total Funds</p></div>
-                <p className="text-lg font-semibold text-green-400">{fmt(accountBalances.westpac_choice + accountBalances.westpac_life + accountBalances.paypal)}</p>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Income vs Expenses side by side */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2740,24 +2752,38 @@ export default function AdminBudgetPage() {
           )}
 
           {/* Balance cards */}
-          {!editingBalances && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              {[
-                { label: 'Westpac Choice 524337', value: accountBalances.westpac_choice, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream', type: 'bank' },
-                { label: 'Westpac Life 253840', value: accountBalances.westpac_life, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream', type: 'bank' },
-                { label: 'PayPal (manual)', value: accountBalances.paypal, icon: Wallet, color: 'border-amber-600/20', textColor: 'text-amber-300', type: 'paypal' },
-                { label: 'Total Funds', value: accountBalances.westpac_choice + accountBalances.westpac_life + accountBalances.paypal, icon: DollarSign, color: 'border-green-600/30', textColor: 'text-green-400', type: 'total' },
-              ].map(({ label, value, icon: Icon, color, textColor }) => (
-                <div key={label} className={`rounded-xl border ${color} bg-brand-dark-grey px-5 py-4`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon className="w-4 h-4 text-brand-cream/40" />
-                    <p className="text-xs uppercase tracking-wide text-brand-cream/45">{label}</p>
-                  </div>
-                  <p className={`text-2xl font-bold ${textColor}`}>{fmt(value)}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          {!editingBalances && (() => {
+            const wcNet = accountFlowSummary.find((r) => r.id === 'westpac_choice')?.net ?? 0;
+            const wlNet = accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0;
+            const ppNet = accountFlowSummary.find((r) => r.id === 'paypal')?.net ?? 0;
+            const cards = [
+              { label: 'Westpac Choice 524337', ledger: wcNet, snapshot: accountBalances.westpac_choice, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
+              { label: 'Westpac Life 253840',   ledger: wlNet, snapshot: accountBalances.westpac_life,   icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
+              { label: 'PayPal',                ledger: ppNet, snapshot: accountBalances.paypal,          icon: Wallet,    color: 'border-amber-600/20', textColor: 'text-amber-300'  },
+              { label: 'Total Funds',           ledger: wcNet + wlNet + ppNet, snapshot: null,           icon: DollarSign, color: 'border-green-600/30', textColor: 'text-green-400' },
+            ];
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                {cards.map(({ label, ledger, snapshot, icon: Icon, color, textColor }) => {
+                  const variance = snapshot !== null && snapshot > 0 ? snapshot - ledger : null;
+                  return (
+                    <div key={label} className={`rounded-xl border ${color} bg-brand-dark-grey px-5 py-4`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Icon className="w-4 h-4 text-brand-cream/40" />
+                        <p className="text-xs uppercase tracking-wide text-brand-cream/45">{label}</p>
+                      </div>
+                      <p className={`text-2xl font-bold ${textColor}`}>{fmt(ledger)}</p>
+                      {variance !== null && (
+                        <p className={`text-[10px] mt-1 ${Math.abs(variance) < 1 ? 'text-green-400/60' : Math.abs(variance) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>
+                          Bank: {fmt(snapshot!)} · {variance >= 0 ? '+' : ''}{fmt(variance)} vs ledger
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Transfers section */}
           <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
