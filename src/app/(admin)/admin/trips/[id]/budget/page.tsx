@@ -497,6 +497,36 @@ function getMemberPortalAccountId(sources: PaymentSource[]): string | null {
   return selectedBankSource?.id || null;
 }
 
+// ── Table sort helpers ────────────────────────────────────────────────────────
+
+type SortDir = 'asc' | 'desc';
+
+function sortBy<T>(arr: T[], keyFn: (item: T) => string | number, dir: SortDir): T[] {
+  return [...arr].sort((a, b) => {
+    const av = keyFn(a), bv = keyFn(b);
+    if (av === bv) return 0;
+    if (typeof av === 'string' && typeof bv === 'string') {
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+    return dir === 'asc' ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
+  });
+}
+
+function SortTh({ label, colKey, sortKey, sortDir, onSort, className }: {
+  label: string; colKey: string; sortKey: string; sortDir: SortDir;
+  onSort: (key: string) => void; className?: string;
+}) {
+  const active = colKey === sortKey;
+  return (
+    <th
+      onClick={() => onSort(colKey)}
+      className={`px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase cursor-pointer hover:text-brand-cream/70 select-none whitespace-nowrap ${className ?? ''}`}
+    >
+      {label}{active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : <span className="opacity-30"> ↕</span>}
+    </th>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function AdminBudgetPage() {
@@ -521,6 +551,22 @@ export default function AdminBudgetPage() {
   const [memberPaymentSummary, setMemberPaymentSummary] = useState<MemberPaymentSummary[]>([]);
   const [memberSortKey, setMemberSortKey] = useState<'name' | 'paid' | 'remaining'>('name');
   const [memberSortDir, setMemberSortDir] = useState<'asc' | 'desc'>('asc');
+  const [cashflowSortKey, setCashflowSortKey] = useState<'name' | 'inflow' | 'outflow' | 'net'>('name');
+  const [cashflowSortDir, setCashflowSortDir] = useState<SortDir>('asc');
+  const [memberContribSortKey, setMemberContribSortKey] = useState<'name' | 'kitty' | 'personal' | 'paid' | 'remaining'>('name');
+  const [memberContribSortDir, setMemberContribSortDir] = useState<SortDir>('asc');
+  const [transferSortKey, setTransferSortKey] = useState<'date' | 'description' | 'amount'>('date');
+  const [transferSortDir, setTransferSortDir] = useState<SortDir>('desc');
+  const [ledgerSortKey, setLedgerSortKey] = useState<'date' | 'description' | 'amount' | 'balance'>('date');
+  const [ledgerSortDir, setLedgerSortDir] = useState<SortDir>('desc');
+  const [incomeSortKey, setIncomeSortKey] = useState<'date' | 'description' | 'amount'>('date');
+  const [incomeSortDir, setIncomeSortDir] = useState<SortDir>('desc');
+  const [expenseSortKey, setExpenseSortKey] = useState<'date' | 'description' | 'amount_aud'>('date');
+  const [expenseSortDir, setExpenseSortDir] = useState<SortDir>('desc');
+  const [unassignedSortKey, setUnassignedSortKey] = useState<'date' | 'description' | 'amount'>('date');
+  const [unassignedSortDir, setUnassignedSortDir] = useState<SortDir>('desc');
+  const [catSortKey, setCatSortKey] = useState<'name' | 'group' | 'personal' | 'spent' | 'remaining'>('name');
+  const [catSortDir, setCatSortDir] = useState<SortDir>('asc');
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [memberBreakdown, setMemberBreakdown] = useState<MemberBreakdown[]>([]);
   const [tripMembers, setTripMembers] = useState<{ id: string; full_name: string | null; nickname: string | null }[]>([]);
@@ -2255,6 +2301,58 @@ export default function AdminBudgetPage() {
     }
     return memberSortDir === 'asc' ? cmp : -cmp;
   });
+  const makeSort = <K extends string>(
+    setSortKey: (k: K) => void, setSortDir: (d: SortDir) => void,
+    currentKey: K, currentDir: SortDir, numericKeys: K[] = [],
+  ): (key: string) => void => (key: string) => {
+    const k = key as K;
+    if (k === currentKey) { setSortDir(currentDir === 'asc' ? 'desc' : 'asc'); }
+    else { setSortKey(k); setSortDir(numericKeys.includes(k) ? 'desc' : 'asc'); }
+  };
+
+  const handleCashflowSort = makeSort(setCashflowSortKey, setCashflowSortDir, cashflowSortKey, cashflowSortDir, ['inflow','outflow','net']);
+  const handleMemberContribSort = makeSort(setMemberContribSortKey, setMemberContribSortDir, memberContribSortKey, memberContribSortDir, ['kitty','personal','paid','remaining']);
+  const handleTransferSort = makeSort(setTransferSortKey, setTransferSortDir, transferSortKey, transferSortDir, ['amount']);
+  const handleLedgerSort = makeSort(setLedgerSortKey, setLedgerSortDir, ledgerSortKey, ledgerSortDir, ['amount','balance']);
+  const handleIncomeSort = makeSort(setIncomeSortKey, setIncomeSortDir, incomeSortKey, incomeSortDir, ['amount']);
+  const handleExpenseSort = makeSort(setExpenseSortKey, setExpenseSortDir, expenseSortKey, expenseSortDir, ['amount_aud']);
+  const handleUnassignedSort = makeSort(setUnassignedSortKey, setUnassignedSortDir, unassignedSortKey, unassignedSortDir, ['amount']);
+  const handleCatSort = makeSort(setCatSortKey, setCatSortDir, catSortKey, catSortDir, ['group','personal','spent','remaining']);
+
+  const sortedCashflow = sortBy(accountFlowSummary, (r) => {
+    if (cashflowSortKey === 'inflow') return r.inflow;
+    if (cashflowSortKey === 'outflow') return r.outflow;
+    if (cashflowSortKey === 'net') return r.net;
+    return r.name;
+  }, cashflowSortDir);
+
+  const sortedMemberContrib = sortBy(memberBreakdown, (m) => {
+    if (memberContribSortKey === 'kitty') return m.kitty_share_aud ?? m.cost_share_aud;
+    if (memberContribSortKey === 'personal') return m.personal_budget_aud ?? 0;
+    if (memberContribSortKey === 'paid') return m.total_paid_aud;
+    if (memberContribSortKey === 'remaining') return m.remaining_aud;
+    return (m.nickname ?? m.full_name ?? '').toLowerCase();
+  }, memberContribSortDir);
+
+  type TransferRow = { key: string; date: string; description: string; absAmount: number; direction: 'in' | 'out'; displayAmount: string; notes?: string | null };
+  const allTransferRows: TransferRow[] = [
+    ...transferExpenseEntries.map((e) => ({
+      key: `exp-${e.id}`, date: e.expense_date, description: e.description,
+      absAmount: Math.abs(e.amount_aud), direction: 'out' as const,
+      displayAmount: `-${fmt(Math.abs(e.amount_aud))}`, notes: e.notes,
+    })),
+    ...transferIncomeEntries.map((e) => ({
+      key: `inc-${e.id}`, date: e.income_date, description: e.description,
+      absAmount: Math.abs(e.amount_aud), direction: 'in' as const,
+      displayAmount: `+${fmt(Math.abs(e.amount_aud))}`, notes: e.notes,
+    })),
+  ];
+  const sortedTransfers = sortBy(allTransferRows, (r) => {
+    if (transferSortKey === 'description') return r.description;
+    if (transferSortKey === 'amount') return r.absAmount;
+    return r.date;
+  }, transferSortDir);
+
   const paymentsByMember = memberPayments.reduce<Record<string, MemberPayment[]>>((acc, payment) => {
     const memberId = payment.member_id || '__unknown__';
     if (!acc[memberId]) acc[memberId] = [];
@@ -2532,10 +2630,18 @@ export default function AdminBudgetPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-brand-black">
-                  <tr>{['Account','Type','Inflow','Outflow','Net','Vs Balance','Member Portal'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                  <tr>
+                    <SortTh label="Account" colKey="name" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Type</th>
+                    <SortTh label="Inflow" colKey="inflow" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
+                    <SortTh label="Outflow" colKey="outflow" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
+                    <SortTh label="Net" colKey="net" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Vs Balance</th>
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Member Portal</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-tan/10">
-                  {accountFlowSummary.map((row) => (
+                  {sortedCashflow.map((row) => (
                     <tr key={row.id} className="hover:bg-brand-tan/5">
                       <td className="px-4 py-3 font-medium text-brand-cream">{row.name}</td>
                       <td className="px-4 py-3 text-brand-cream/60">{row.typeLabel}</td>
@@ -2627,10 +2733,17 @@ export default function AdminBudgetPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px]">
                   <thead className="bg-brand-black">
-                    <tr>{['Member','Kitty Target','Personal','Paid','Remaining','Status'].map((h) => <th key={h} className="px-5 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                    <tr>
+                      <SortTh label="Member" colKey="name" sortKey={memberContribSortKey} sortDir={memberContribSortDir} onSort={handleMemberContribSort} className="px-5" />
+                      <SortTh label="Kitty Target" colKey="kitty" sortKey={memberContribSortKey} sortDir={memberContribSortDir} onSort={handleMemberContribSort} className="px-5" />
+                      <SortTh label="Personal" colKey="personal" sortKey={memberContribSortKey} sortDir={memberContribSortDir} onSort={handleMemberContribSort} className="px-5" />
+                      <SortTh label="Paid" colKey="paid" sortKey={memberContribSortKey} sortDir={memberContribSortDir} onSort={handleMemberContribSort} className="px-5" />
+                      <SortTh label="Remaining" colKey="remaining" sortKey={memberContribSortKey} sortDir={memberContribSortDir} onSort={handleMemberContribSort} className="px-5" />
+                      <th className="px-5 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Status</th>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
-                    {memberBreakdown.map((m) => {
+                    {sortedMemberContrib.map((m) => {
                       const kittyTarget = m.kitty_share_aud ?? m.cost_share_aud;
                       const personalBudget = m.personal_budget_aud ?? 0;
                       return (
@@ -2802,30 +2915,29 @@ export default function AdminBudgetPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-sm">
                 <thead className="bg-brand-black">
-                  <tr>{['Date', 'Description', 'Direction', 'Amount', 'Notes'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                  <tr>
+                    <SortTh label="Date" colKey="date" sortKey={transferSortKey} sortDir={transferSortDir} onSort={handleTransferSort} />
+                    <SortTh label="Description" colKey="description" sortKey={transferSortKey} sortDir={transferSortDir} onSort={handleTransferSort} />
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Direction</th>
+                    <SortTh label="Amount" colKey="amount" sortKey={transferSortKey} sortDir={transferSortDir} onSort={handleTransferSort} />
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Notes</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-tan/10">
-                  {/* Expenses flagged as transfers */}
-                  {transferExpenseEntries.map((e) => (
-                    <tr key={`exp-${e.id}`} className="hover:bg-brand-tan/5">
-                      <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.expense_date)}</td>
-                      <td className="px-4 py-3 text-brand-cream">{e.description}</td>
-                      <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-red-900/20 text-red-400 border border-red-600/20">Outflow</span></td>
-                      <td className="px-4 py-3 font-semibold text-red-400">-{fmt(Math.abs(e.amount_aud))}</td>
-                      <td className="px-4 py-3 text-brand-cream/40 text-xs">{e.notes ? String(e.notes).substring(0, 60) : '—'}</td>
+                  {sortedTransfers.map((r) => (
+                    <tr key={r.key} className="hover:bg-brand-tan/5">
+                      <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="px-4 py-3 text-brand-cream">{r.description}</td>
+                      <td className="px-4 py-3">
+                        {r.direction === 'out'
+                          ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-900/20 text-red-400 border border-red-600/20">Outflow</span>
+                          : <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/20 text-green-400 border border-green-600/20">Inflow</span>}
+                      </td>
+                      <td className={`px-4 py-3 font-semibold ${r.direction === 'out' ? 'text-red-400' : 'text-green-400'}`}>{r.displayAmount}</td>
+                      <td className="px-4 py-3 text-brand-cream/40 text-xs">{r.notes ? String(r.notes).substring(0, 60) : '—'}</td>
                     </tr>
                   ))}
-                  {/* Income entries flagged as transfers */}
-                  {transferIncomeEntries.map((e) => (
-                    <tr key={`inc-${e.id}`} className="hover:bg-brand-tan/5">
-                      <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.income_date)}</td>
-                      <td className="px-4 py-3 text-brand-cream">{e.description}</td>
-                      <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-green-900/20 text-green-400 border border-green-600/20">Inflow</span></td>
-                      <td className="px-4 py-3 font-semibold text-green-400">+{fmt(Math.abs(e.amount_aud))}</td>
-                      <td className="px-4 py-3 text-brand-cream/40 text-xs">{e.notes?.substring(0, 60) || '—'}</td>
-                    </tr>
-                  ))}
-                  {transferExpenseEntries.length === 0 && transferIncomeEntries.length === 0 && (
+                  {sortedTransfers.length === 0 && (
                     <tr><td colSpan={5} className="px-4 py-8 text-center text-brand-cream/30 text-sm">No transfers recorded yet</td></tr>
                   )}
                 </tbody>
@@ -3532,7 +3644,15 @@ export default function AdminBudgetPage() {
                           </th>
                         );
                       })()}
-                      {['Date','Description','Type','Account','Currency','Amount','Balance','Reconciled','Actions'].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}
+                      <SortTh label="Date" colKey="date" sortKey={ledgerSortKey} sortDir={ledgerSortDir} onSort={handleLedgerSort} className="px-4 py-3" />
+                      <SortTh label="Description" colKey="description" sortKey={ledgerSortKey} sortDir={ledgerSortDir} onSort={handleLedgerSort} className="px-4 py-3" />
+                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Type</th>
+                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Account</th>
+                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Currency</th>
+                      <SortTh label="Amount" colKey="amount" sortKey={ledgerSortKey} sortDir={ledgerSortDir} onSort={handleLedgerSort} className="px-4 py-3" />
+                      <SortTh label="Balance" colKey="balance" sortKey={ledgerSortKey} sortDir={ledgerSortDir} onSort={handleLedgerSort} className="px-4 py-3" />
+                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Reconciled</th>
+                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-brand-tan/10">
@@ -3546,7 +3666,13 @@ export default function AdminBudgetPage() {
                         }
                         return true;
                       });
-                      return filteredLedger.map((row, i) => {
+                      const sortedFilteredLedger = sortBy(filteredLedger, (row) => {
+                        if (ledgerSortKey === 'description') return row.description;
+                        if (ledgerSortKey === 'amount') return row.amount_aud;
+                        if (ledgerSortKey === 'balance') return row.running_balance;
+                        return row.date;
+                      }, ledgerSortDir);
+                      return sortedFilteredLedger.map((row, i) => {
                         const fallbackAccountId = row.sub_type === 'member_payment' ? memberPortalAccountId : null;
                         const accountId = getTransactionAccountId(row.notes, fallbackAccountId);
                         const reconcileType: ReconcileType = row.type === 'income' ? 'income' : 'expense';
@@ -4405,9 +4531,23 @@ export default function AdminBudgetPage() {
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[860px] text-sm">
-                        <thead className="bg-brand-black"><tr>{['Date','Description','Category','Account','Amount','Reconciled',''].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+                        <thead className="bg-brand-black">
+                          <tr>
+                            <SortTh label="Date" colKey="date" sortKey={incomeSortKey} sortDir={incomeSortDir} onSort={handleIncomeSort} />
+                            <SortTh label="Description" colKey="description" sortKey={incomeSortKey} sortDir={incomeSortDir} onSort={handleIncomeSort} />
+                            <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Category</th>
+                            <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Account</th>
+                            <SortTh label="Amount" colKey="amount" sortKey={incomeSortKey} sortDir={incomeSortDir} onSort={handleIncomeSort} />
+                            <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Reconciled</th>
+                            <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase"></th>
+                          </tr>
+                        </thead>
                         <tbody className="divide-y divide-brand-tan/10">
-                          {incomeEntries.sort((a, b) => a.income_date.localeCompare(b.income_date)).map((e) => {
+                          {sortBy(incomeEntries, (e) => {
+                            if (incomeSortKey === 'description') return e.description;
+                            if (incomeSortKey === 'amount') return e.amount_aud;
+                            return e.income_date;
+                          }, incomeSortDir).map((e) => {
                             const catConfig: Record<string, { label: string; className: string }> = {
                               interest: { label: 'Interest', className: 'bg-amber-900/20 text-amber-300 border-amber-600/20' },
                               transfer: { label: 'Transfer', className: 'bg-blue-900/20 text-blue-400 border-blue-600/20' },
@@ -4797,10 +4937,24 @@ export default function AdminBudgetPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[1080px] text-sm">
                     <thead className="bg-brand-black">
-                      <tr>{['Date','Description','Category','Paid by','Account','Amount','AUD','Source',''].map((h) => <th key={h} className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                      <tr>
+                        <SortTh label="Date" colKey="date" sortKey={expenseSortKey} sortDir={expenseSortDir} onSort={handleExpenseSort} className="px-3 py-3" />
+                        <SortTh label="Description" colKey="description" sortKey={expenseSortKey} sortDir={expenseSortDir} onSort={handleExpenseSort} className="px-3 py-3" />
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">Category</th>
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">Paid by</th>
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">Account</th>
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">Amount</th>
+                        <SortTh label="AUD" colKey="amount_aud" sortKey={expenseSortKey} sortDir={expenseSortDir} onSort={handleExpenseSort} className="px-3 py-3" />
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase">Source</th>
+                        <th className="px-3 py-3 text-left text-xs text-brand-cream/40 uppercase"></th>
+                      </tr>
                     </thead>
                     <tbody className="divide-y divide-brand-tan/10">
-                      {filteredExpenses.map((exp) => (
+                      {sortBy(filteredExpenses, (exp) => {
+                        if (expenseSortKey === 'description') return exp.description;
+                        if (expenseSortKey === 'amount_aud') return exp.amount_aud;
+                        return exp.expense_date;
+                      }, expenseSortDir).map((exp) => (
                         <tr key={exp.id} className={`hover:bg-brand-tan/5 ${!exp.reconciled && exp.source === 'manual' ? 'border-l-2 border-amber-500/40' : ''}`}>
                           <td className="px-3 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(exp.expense_date)}</td>
                           <td className="px-3 py-3 text-brand-cream max-w-[160px]">
@@ -4948,10 +5102,20 @@ export default function AdminBudgetPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[780px] text-sm">
                       <thead className="bg-brand-black">
-                        <tr>{['Date','Description','Amount','Type','Assign Account'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr>
+                        <tr>
+                          <SortTh label="Date" colKey="date" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <SortTh label="Description" colKey="description" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <SortTh label="Amount" colKey="amount" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Type</th>
+                          <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Assign Account</th>
+                        </tr>
                       </thead>
                       <tbody className="divide-y divide-brand-tan/10">
-                        {unassignedExpenses.map((e) => (
+                        {sortBy(unassignedExpenses, (e) => {
+                          if (unassignedSortKey === 'description') return e.description;
+                          if (unassignedSortKey === 'amount') return e.amount_aud;
+                          return e.expense_date;
+                        }, unassignedSortDir).map((e) => (
                           <tr key={`ue-${e.id}`} className="hover:bg-red-900/10">
                             <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.expense_date)}</td>
                             <td className="px-4 py-3 text-brand-cream">{e.description}</td>
@@ -4989,7 +5153,11 @@ export default function AdminBudgetPage() {
                             </td>
                           </tr>
                         ))}
-                        {unassignedIncome.map((e) => (
+                        {sortBy(unassignedIncome, (e) => {
+                          if (unassignedSortKey === 'description') return e.description;
+                          if (unassignedSortKey === 'amount') return e.amount_aud;
+                          return e.income_date;
+                        }, unassignedSortDir).map((e) => (
                           <tr key={`ui-${e.id}`} className="hover:bg-red-900/10">
                             <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.income_date)}</td>
                             <td className="px-4 py-3 text-brand-cream">{e.description}</td>
@@ -5321,9 +5489,28 @@ export default function AdminBudgetPage() {
 	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
 	              <div className="overflow-x-auto">
 	                <table className="w-full min-w-[900px] text-sm">
-	                  <thead className="bg-brand-black"><tr>{['','Category','Group Kitty','Personal','Budget (Per Person)','Spent','Committed','Remaining',''].map((h) => <th key={h} className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+	                  <thead className="bg-brand-black">
+	                    <tr>
+	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase w-6" />
+	                      <SortTh label="Category" colKey="name" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
+	                      <SortTh label="Group Kitty" colKey="group" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
+	                      <SortTh label="Personal" colKey="personal" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
+	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Budget (Per Person)</th>
+	                      <SortTh label="Spent" colKey="spent" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
+	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Committed</th>
+	                      <SortTh label="Remaining" colKey="remaining" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
+	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase" />
+	                    </tr>
+	                  </thead>
 	                  <tbody className="divide-y divide-brand-tan/10">
-	                    {categories.map((cat) => {
+	                    {sortBy(categories, (cat) => {
+	                      const _parsedForSort = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
+	                      if (catSortKey === 'group') return getCategoryGroupTotal(_parsedForSort.parts);
+	                      if (catSortKey === 'personal') return getCategoryPersonalTotal(_parsedForSort.parts);
+	                      if (catSortKey === 'spent') return cat.spent_aud ?? 0;
+	                      if (catSortKey === 'remaining') return cat.remaining_aud ?? 0;
+	                      return cat.name.toLowerCase();
+	                    }, catSortDir).map((cat) => {
 	                      const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
 	                      const groupTotal = getCategoryGroupTotal(parsed.parts);
 	                      const personalTotal = getCategoryPersonalTotal(parsed.parts);
