@@ -108,7 +108,8 @@ export default function PaymentProgressCard({
         const payments: MemberPayment[] = paymentsData.payments || [];
 
         setSchedule(sched);
-        setTargetAmount(Number(scheduleData.totalTarget || 0));
+        const flightsCost = Number(scheduleData.paymentSettings?.flights_cost_aud ?? 0);
+        setTargetAmount(Number(scheduleData.totalTarget || 0) + flightsCost);
         setMemberPayments(payments);
         setTotalPaid(payments.reduce((sum, p) => sum + Number(p.amount), 0));
       } catch (err) {

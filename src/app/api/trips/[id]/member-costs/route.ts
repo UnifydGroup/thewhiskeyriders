@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // GET /api/trips/[id]/member-costs
 // Returns all assignments for this trip: { assignments: [...] }
 export async function GET(_req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
 
   const { data, error } = await supabase
     .from('member_cost_assignments')
@@ -21,8 +21,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 // POST /api/trips/[id]/member-costs
 // Upsert a single assignment: { member_id, cost_item_id, is_self_funded, notes? }
 export async function POST(req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
   const body = await req.json();
 
   const { member_id, cost_item_id, is_self_funded, notes } = body as {

@@ -1122,6 +1122,61 @@ export type Database = {
           },
         ]
       }
+      member_cost_assignments: {
+        Row: {
+          cost_item_id: string
+          created_at: string
+          id: string
+          is_self_funded: boolean
+          member_id: string
+          notes: string | null
+          trip_id: string
+          updated_at: string
+        }
+        Insert: {
+          cost_item_id: string
+          created_at?: string
+          id?: string
+          is_self_funded?: boolean
+          member_id: string
+          notes?: string | null
+          trip_id: string
+          updated_at?: string
+        }
+        Update: {
+          cost_item_id?: string
+          created_at?: string
+          id?: string
+          is_self_funded?: boolean
+          member_id?: string
+          notes?: string | null
+          trip_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_cost_assignments_cost_item_id_fkey"
+            columns: ["cost_item_id"]
+            isOneToOne: false
+            referencedRelation: "trip_cost_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_cost_assignments_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_cost_assignments_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trip_documents: {
         Row: {
           created_at: string | null
@@ -1277,6 +1332,44 @@ export type Database = {
           },
           {
             foreignKeyName: "trip_expenses_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_cost_items: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          sort_order: number
+          trip_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          sort_order?: number
+          trip_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          sort_order?: number
+          trip_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_cost_items_trip_id_fkey"
             columns: ["trip_id"]
             isOneToOne: false
             referencedRelation: "trips"

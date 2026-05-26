@@ -9,12 +9,14 @@ import {
   RefreshCw, Upload, ArrowDownCircle, ArrowUpCircle, AlertTriangle,
   BookOpen, ChevronDown, ChevronUp, Info, Wallet, Repeat, ArrowLeftRight,
   Building2, Landmark, Search, Download, Users, CheckSquare, Square,
-  Plane, Shield, FileText, GripVertical,
+  Plane, Shield, FileText, GripVertical, Bell, ChevronRight, Send,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -442,8 +444,18 @@ function parseLocalDate(ds: string): Date {
   const [y, m, d] = ds.slice(0, 10).split('-').map(Number);
   return new Date(y, m - 1, d, 12, 0, 0);
 }
-function fmtDate(d: string) { return parseLocalDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); }
+/** dd/mm/yyyy — the consistent Australian date format used throughout the financial manager */
+function fmtDate(d: string) {
+  const dt = parseLocalDate(d);
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const yyyy = dt.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+/** Short readable display e.g. "1 Jul" — for tight space contexts */
 function fmtShort(d: string) { return parseLocalDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }); }
+/** Long unambiguous display e.g. "1 July 2025" — for milestone / email contexts */
+function fmtDateLong(d: string) { return parseLocalDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }); }
 function normalisePaymentSettings(
   raw: Partial<Record<keyof TripPaymentSettings, unknown>> | null | undefined
 ): TripPaymentSettings {
@@ -577,6 +589,71 @@ export default function AdminBudgetPage() {
   const [budgetSyncMode, setBudgetSyncMode] = useState<'group_drives' | 'per_person_drives'>('per_person_drives');
   const [deletingAll, setDeletingAll] = useState(false);
 
+  // ── Confirm dialog (promise-based, drop-in replacement for window.confirm) ──
+  const confirmResolveRef = useRef<((v: boolean) => void) | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    variant?: 'danger' | 'warning' | 'info';
+  }>({ isOpen: false, title: '', message: '' });
+
+  /** Async replacement for window.confirm(). Returns true if confirmed. */
+  const promptConfirm = (opts: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    variant?: 'danger' | 'warning' | 'info';
+  }): Promise<boolean> =>
+    new Promise((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmDialog({ ...opts, isOpen: true });
+    });
+
+  const resolveConfirm = (value: boolean) => {
+    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+    confirmResolveRef.current?.(value);
+    confirmResolveRef.current = null;
+  };
+
+  // ── Settings section collapse state ───────────────────────────────────────
+  const [settingsOpen, setSettingsOpen] = useState<Record<string, boolean>>({
+    budget: true,
+    payment: true,
+    milestones: true,
+    visibility: true,
+  });
+  const toggleSection = (key: string) =>
+    setSettingsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // ── Milestone reminder state ───────────────────────────────────────────────
+  const [reminderMilestoneId, setReminderMilestoneId] = useState<string | null>(null);
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [sendingReminder, setSendingReminder] = useState(false);
+
+  const handleSendReminder = async (milestoneId: string) => {
+    setSendingReminder(true);
+    try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
+      const res = await fetch(`/api/trips/${tripId}/milestone-reminder`, {
+        method: 'POST',
+        headers: h,
+        body: JSON.stringify({ milestone_id: milestoneId, custom_message: reminderMessage.trim() || undefined }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast('success', `Reminder sent to ${d.sent ?? 0} member${d.sent === 1 ? '' : 's'}`);
+        setReminderMilestoneId(null);
+        setReminderMessage('');
+      } else {
+        showToast('error', d.error ?? 'Failed to send reminder');
+      }
+    } finally {
+      setSendingReminder(false);
+    }
+  };
+
   // ── Member cost tracking ───────────────────────────────────────────────────
   type CostItem = { id: string; name: string; description: string | null; sort_order: number };
   type CostAssignment = { id: string; member_id: string; cost_item_id: string; is_self_funded: boolean; notes: string | null };
@@ -594,9 +671,10 @@ export default function AdminBudgetPage() {
   const newCostItemRef = useRef<HTMLInputElement>(null);
 
   const loadCostData = useCallback(async () => {
+    const h = await getAuthHeader();
     const [itemsRes, assignRes] = await Promise.all([
-      fetch(`/api/trips/${tripId}/cost-items`),
-      fetch(`/api/trips/${tripId}/member-costs`),
+      fetch(`/api/trips/${tripId}/cost-items`, { headers: h }),
+      fetch(`/api/trips/${tripId}/member-costs`, { headers: h }),
     ]);
     if (itemsRes.ok) {
       const d = await itemsRes.json();
@@ -607,7 +685,7 @@ export default function AdminBudgetPage() {
       setCostAssignments(d.assignments ?? []);
     }
     setCostItemsLoaded(true);
-  }, [tripId]);
+  }, [tripId, getAuthHeader]);
 
   // Load cost data when the Members tab is first opened
   useEffect(() => {
@@ -620,29 +698,36 @@ export default function AdminBudgetPage() {
     if (!newCostItemName.trim()) return;
     setSavingCostItem(true);
     try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
       const res = await fetch(`/api/trips/${tripId}/cost-items`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: h,
         body: JSON.stringify({ name: newCostItemName.trim(), description: newCostItemDesc.trim() || null, sort_order: costItems.length }),
       });
-      if (res.ok) {
-        const d = await res.json();
-        setCostItems((prev) => [...prev, d.item]);
-        setNewCostItemName('');
-        setNewCostItemDesc('');
-        setAddingCostItem(false);
-      }
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Failed to add cost item');
+      setCostItems((prev) => [...prev, d.item]);
+      setNewCostItemName('');
+      setNewCostItemDesc('');
+      setAddingCostItem(false);
+      showToast('success', 'Cost item added');
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'Failed to add cost item');
     } finally {
       setSavingCostItem(false);
     }
   };
 
   const handleDeleteCostItem = async (itemId: string) => {
-    if (!confirm('Delete this cost item? All member assignments for it will also be removed.')) return;
-    const res = await fetch(`/api/trips/${tripId}/cost-items?item_id=${itemId}`, { method: 'DELETE' });
+    if (!await promptConfirm({ title: 'Delete Cost Item', message: 'Delete this cost item? All member assignments for it will also be removed.', confirmLabel: 'Delete', variant: 'danger' })) return;
+    const h = await getAuthHeader();
+    const res = await fetch(`/api/trips/${tripId}/cost-items?item_id=${itemId}`, { method: 'DELETE', headers: h });
     if (res.ok) {
       setCostItems((prev) => prev.filter((i) => i.id !== itemId));
       setCostAssignments((prev) => prev.filter((a) => a.cost_item_id !== itemId));
+      showToast('success', 'Cost item removed');
+    } else {
+      showToast('error', 'Failed to delete cost item');
     }
   };
 
@@ -652,9 +737,10 @@ export default function AdminBudgetPage() {
     const existing = costAssignments.find((a) => a.member_id === memberId && a.cost_item_id === itemId);
     const newVal = !(existing?.is_self_funded ?? false);
     try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
       const res = await fetch(`/api/trips/${tripId}/member-costs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: h,
         body: JSON.stringify({ member_id: memberId, cost_item_id: itemId, is_self_funded: newVal, notes: existing?.notes ?? null }),
       });
       if (res.ok) {
@@ -663,6 +749,8 @@ export default function AdminBudgetPage() {
           const without = prev.filter((a) => !(a.member_id === memberId && a.cost_item_id === itemId));
           return [...without, d.assignment];
         });
+      } else {
+        showToast('error', 'Failed to update assignment');
       }
     } finally {
       setTogglingCell(null);
@@ -673,9 +761,10 @@ export default function AdminBudgetPage() {
     setSavingNote(true);
     const existing = costAssignments.find((a) => a.member_id === memberId && a.cost_item_id === itemId);
     try {
+      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
       const res = await fetch(`/api/trips/${tripId}/member-costs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: h,
         body: JSON.stringify({ member_id: memberId, cost_item_id: itemId, is_self_funded: existing?.is_self_funded ?? false, notes: noteDraft.trim() || null }),
       });
       if (res.ok) {
@@ -685,6 +774,9 @@ export default function AdminBudgetPage() {
           return [...without, d.assignment];
         });
         setEditingNoteCell(null);
+        showToast('success', 'Note saved');
+      } else {
+        showToast('error', 'Failed to save note');
       }
     } finally {
       setSavingNote(false);
@@ -1031,7 +1123,7 @@ export default function AdminBudgetPage() {
     const existingExpense = expenses.find((entry) => entry.id === id);
     const expenseNote = parseTransactionNote(existingExpense?.notes ?? null);
     const deletingLinkedTransfer = isLinkedTransferNote(expenseNote);
-    if (!confirm(deletingLinkedTransfer ? 'Delete this linked transfer pair?' : 'Delete this expense?')) return;
+    if (!await promptConfirm({ title: deletingLinkedTransfer ? 'Delete Transfer Pair' : 'Delete Expense', message: deletingLinkedTransfer ? 'This will delete both sides of the linked transfer. This cannot be undone.' : 'Delete this expense? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/budget/expenses/${id}`, { method: 'DELETE', headers: h });
@@ -1077,7 +1169,7 @@ export default function AdminBudgetPage() {
     const existingIncome = incomeEntries.find((entry) => entry.id === id);
     const incomeNote = parseTransactionNote(existingIncome?.notes ?? null);
     const deletingLinkedTransfer = isLinkedTransferNote(incomeNote);
-    if (!confirm(deletingLinkedTransfer ? 'Delete this linked transfer pair?' : 'Delete this income entry?')) return;
+    if (!await promptConfirm({ title: deletingLinkedTransfer ? 'Delete Transfer Pair' : 'Delete Income Entry', message: deletingLinkedTransfer ? 'This will delete both sides of the linked transfer. This cannot be undone.' : 'Delete this income entry? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${id}`, { method: 'DELETE', headers: h });
@@ -1143,7 +1235,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeletePayment = async (paymentId: string) => {
-    if (!confirm('Delete this payment?')) return;
+    if (!await promptConfirm({ title: 'Delete Payment', message: 'Delete this payment record? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/payments/member-payment/${paymentId}?trip_id=${encodeURIComponent(tripId)}`, {
@@ -1166,7 +1258,7 @@ export default function AdminBudgetPage() {
   const handleBulkDeletePayments = async () => {
     const ids = Array.from(selectedPaymentIds);
     if (ids.length === 0) return;
-    if (!confirm(`Delete ${ids.length} selected payment${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (!await promptConfirm({ title: 'Delete Payments', message: `Permanently delete ${ids.length} selected payment${ids.length === 1 ? '' : 's'}? This cannot be undone.`, confirmLabel: 'Delete All', variant: 'danger' })) return;
     setBulkDeleting(true);
     try {
       const h = await getAuthHeader();
@@ -1404,7 +1496,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeleteMilestone = async (milestoneId: string) => {
-    if (!confirm('Delete this milestone?')) return;
+    if (!await promptConfirm({ title: 'Delete Milestone', message: 'Delete this payment milestone? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/payment-schedule?milestone_id=${encodeURIComponent(milestoneId)}`, {
@@ -1546,7 +1638,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeleteLedgerRow = async (row: LedgerRow) => {
-    if (!confirm(`Delete "${row.description}"? This cannot be undone.`)) return;
+    if (!await promptConfirm({ title: 'Delete Transaction', message: `Delete "${row.description}"? This cannot be undone.`, confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const ok = await deleteLedgerRowById(row, h);
@@ -1563,7 +1655,7 @@ export default function AdminBudgetPage() {
   const handleBulkDeleteLedgerRows = async () => {
     const ids = Array.from(selectedLedgerIds);
     if (ids.length === 0) return;
-    if (!confirm(`Permanently delete ${ids.length} selected transaction${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (!await promptConfirm({ title: 'Delete Transactions', message: `Permanently delete ${ids.length} selected transaction${ids.length === 1 ? '' : 's'}? This cannot be undone.`, confirmLabel: 'Delete All', variant: 'danger' })) return;
     setBulkDeletingLedger(true);
     try {
       const h = await getAuthHeader();
@@ -1862,7 +1954,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleDeleteCat = async (id: string) => {
-    if (!confirm('Delete this category?')) return;
+    if (!await promptConfirm({ title: 'Delete Category', message: 'Delete this category? Expenses assigned to it will become uncategorised.', confirmLabel: 'Delete', variant: 'danger' })) return;
     try {
       const h = await getAuthHeader();
       const res = await fetch(`/api/trips/${tripId}/budget/categories/${id}`, { method: 'DELETE', headers: h });
@@ -1872,7 +1964,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleSeedCategories = async () => {
-    if (!confirm('Add default categories?')) return;
+    if (!await promptConfirm({ title: 'Add Default Categories', message: 'Add the default category set? This will add categories alongside any you\'ve already created.', confirmLabel: 'Add Defaults', variant: 'info' })) return;
     setSaving(true);
     try {
       const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
@@ -2049,13 +2141,11 @@ export default function AdminBudgetPage() {
     finally { setSaving(false); }
   };
 
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
+  const [showDeleteAllForm, setShowDeleteAllForm] = useState(false);
+
   const handleDeleteAllData = async () => {
-    const confirmed = confirm(
-      'DELETE ALL FINANCIAL DATA?\n\nThis will permanently delete ALL expenses and income entries for this trip. Member payment records are kept.\n\nThis cannot be undone. Type "DELETE" in the prompt to confirm.'
-    );
-    if (!confirmed) return;
-    const typed = prompt('Type DELETE to confirm:');
-    if (typed !== 'DELETE') { showToast('error', 'Cancelled — nothing was deleted'); return; }
+    if (deleteAllConfirmText !== 'DELETE') { showToast('error', 'Type DELETE to confirm'); return; }
     setDeletingAll(true);
     try {
       const h = await getAuthHeader();
@@ -2512,6 +2602,17 @@ export default function AdminBudgetPage() {
 
   return (
     <div className="space-y-6">
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        variant={confirmDialog.variant}
+        onConfirm={() => resolveConfirm(true)}
+        onCancel={() => resolveConfirm(false)}
+      />
+
       {/* Toast */}
       {toast && (
         <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg shadow-xl border ${toast.type === 'success' ? 'bg-green-900/95 border-green-600/60 text-green-200' : 'bg-red-900/95 border-red-600/60 text-red-200'}`}>
@@ -2613,7 +2714,10 @@ export default function AdminBudgetPage() {
         <div className="space-y-6">
           {/* Net position hero */}
           <div className={`rounded-xl p-6 border ${overview.net_position_aud >= 0 ? 'bg-green-900/20 border-green-600/30' : 'bg-red-900/20 border-red-600/30'}`}>
-            <p className="text-sm text-brand-cream/60 uppercase tracking-wider mb-1">Net Position</p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-sm text-brand-cream/60 uppercase tracking-wider">Net Position</p>
+              <InfoTooltip content="Total income received minus total expenses recorded. Positive = surplus funds on hand; negative = overspent relative to collections." position="right" />
+            </div>
             <p className={`text-5xl font-bold ${overview.net_position_aud >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {fmtSigned(overview.net_position_aud)}
             </p>
@@ -2632,6 +2736,7 @@ export default function AdminBudgetPage() {
                   <div className="flex items-center gap-2">
                     <Landmark className="w-5 h-5 text-brand-tan" />
                     <h3 className="font-semibold text-brand-cream">Cash Position</h3>
+                    <InfoTooltip content="Calculated from your ledger entries — income minus expenses per account. Update actual balances in the Accounts tab for a real-time reconciliation view." />
                     <span className="text-xs text-brand-cream/30 ml-1">from recorded transactions</span>
                   </div>
 
@@ -2687,8 +2792,11 @@ export default function AdminBudgetPage() {
                   <span>Budget target (per person)</span>
                   <span>{fmt(totalBudgetPerPersonAud)}</span>
                 </div>
-                <div className={`flex justify-between ${hasCollectionSurplus ? 'text-green-400/90' : 'text-amber-400/80'}`}>
-                  <span>{hasCollectionSurplus ? 'Collection surplus' : 'Collection gap'}</span>
+                <div className={`flex justify-between items-center ${hasCollectionSurplus ? 'text-green-400/90' : 'text-amber-400/80'}`}>
+                  <span className="flex items-center gap-1">
+                    {hasCollectionSurplus ? 'Collection surplus' : 'Collection gap'}
+                    <InfoTooltip content={hasCollectionSurplus ? 'Members have paid more than the budget target — you\'re ahead of schedule.' : 'The shortfall between what members have paid and the budget target. Send reminders to close this gap.'} />
+                  </span>
                   <span>{fmt(Math.abs(collectionGapAud))}</span>
                 </div>
               </div>
@@ -4224,6 +4332,7 @@ export default function AdminBudgetPage() {
                           </button>
                         </th>
                       ))}
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Target</th>
                       <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Payments</th>
                       <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Last Payment</th>
                       <th className="px-6 py-4 text-left text-sm font-semibold text-brand-cream">Milestone Status</th>
@@ -4231,13 +4340,16 @@ export default function AdminBudgetPage() {
                   </thead>
                   <tbody>
                     {sortedMemberPaymentSummary.map((member) => {
-                      const hasSchedule = targetAmount > 0;
                       const memberTransactions = [...(paymentsByMember[member.member_id] ?? [])]
                         .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
                       const isExpanded = expandedMemberPayments[member.member_id] === true;
-                      const remaining = Math.max(0, targetAmount - member.total_paid);
-                      const percentPaid = targetAmount > 0 ? (member.total_paid / targetAmount) * 100 : 0;
-                      const isFullyPaid = hasSchedule && member.total_paid >= targetAmount;
+                      // Use member-specific kitty share if available, fall back to schedule target
+                      const memberBD = memberBreakdown.find((b) => b.user_id === member.member_id);
+                      const memberTarget = memberBD ? (memberBD.kitty_share_aud ?? memberBD.cost_share_aud ?? targetAmount) : targetAmount;
+                      const hasSchedule = memberTarget > 0;
+                      const remaining = Math.max(0, memberTarget - member.total_paid);
+                      const percentPaid = memberTarget > 0 ? (member.total_paid / memberTarget) * 100 : 0;
+                      const isFullyPaid = hasSchedule && member.total_paid >= memberTarget;
                       const isAhead = hasSchedule && !isFullyPaid && member.total_paid > expectedByMilestone;
                       const isOnTrack = hasSchedule && !isFullyPaid && member.total_paid >= expectedByMilestone;
 
@@ -4267,6 +4379,9 @@ export default function AdminBudgetPage() {
                               <p className={`font-semibold ${remaining > 0 ? 'text-amber-400' : 'text-green-400'}`}>
                                 ${remaining.toFixed(2)}
                               </p>
+                            </td>
+                            <td className="px-6 py-4">
+                              <p className="text-brand-cream/60">{memberTarget > 0 ? `$${memberTarget.toFixed(2)}` : '—'}</p>
                             </td>
                             <td className="px-6 py-4">
                               <p className="text-brand-cream/70">{member.payment_count}</p>
@@ -4338,7 +4453,7 @@ export default function AdminBudgetPage() {
                           </tr>
                           {isExpanded && (
                             <tr className="border-b border-brand-tan/10 bg-brand-black/40">
-                              <td colSpan={6} className="px-6 py-4">
+                              <td colSpan={7} className="px-6 py-4">
                                 {memberTransactions.length === 0 ? (
                                   <p className="text-sm text-brand-cream/40">No transactions recorded for this member.</p>
                                 ) : (() => {
@@ -5917,13 +6032,44 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
         <div className="max-w-5xl space-y-5">
-          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-5">
-            <h3 className="font-semibold text-brand-cream">Budget Configuration</h3>
+
+          {/* ── Mini-nav index ───────────────────────────────────────────── */}
+          <div className="flex flex-wrap gap-2 pb-1 border-b border-brand-tan/10">
+            {[
+              { key: 'budget', label: 'Budget Configuration' },
+              { key: 'payment', label: 'Payment Settings' },
+              { key: 'milestones', label: 'Milestones' },
+              { key: 'visibility', label: 'Visibility' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setSettingsOpen((prev) => ({ ...prev, [key]: true }));
+                  document.getElementById(`settings-section-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border border-brand-tan/20 text-brand-cream/60 hover:text-brand-tan hover:border-brand-tan/50 transition-colors"
+              >
+                <ChevronRight className="w-3 h-3" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Budget Configuration ─────────────────────────────────────── */}
+          <div id="settings-section-budget" className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('budget')}
+              className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-brand-black/20 transition-colors"
+            >
+              <h3 className="font-semibold text-brand-cream">Budget Configuration</h3>
+              <ChevronDown className={`w-4 h-4 text-brand-cream/50 transition-transform ${settingsOpen.budget ? 'rotate-180' : ''}`} />
+            </button>
+            {settingsOpen.budget && <div className="px-6 pb-6 space-y-5 border-t border-brand-tan/10 pt-5">
 
             {/* Budget fields — both independent, with auto-sync helpers */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-brand-cream/60 mb-1">Per-Person Budget (AUD)</label>
+                <label className="flex items-center gap-1 text-xs font-medium text-brand-cream/60 mb-1">Per-Person Budget (AUD) <InfoTooltip content="The total amount each member is expected to contribute to the trip kitty. Changing this auto-updates the group total if sync mode is active." /></label>
                 <input
                   type="number" min="0" step="100"
                   value={settings.per_person_budget_aud || ''}
@@ -5941,7 +6087,7 @@ export default function AdminBudgetPage() {
                 <p className="text-xs text-brand-cream/30 mt-1">Cost each member is expected to contribute</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-brand-cream/60 mb-1">Group Total Budget (AUD)</label>
+                <label className="flex items-center gap-1 text-xs font-medium text-brand-cream/60 mb-1">Group Total Budget (AUD) <InfoTooltip content="The combined budget across all members — used for overall health tracking and category allocation. Syncs from per-person × member count when auto-calc is active." /></label>
                 <input
                   type="number" min="0" step="100"
                   value={settings.total_budget_aud || ''}
@@ -6078,16 +6224,25 @@ export default function AdminBudgetPage() {
               )}
             </div>
             <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label><textarea rows={3} value={settingsNotesText} onChange={(e) => setSettingsNotesText(e.target.value)} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="Any general notes about this trip's budget…" /></div>
+            </div>}
           </div>
 
-          <div className="bg-brand-black/30 border border-brand-tan/20 rounded-lg p-5 space-y-5">
-            <div className="flex items-start justify-between gap-4">
+          {/* ── Trip Payment Settings ─────────────────────────────────────── */}
+          <div id="settings-section-payment" className="bg-brand-black/30 border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('payment')}
+              className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-brand-black/20 transition-colors"
+            >
               <div>
                 <h3 className="font-semibold text-brand-cream">Trip Payment Settings</h3>
                 <p className="text-xs text-brand-cream/40 mt-1">Configure payment options, flights surcharge and bank details per trip.</p>
               </div>
+              <ChevronDown className={`w-4 h-4 text-brand-cream/50 transition-transform ${settingsOpen.payment ? 'rotate-180' : ''}`} />
+            </button>
+            {settingsOpen.payment && <div className="px-6 pb-6 space-y-5 border-t border-brand-tan/10 pt-5">
+            <div className="flex justify-end">
               <button onClick={handleSavePaymentSettings} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save Settings'}
+                {saving ? 'Saving…' : 'Save Payment Settings'}
               </button>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -6102,7 +6257,7 @@ export default function AdminBudgetPage() {
                   Show payment option cards on member pages
                 </label>
                 <div>
-                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Flights Cost Add-on (AUD)</label>
+                  <label className="flex items-center gap-1 text-xs font-medium text-brand-cream/60 mb-1">Flights Cost Add-on (AUD) <InfoTooltip content="An additional per-person surcharge applied for members who need flights arranged. Shown separately in the member portal so they know what portion covers airfare." /></label>
                   <input
                     type="number"
                     min="0"
@@ -6321,14 +6476,23 @@ export default function AdminBudgetPage() {
                 />
               </div>
             </div>
+            </div>}
           </div>
 
-          <div className="bg-brand-black/30 border border-brand-tan/20 rounded-lg p-5 space-y-4">
-            <div className="flex items-center justify-between">
+          {/* ── Payment Schedule Milestones ───────────────────────────────── */}
+          <div id="settings-section-milestones" className="bg-brand-black/30 border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('milestones')}
+              className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-brand-black/20 transition-colors"
+            >
               <div>
                 <h3 className="font-semibold text-brand-cream">Payment Schedule Milestones</h3>
                 <p className="text-xs text-brand-cream/40 mt-1">Create and maintain the accumulated target milestones for this trip.</p>
               </div>
+              <ChevronDown className={`w-4 h-4 text-brand-cream/50 transition-transform ${settingsOpen.milestones ? 'rotate-180' : ''}`} />
+            </button>
+            {settingsOpen.milestones && <div className="px-6 pb-6 space-y-4 border-t border-brand-tan/10 pt-5">
+            <div className="flex justify-end">
               <button
                 onClick={() => {
                   if (showMilestoneForm) {
@@ -6359,7 +6523,7 @@ export default function AdminBudgetPage() {
                     step="0.01"
                     value={milestoneForm.accumulated_amount}
                     onChange={(e) => setMilestoneForm((prev) => ({ ...prev, accumulated_amount: e.target.value }))}
-                    placeholder="Accumulated Amount (AUD)"
+                    placeholder="Accumulated Amount by this date (AUD)"
                     className="px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
                   />
                   <input
@@ -6382,28 +6546,78 @@ export default function AdminBudgetPage() {
             ) : (
               <div className="space-y-2">
                 {paymentSchedule.map((milestone) => (
-                  <div key={milestone.id} className="flex items-center justify-between bg-brand-dark-grey border border-brand-tan/20 rounded-lg px-4 py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-brand-cream">{fmtDate(milestone.milestone_date)} · {fmt(milestone.accumulated_amount)}</p>
-                      {milestone.description && <p className="text-xs text-brand-cream/50">{milestone.description}</p>}
+                  <div key={milestone.id} className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-brand-cream">{fmtDateLong(milestone.milestone_date)} · {fmt(milestone.accumulated_amount)}</p>
+                        {milestone.description && <p className="text-xs text-brand-cream/50">{milestone.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setReminderMilestoneId(reminderMilestoneId === milestone.id ? null : milestone.id)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${reminderMilestoneId === milestone.id ? 'bg-brand-tan/20 text-brand-tan border border-brand-tan/40' : 'border border-brand-tan/20 text-brand-cream/40 hover:text-brand-tan hover:border-brand-tan/40'}`}
+                          title="Send reminder to members"
+                        >
+                          <Bell className="w-3.5 h-3.5" />
+                          Remind
+                        </button>
+                        <button onClick={() => openMilestoneEditor(milestone)} className="p-1 text-brand-cream/40 hover:text-brand-tan" title="Edit milestone">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDeleteMilestone(milestone.id)} className="p-1 text-brand-cream/40 hover:text-red-400" title="Delete milestone">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => openMilestoneEditor(milestone)} className="p-1 text-brand-cream/40 hover:text-brand-tan" title="Edit milestone">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDeleteMilestone(milestone.id)} className="p-1 text-brand-cream/40 hover:text-red-400" title="Delete milestone">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {/* Inline reminder panel */}
+                    {reminderMilestoneId === milestone.id && (
+                      <div className="border-t border-brand-tan/15 bg-brand-black/30 px-4 py-3 space-y-2">
+                        <p className="text-xs font-medium text-brand-cream/60">Send a payment reminder for this milestone to all trip members</p>
+                        <textarea
+                          rows={2}
+                          value={reminderMessage}
+                          onChange={(e) => setReminderMessage(e.target.value)}
+                          placeholder="Optional: add a custom message to include in the email…"
+                          className="w-full px-3 py-2 bg-brand-black border border-brand-tan/25 rounded-lg text-brand-cream text-sm focus:outline-none focus:ring-2 focus:ring-brand-tan placeholder:text-brand-cream/25 resize-none"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => { setReminderMilestoneId(null); setReminderMessage(''); }}
+                            className="px-3 py-1.5 rounded-lg text-xs border border-brand-tan/20 text-brand-cream/50 hover:text-brand-cream transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleSendReminder(milestone.id)}
+                            disabled={sendingReminder}
+                            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-brand-tan text-brand-black hover:bg-brand-tan/90 transition-colors disabled:opacity-50"
+                          >
+                            <Send className="w-3 h-3" />
+                            {sendingReminder ? 'Sending…' : `Send to ${tripMembers.length} member${tripMembers.length === 1 ? '' : 's'}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
+            </div>}
           </div>
 
-          <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-6 space-y-5">
-            <h3 className="font-semibold text-brand-cream">Member Visibility</h3>
-            <p className="text-xs text-brand-cream/40">Control what members can see in their trip budget view</p>
+          {/* ── Member Visibility ─────────────────────────────────────────── */}
+          <div id="settings-section-visibility" className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('visibility')}
+              className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-brand-black/20 transition-colors"
+            >
+              <div>
+                <h3 className="font-semibold text-brand-cream">Member Visibility</h3>
+                <p className="text-xs text-brand-cream/40 mt-1">Control what members can see in their trip budget view</p>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-brand-cream/50 transition-transform ${settingsOpen.visibility ? 'rotate-180' : ''}`} />
+            </button>
+            {settingsOpen.visibility && <div className="px-6 pb-6 space-y-4 border-t border-brand-tan/10 pt-5">
             {[
               { key: 'show_group_budget_to_members' as const, label: 'Show group budget to members', desc: 'Members see budget health, categories, and spend progress' },
               { key: 'show_individual_breakdown_to_members' as const, label: 'Show individual cost breakdown', desc: 'Each member sees their own cost share and payment status' },
@@ -6418,6 +6632,7 @@ export default function AdminBudgetPage() {
                 <div><p className="font-medium text-brand-cream text-sm">{label}</p><p className="text-xs text-brand-cream/40 mt-0.5">{desc}</p></div>
               </label>
             ))}
+            </div>}
           </div>
 
           <button onClick={handleSaveSettings} disabled={saving} className="w-full bg-brand-tan hover:bg-brand-tan/90 text-brand-black font-semibold py-3 rounded-lg transition-colors disabled:opacity-50">
@@ -6425,26 +6640,63 @@ export default function AdminBudgetPage() {
           </button>
 
           {/* ── Danger Zone ───────────────────────────────────────────────── */}
-          <div className="bg-red-950/30 border border-red-600/30 rounded-xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400" />
-              <h3 className="font-semibold text-red-300 text-sm">Danger Zone</h3>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-brand-cream">Delete All Financial Data</p>
-                <p className="text-xs text-brand-cream/40 mt-0.5">
-                  Permanently removes ALL expenses and income entries. Member payment records are kept. Start fresh.
-                </p>
+          <div className="mt-8 pt-8 border-t-2 border-red-900/50">
+            <div className="bg-red-950/20 border border-red-700/40 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-red-900/40 border border-red-600/40 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-4.5 h-4.5 text-red-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-red-300">Danger Zone</h3>
+                  <p className="text-xs text-red-400/60 mt-0.5">Irreversible actions. Proceed with extreme caution.</p>
+                </div>
               </div>
-              <button
-                onClick={handleDeleteAllData}
-                disabled={deletingAll}
-                className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-red-700/30 border border-red-600/50 text-red-300 rounded-lg text-sm font-semibold hover:bg-red-700/50 transition-colors disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {deletingAll ? 'Deleting…' : 'Delete All Data'}
-              </button>
+
+              <div className="rounded-xl border border-red-700/30 bg-red-950/30 p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-brand-cream">Delete All Financial Data</p>
+                  <p className="text-xs text-brand-cream/40 mt-1 leading-relaxed">
+                    Permanently removes <strong className="text-brand-cream/60">all</strong> expenses and income entries for this trip.
+                    Member payment records and milestones are kept. This cannot be undone.
+                  </p>
+                </div>
+                {!showDeleteAllForm ? (
+                  <button
+                    onClick={() => setShowDeleteAllForm(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-900/30 border border-red-600/40 text-red-300 rounded-lg text-sm font-semibold hover:bg-red-900/50 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete All Data
+                  </button>
+                ) : (
+                  <div className="space-y-2 pt-1">
+                    <p className="text-xs text-red-300/80 font-medium">Type <code className="bg-red-900/40 px-1 rounded text-red-200">DELETE</code> to confirm:</p>
+                    <div className="flex gap-2">
+                      <input
+                        autoFocus
+                        value={deleteAllConfirmText}
+                        onChange={(e) => setDeleteAllConfirmText(e.target.value)}
+                        placeholder="DELETE"
+                        className="flex-1 px-3 py-2 bg-brand-black border border-red-600/40 rounded-lg text-brand-cream text-sm focus:outline-none focus:ring-2 focus:ring-red-500 placeholder:text-brand-cream/20"
+                      />
+                      <button
+                        onClick={handleDeleteAllData}
+                        disabled={deletingAll || deleteAllConfirmText !== 'DELETE'}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {deletingAll ? 'Deleting…' : 'Confirm Delete'}
+                      </button>
+                      <button
+                        onClick={() => { setShowDeleteAllForm(false); setDeleteAllConfirmText(''); }}
+                        className="px-3 py-2 rounded-lg border border-brand-tan/20 text-brand-cream/50 text-sm hover:text-brand-cream hover:border-brand-tan/40 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

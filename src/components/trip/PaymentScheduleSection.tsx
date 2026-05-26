@@ -62,6 +62,8 @@ interface PaymentScheduleSectionProps {
   tripId: string;
   tripName?: string;
   showPaymentInfo?: boolean;
+  /** When false, hides the milestone timeline and shows only payment options + bank details */
+  showSchedule?: boolean;
 }
 
 const DEFAULT_PAYMENT_SETTINGS: TripPaymentSettings = {
@@ -139,6 +141,7 @@ function parsePaymentSourcePayload(rawBankNotes: string | null): { note: string 
 export default function PaymentScheduleSection({
   tripId,
   showPaymentInfo = true,
+  showSchedule = true,
 }: PaymentScheduleSectionProps) {
   const [schedule, setSchedule] = useState<PaymentMilestone[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<TripPaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
@@ -187,7 +190,12 @@ export default function PaymentScheduleSection({
     );
   }
 
-  if (!schedule || schedule.length === 0) {
+  // When showing schedule, bail if there are no milestones.
+  // When hiding schedule (bank-details-only mode), still render if there's bank info.
+  if (showSchedule && (!schedule || schedule.length === 0)) {
+    return null;
+  }
+  if (!showSchedule && !showPaymentInfo) {
     return null;
   }
 
@@ -230,30 +238,44 @@ export default function PaymentScheduleSection({
   );
   const hasBankDetails = hasMemberPortalSourceDetails || hasLegacyBankDetails || parsedPaymentSources.note;
 
+  // In bank-details-only mode, bail if there's truly nothing useful to show.
+  if (!showSchedule && !hasBankDetails && !showMonthlyOption && !showQuarterlyOption) {
+    return null;
+  }
+
   return (
     <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg overflow-hidden">
       <div className="bg-gradient-to-r from-brand-tan/10 to-brand-tan/5 border-b border-brand-tan/30 p-6">
         <div className="flex items-center gap-3 mb-2">
           <DollarSign className="w-6 h-6 text-brand-tan" />
-          <h3 className="text-xl font-bold text-brand-cream">Payment Schedule</h3>
+          <h3 className="text-xl font-bold text-brand-cream">
+            {showSchedule ? 'Payment Schedule' : 'How to Pay'}
+          </h3>
         </div>
-        <p className="text-sm text-brand-cream/70">
-          Total trip cost:{' '}
-          <span className="font-semibold text-brand-tan">
-            ${totalTripCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-          </span>
-        </p>
-        {flightsCost > 0 && (
-          <p className="text-sm text-brand-cream/70 mt-1">
-            Payment schedule target:{' '}
-            <span className="font-semibold text-brand-tan">
-              ${scheduleTargetAmount.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </span>
-            {' '}+ Flights:{' '}
-            <span className="font-semibold text-brand-tan">
-              ${flightsCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </span>
-          </p>
+        {showSchedule && (
+          <>
+            <p className="text-sm text-brand-cream/70">
+              Total trip cost:{' '}
+              <span className="font-semibold text-brand-tan">
+                ${totalTripCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </span>
+            </p>
+            {flightsCost > 0 && (
+              <p className="text-sm text-brand-cream/70 mt-1">
+                Payment schedule target:{' '}
+                <span className="font-semibold text-brand-tan">
+                  ${scheduleTargetAmount.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                {' '}+ Flights:{' '}
+                <span className="font-semibold text-brand-tan">
+                  ${flightsCost.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+              </p>
+            )}
+          </>
+        )}
+        {!showSchedule && (
+          <p className="text-sm text-brand-cream/50">Bank details and payment options</p>
         )}
       </div>
 
@@ -296,7 +318,7 @@ export default function PaymentScheduleSection({
           </div>
         )}
 
-        <div className="space-y-0">
+        {showSchedule && <div className="space-y-0">
           <h4 className="font-semibold text-brand-cream mb-4">Payment Milestones</h4>
           <div className="space-y-3">
             {schedule.map((milestone, index) => {
@@ -372,7 +394,7 @@ export default function PaymentScheduleSection({
               );
             })}
           </div>
-        </div>
+        </div>}
 
         {showPaymentInfo && paymentSettings.show_bank_details && hasBankDetails && (
           <div className="bg-gradient-to-r from-brand-tan/10 to-brand-tan/5 rounded-lg p-4 border border-brand-tan/30 mt-6">

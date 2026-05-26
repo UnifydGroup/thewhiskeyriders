@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // GET /api/trips/[id]/cost-items
 export async function GET(_req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
 
   const { data, error } = await supabase
     .from('trip_cost_items')
@@ -21,8 +21,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 // POST /api/trips/[id]/cost-items  — create a new cost item
 export async function POST(req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
   const body = await req.json();
   const { name, description, sort_order } = body as {
     name: string;
@@ -46,8 +46,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
 // PATCH /api/trips/[id]/cost-items  — bulk update sort orders or rename
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
   const body = await req.json();
 
   // Expect: { updates: [{ id, name?, description?, sort_order? }] }
@@ -78,8 +78,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // DELETE /api/trips/[id]/cost-items?item_id=xxx
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const supabase = createClient();
-  const { id: tripId } = params;
+  const supabase = await createClient();
+  const { id: tripId } = await params;
   const itemId = new URL(req.url).searchParams.get('item_id');
 
   if (!itemId) return NextResponse.json({ error: 'item_id required' }, { status: 400 });

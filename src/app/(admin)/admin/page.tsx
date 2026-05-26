@@ -32,8 +32,10 @@ export default function AdminDashboardPage() {
     totalMembers: 0,
     pendingApprovals: 0,
     pendingPayments: 0,
+    membersBehind: 0,
     upcomingTrips: 0,
   });
+  const [activeTrips, setActiveTrips] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const loadStats = async () => {
@@ -52,15 +54,20 @@ export default function AdminDashboardPage() {
           .eq('status', 'pending');
         // Get pending payments amount to the current milestone (active/upcoming trips)
         let pendingOutstandingAmount = 0;
+        let membersBehindCount = 0;
         const { data: trackedTrips, error: trackedTripsError } = await supabase
           .from('trips')
-          .select('id')
+          .select('id, name')
           .in('status', ['active', 'upcoming']);
         if (trackedTripsError) throw trackedTripsError;
 
-        const trackedTripIds = (trackedTrips || []).map((trip) => trip.id);
+        const trackedTripList = trackedTrips || [];
+        setActiveTrips(trackedTripList.map((t) => ({ id: t.id, name: t.name })));
+        const trackedTripIds = trackedTripList.map((trip) => trip.id);
         if (trackedTripIds.length > 0) {
           const today = new Date();
+          // Use local noon to avoid off-by-one in AU timezone
+          today.setHours(12, 0, 0, 0);
           const [
             { data: milestones, error: milestonesError },
             { data: tripMembers, error: tripMembersError },
@@ -85,9 +92,12 @@ export default function AdminDashboardPage() {
           if (tripMembersError) throw tripMembersError;
           if (memberPaymentsError) throw memberPaymentsError;
 
+          // Latest passed milestone amount per trip
           const expectedByTrip = new Map<string, number>();
           for (const milestone of (milestones || []) as TripMilestone[]) {
-            if (new Date(milestone.milestone_date) <= today) {
+            const [y, m, d] = milestone.milestone_date.slice(0, 10).split('-').map(Number);
+            const milestoneDate = new Date(y, m - 1, d, 12, 0, 0);
+            if (milestoneDate <= today) {
               expectedByTrip.set(milestone.trip_id, Number(milestone.accumulated_amount));
             }
           }
@@ -103,7 +113,11 @@ export default function AdminDashboardPage() {
             if (expectedAmount <= 0) continue;
 
             const paidAmount = paidByMemberByTrip.get(`${member.trip_id}:${member.user_id}`) || 0;
-            pendingOutstandingAmount += Math.max(0, expectedAmount - paidAmount);
+            const shortfall = Math.max(0, expectedAmount - paidAmount);
+            if (shortfall > 0) {
+              pendingOutstandingAmount += shortfall;
+              membersBehindCount += 1;
+            }
           }
         }
         // Get upcoming trips count
@@ -116,6 +130,7 @@ export default function AdminDashboardPage() {
           totalMembers: memberCount || 0,
           pendingApprovals: pendingApprovalsCount || 0,
           pendingPayments: pendingOutstandingAmount,
+          membersBehind: membersBehindCount,
           upcomingTrips: upcomingCount || 0,
         });
       } catch (err) {
@@ -200,23 +215,45 @@ export default function AdminDashboardPage() {
           <CardContent className="pt-6 space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-brand-cream/70 text-sm font-medium mb-1">Pending Payments</p>
+                <p className="text-brand-cream/70 text-sm font-medium mb-1">Overdue Payments</p>
                 <p className="text-3xl font-bold text-brand-cream">
-                  ${stats.pendingPayments.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
+                  ${stats.pendingPayments.toLocaleString('en-AU', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
                   })}
                 </p>
+                {stats.membersBehind > 0 && (
+                  <p className="text-xs text-amber-400/80 mt-1">
+                    {stats.membersBehind} member{stats.membersBehind === 1 ? '' : 's'} behind schedule
+                  </p>
+                )}
+                {stats.membersBehind === 0 && stats.pendingPayments === 0 && (
+                  <p className="text-xs text-green-400/80 mt-1">All members on track ✓</p>
+                )}
               </div>
               <div className="p-3 bg-brand-brown/20 rounded-lg">
                 <DollarSign className="w-6 h-6 text-brand-brown" />
               </div>
             </div>
-            <Link href="/admin/financial-manager">
-              <Button variant="outline" size="sm" className="w-full">
-                Open Financial Manager
-              </Button>
-            </Link>
+            {activeTrips.length === 1 ? (
+              <Link href={`/admin/trips/${activeTrips[0].id}/budget?tab=collections`}>
+                <Button variant="outline" size="sm" className="w-full">
+                  View Member Payments
+                </Button>
+              </Link>
+            ) : activeTrips.length > 1 ? (
+              <Link href="/admin/trips?status=active">
+                <Button variant="outline" size="sm" className="w-full">
+                  View Active Trips
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/admin/trips">
+                <Button variant="ghost" size="sm" className="w-full">
+                  View Trips
+                </Button>
+              </Link>
+            )}
           </CardContent>
         </Card>
         <Card>

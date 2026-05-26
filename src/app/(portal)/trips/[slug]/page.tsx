@@ -25,7 +25,6 @@ import Link from 'next/link';
 import PaymentScheduleSection from '@/components/trip/PaymentScheduleSection';
 import PaymentProgressCard from '@/components/dashboard/PaymentProgressCard';
 import PhotosTabContent from '@/components/photos/PhotosTabContent';
-import MemberTransactions from '@/components/trips/MemberTransactions';
 import MemberBudgetView from '@/components/budget/MemberBudgetView';
 import { getMemberDisplayName } from '@/lib/member-display';
 import type { Trip, TripKeyDate, TripUpdate, TripMember, Profile } from '@/lib/types/database';
@@ -46,6 +45,16 @@ type TripDocument = {
 };
 
 type TripTab = 'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes';
+
+const TAB_LABELS: Record<TripTab, string> = {
+  overview: 'Overview',
+  news: 'News',
+  photos: 'Photos',
+  documents: 'Documents',
+  payments: 'Payments',
+  budget: 'Trip Budget',
+  votes: 'Votes',
+};
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -416,7 +425,7 @@ export default function TripDetailPage() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`pb-3 px-2 font-semibold transition-colors capitalize flex items-center gap-2 whitespace-nowrap ${
+            className={`pb-3 px-2 font-semibold transition-colors flex items-center gap-2 whitespace-nowrap ${
               tab === t
                 ? 'text-brand-brown border-b-2 border-brand-brown'
                 : 'text-brand-cream/60 hover:text-brand-cream'
@@ -424,7 +433,7 @@ export default function TripDetailPage() {
           >
             {t === 'news' && <Newspaper className="w-4 h-4" />}
             {t === 'photos' && <ImageIcon className="w-4 h-4" />}
-            {t}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -644,6 +653,13 @@ export default function TripDetailPage() {
       {/* Payments Tab */}
       {tab === 'payments' && trip && (
         <div className="space-y-6">
+          {/* Bank details / how to pay — shown first so members know where to send money */}
+          <PaymentScheduleSection
+            tripId={trip.id}
+            showPaymentInfo={true}
+            showSchedule={false}
+          />
+          {/* Progress card — includes full milestone schedule + payment history */}
           {currentUser?.id && (
             <PaymentProgressCard
               tripId={trip.id}
@@ -651,13 +667,6 @@ export default function TripDetailPage() {
               tripName={trip.name}
             />
           )}
-          {currentUser?.id && (
-            <div>
-              <h2 className="text-2xl font-bold text-brand-cream mb-4">Your Transactions</h2>
-              <MemberTransactions memberId={currentUser.id} tripId={trip.id} />
-            </div>
-          )}
-          <PaymentScheduleSection tripId={trip.id} tripName={trip.name} showPaymentInfo={true} />
         </div>
       )}
 
