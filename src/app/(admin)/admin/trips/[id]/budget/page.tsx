@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState, useCallback, useRef } from 'react';
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -545,7 +545,7 @@ function SortTh({ label, colKey, sortKey, sortDir, onSort, className }: {
 export default function AdminBudgetPage() {
   const params = useParams();
   const tripId = params.id as string;
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   type Tab = 'pl' | 'accounts' | 'ledger' | 'income' | 'expenses' | 'categories' | 'members' | 'settings' | 'export';
   const [tab, setTab] = useState<Tab>('pl');
