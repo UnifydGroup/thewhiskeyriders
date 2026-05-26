@@ -547,6 +547,12 @@ export default function AdminBudgetPage() {
   const tripId = params.id as string;
   const supabase = useMemo(() => createClient(), []);
 
+  // Declared early so it is available in useCallback dependency arrays below (avoids TDZ)
+  const getAuthHeader = useCallback(async (): Promise<Record<string, string>> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+  }, [supabase]);
+
   type Tab = 'pl' | 'accounts' | 'ledger' | 'income' | 'expenses' | 'categories' | 'members' | 'settings' | 'export';
   const [tab, setTab] = useState<Tab>('pl');
   const [exportFY, setExportFY] = useState('');
@@ -950,11 +956,6 @@ export default function AdminBudgetPage() {
   };
   // Always returns a stable account ID for new transactions (Westpac Choice = primary operational account)
   const getDefaultInternalAccountId = () => 'westpac_choice';
-
-  const getAuthHeader = useCallback(async (): Promise<Record<string, string>> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-  }, [supabase]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
