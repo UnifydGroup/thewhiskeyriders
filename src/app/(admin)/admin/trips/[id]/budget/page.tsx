@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
+import BudgetBuilder from '@/components/budget/BudgetBuilder';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -38,7 +39,7 @@ interface MemberPaymentSummary { member_id: string; full_name: string; nickname?
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
 interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
 interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_interest_income_aud?: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; kitty_per_member_aud?: number; personal_budget_per_member_aud?: number; total_group_planned_aud?: number; total_personal_planned_aud?: number; kitty_requirement_aud?: number; unreconciled_count: number; }
-interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; }
+interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; projected_member_count?: number | null; }
 interface AccountBalances { westpac_choice: number; westpac_life: number; paypal: number; balance_date: string; }
 interface TripPaymentSettings {
   flights_cost_aud: number;
@@ -2140,6 +2141,19 @@ export default function AdminBudgetPage() {
       showToast('success', 'Settings saved'); fetchData();
     } catch { showToast('error', 'Failed to save settings'); }
     finally { setSaving(false); }
+  };
+
+  // Partial settings update used by BudgetBuilder (doesn't touch the notes JSON blob)
+  const handleBudgetSettingsPartialUpdate = async (partial: Partial<BudgetSettings>) => {
+    const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
+    const res = await fetch(`/api/trips/${tripId}/budget/settings`, {
+      method: 'PUT', headers: h, body: JSON.stringify(partial),
+    });
+    if (!res.ok) throw new Error('Failed to save settings');
+    setSettings((prev) => ({ ...prev, ...partial }));
+    if (partial.show_group_budget_to_members !== undefined || partial.show_individual_breakdown_to_members !== undefined) {
+      fetchData();
+    }
   };
 
   const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
@@ -5183,233 +5197,15 @@ export default function AdminBudgetPage() {
           CATEGORIES TAB
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'categories' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-brand-cream/60 text-sm">Define budget line items</p>
-            <div className="flex gap-2">
-              {categories.length === 0 && <button onClick={handleSeedCategories} disabled={saving} className="flex items-center gap-2 border border-brand-tan/40 hover:border-brand-tan text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10"><Plus className="w-4 h-4" />Add Defaults</button>}
-              <button onClick={() => openCatForm()} className="flex items-center gap-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black px-4 py-2 rounded-lg text-sm font-semibold"><Plus className="w-4 h-4" />Add Category</button>
-            </div>
-          </div>
-
-          {showCatForm && (
-            <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-lg p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-brand-cream">{editingCat ? 'Edit' : 'New'} Category</h3>
-                <button onClick={() => setShowCatForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Name</label>
-                    <input value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Colour</label>
-                    <div className="flex gap-2 flex-wrap">
-                      {CATEGORY_COLORS.map((c) => (
-                        <button key={c} onClick={() => setCatForm({ ...catForm, color: c })} className={`w-7 h-7 rounded-full border-2 transition-all ${catForm.color === c ? 'border-white scale-125' : 'border-transparent'}`} style={{ backgroundColor: c }} />
-                      ))}
-                    </div>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes</label>
-                    <textarea rows={2} value={catForm.notes_text} onChange={(e) => setCatForm({ ...catForm, notes_text: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Committed / Forecast (AUD)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
-                      <input
-                        type="number" min="0" step="0.01"
-                        value={catForm.committed_aud}
-                        onChange={(e) => setCatForm({ ...catForm, committed_aud: e.target.value })}
-                        className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                        placeholder="Booked but not yet paid (deposits, confirmed bookings)"
-                      />
-                    </div>
-                    <p className="text-xs text-brand-cream/30 mt-1">Booked / confirmed commitments not yet paid — shown alongside actual spend</p>
-                  </div>
-                </div>
-
-                <div className="border border-brand-tan/20 rounded-lg overflow-hidden">
-                  <div className="px-4 py-3 bg-brand-black/40 border-b border-brand-tan/20 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-brand-cream text-sm">Budget Parts</p>
-                      <p className="text-xs text-brand-cream/40">Split a category into multiple items (e.g. international + internal flights)</p>
-                    </div>
-                    <button onClick={addCatPart} className="text-xs px-3 py-1.5 rounded border border-brand-tan/40 text-brand-cream hover:bg-brand-tan/10">
-                      <Plus className="w-3.5 h-3.5 inline mr-1" />
-                      Add Part
-                    </button>
-                  </div>
-
-                  <div className="divide-y divide-brand-tan/10">
-                    {catForm.parts.map((part) => (
-                      <div key={part.id} className="p-4 space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                          <div className="md:col-span-2">
-                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Part Name</label>
-                            <input
-                              value={part.name}
-                              onChange={(e) => updateCatPart(part.id, { name: e.target.value })}
-                              placeholder="e.g. International flight"
-                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Who Pays?</label>
-                            <select
-                              value={part.payment_type ?? 'group'}
-                              onChange={(e) => updateCatPart(part.id, { payment_type: e.target.value as BudgetPaymentType })}
-                              className={`w-full px-3 py-2 bg-brand-black border rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan text-sm font-medium ${part.payment_type === 'personal' ? 'border-purple-500/50 text-purple-300' : 'border-brand-tan/30'}`}
-                            >
-                              <option value="group">Group Kitty</option>
-                              <option value="personal">Personal</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Pricing</label>
-                            <select
-                              value={part.basis}
-                              onChange={(e) => updateCatPart(part.id, { basis: e.target.value as BudgetPartBasis })}
-                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                            >
-                              <option value="per_person">Per Person</option>
-                              <option value="group">Group</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">{part.basis === 'per_person' ? 'Amount per Person' : 'Group Amount'} (AUD)</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={part.amount_aud}
-                              onChange={(e) => updateCatPart(part.id, { amount_aud: parseFloat(e.target.value) || 0 })}
-                              className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-brand-cream/60 mb-1">Members</label>
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              disabled={part.basis === 'group'}
-                              value={part.member_count}
-                              onChange={(e) => updateCatPart(part.id, { member_count: Math.max(1, parseInt(e.target.value || '1', 10)) })}
-                              className={`w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan ${part.basis === 'group' ? 'opacity-40 cursor-not-allowed' : ''}`}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-3">
-                            <p className="text-brand-cream/50">Part total: <span className="text-brand-tan font-semibold">{fmt(getBudgetPartTotal(part))}</span></p>
-                            {part.payment_type === 'personal'
-                              ? <span className="text-xs px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-500/30 text-purple-300">Personal expense</span>
-                              : <span className="text-xs px-2 py-0.5 rounded-full bg-brand-tan/10 border border-brand-tan/20 text-brand-tan/70">Group kitty</span>
-                            }
-                          </div>
-                          <button onClick={() => removeCatPart(part.id)} className="text-brand-cream/40 hover:text-red-400 text-xs">
-                            <Trash2 className="w-3.5 h-3.5 inline mr-1" />
-                            Remove part
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-brand-black/40 border border-brand-tan/20 rounded-lg px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm text-brand-cream/60">Category total</span>
-                  <span className="text-lg font-semibold text-brand-tan">{fmt(getCategoryTotalFromParts(normaliseBudgetParts(catForm.parts, defaultParticipantCount)))}</span>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 mt-4">
-                <button onClick={() => setShowCatForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                <button onClick={handleSaveCat} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : editingCat ? 'Update' : 'Add'}</button>
-              </div>
-            </div>
-          )}
-
-	          {categories.length === 0 && !showCatForm ? (
-	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg py-12 text-center text-brand-cream/40">No categories yet</div>
-	          ) : (
-	            <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
-	              <div className="overflow-x-auto">
-	                <table className="w-full min-w-[900px] text-sm">
-	                  <thead className="bg-brand-black">
-	                    <tr>
-	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase w-6" />
-	                      <SortTh label="Category" colKey="name" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
-	                      <SortTh label="Group Kitty" colKey="group" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
-	                      <SortTh label="Personal" colKey="personal" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
-	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Budget (Per Person)</th>
-	                      <SortTh label="Spent" colKey="spent" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
-	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase">Committed</th>
-	                      <SortTh label="Remaining" colKey="remaining" sortKey={catSortKey} sortDir={catSortDir} onSort={handleCatSort} className="px-4 py-3" />
-	                      <th className="px-4 py-3 text-left text-xs text-brand-cream/40 uppercase" />
-	                    </tr>
-	                  </thead>
-	                  <tbody className="divide-y divide-brand-tan/10">
-	                    {sortBy(categories, (cat) => {
-	                      const _parsedForSort = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
-	                      if (catSortKey === 'group') return getCategoryGroupTotal(_parsedForSort.parts);
-	                      if (catSortKey === 'personal') return getCategoryPersonalTotal(_parsedForSort.parts);
-	                      if (catSortKey === 'spent') return cat.spent_aud ?? 0;
-	                      if (catSortKey === 'remaining') return cat.remaining_aud ?? 0;
-	                      return cat.name.toLowerCase();
-	                    }, catSortDir).map((cat) => {
-	                      const parsed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount);
-	                      const groupTotal = getCategoryGroupTotal(parsed.parts);
-	                      const personalTotal = getCategoryPersonalTotal(parsed.parts);
-	                      return (
-	                        <tr key={cat.id} className="hover:bg-brand-tan/5">
-	                          <td className="px-4 py-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} /></td>
-	                          <td className="px-4 py-3">
-	                            <p className="font-medium text-brand-cream">{cat.name}</p>
-	                            <p className="text-xs text-brand-cream/40">{parsed.parts.length} part{parsed.parts.length === 1 ? '' : 's'}{personalTotal > 0 && groupTotal > 0 ? ' · mixed' : personalTotal > 0 ? ' · personal' : ''}</p>
-	                          </td>
-	                          <td className="px-4 py-3 text-brand-cream/70">{groupTotal > 0 ? fmt(groupTotal) : <span className="text-brand-cream/20">—</span>}</td>
-	                          <td className="px-4 py-3">{personalTotal > 0 ? <span className="text-purple-300 font-medium">{fmt(personalTotal)}</span> : <span className="text-brand-cream/20">—</span>}</td>
-	                          <td className="px-4 py-3 text-brand-cream/60">{fmt(cat.planned_aud / participantCount)}</td>
-	                          <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400' : 'text-brand-cream/70'}>{fmt(cat.spent_aud ?? 0)}</span></td>
-	                          <td className="px-4 py-3 text-amber-300/70">
-	                            {(() => {
-	                              const committed = parseCategoryNotes(cat.notes, cat.planned_aud, defaultParticipantCount).committed_aud;
-	                              return committed > 0 ? fmt(committed) : <span className="text-brand-cream/20">—</span>;
-	                            })()}
-	                          </td>
-	                          <td className="px-4 py-3"><span className={cat.over_budget ? 'text-red-400 font-semibold' : 'text-green-400'}>{fmt(Math.abs(cat.remaining_aud ?? 0))}{cat.over_budget ? ' over' : ''}</span></td>
-	                          <td className="px-4 py-3"><div className="flex gap-1"><button onClick={() => openCatForm(cat)} className="p-1 text-brand-cream/30 hover:text-brand-cream"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleDeleteCat(cat.id)} className="p-1 text-brand-cream/30 hover:text-red-400"><Trash2 className="w-4 h-4" /></button></div></td>
-	                        </tr>
-	                      );
-	                    })}
-	                  </tbody>
-	                  <tfoot className="bg-brand-black/40 border-t border-brand-tan/20">
-	                    <tr>
-	                      <td className="px-4 py-3" />
-	                      <td className="px-4 py-3 font-semibold text-brand-cream">Totals</td>
-	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categories.reduce((s, c) => s + getCategoryGroupTotal(parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).parts), 0))}</td>
-	                      <td className="px-4 py-3 font-semibold text-purple-300">{fmt(categories.reduce((s, c) => s + getCategoryPersonalTotal(parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).parts), 0))}</td>
-	                      <td className="px-4 py-3 font-semibold text-brand-tan">{fmt(categoriesBudgetTotal / participantCount)}</td>
-	                      <td className="px-4 py-3 font-semibold text-brand-cream">{fmt(categoriesSpentTotal)}</td>
-	                      <td className="px-4 py-3 font-semibold text-amber-300/70">{fmt(categories.reduce((s, c) => s + parseCategoryNotes(c.notes, c.planned_aud, defaultParticipantCount).committed_aud, 0))}</td>
-	                      <td className="px-4 py-3 font-semibold">
-	                        <span className={categoriesRemainingTotal < 0 ? 'text-red-400' : 'text-green-400'}>
-	                          {fmt(categoriesRemainingTotal)}
-	                        </span>
-	                      </td>
-	                      <td className="px-4 py-3" />
-	                    </tr>
-	                  </tfoot>
-	                </table>
-	              </div>
-	            </div>
-	          )}
-        </div>
+        <BudgetBuilder
+          tripId={tripId}
+          categories={categories}
+          overview={overview}
+          settings={settings}
+          onRefresh={fetchData}
+          onSettingsUpdate={handleBudgetSettingsPartialUpdate}
+          getAuthHeader={getAuthHeader}
+        />
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════

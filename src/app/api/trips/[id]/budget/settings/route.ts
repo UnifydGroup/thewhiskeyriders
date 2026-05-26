@@ -42,6 +42,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       exchange_rate_mad_aud: 0.14,
       enabled_currencies: ['AUD'],
       notes: null,
+      projected_member_count: null,
     };
 
     const showGroup = settings.show_group_budget_to_members === true;
@@ -85,6 +86,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       exchange_rate_mad_aud,
       enabled_currencies,
       notes,
+      projected_member_count,
     } = body;
 
     // Validate enabled_currencies if provided
@@ -113,6 +115,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
           ...(exchange_rate_mad_aud !== undefined && { exchange_rate_mad_aud }),
           ...(normalizedCurrencies !== undefined && { enabled_currencies: normalizedCurrencies }),
           ...(notes !== undefined && { notes }),
+          ...(projected_member_count !== undefined && { projected_member_count: projected_member_count === null ? null : Number(projected_member_count) }),
         },
         { onConflict: 'trip_id' }
       )
