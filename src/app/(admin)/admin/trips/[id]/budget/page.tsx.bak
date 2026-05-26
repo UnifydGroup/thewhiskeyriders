@@ -535,9 +535,8 @@ export default function AdminBudgetPage() {
   const tripId = params.id as string;
   const supabase = createClient();
 
-  type Tab = 'pl' | 'accounts' | 'ledger' | 'income' | 'expenses' | 'categories' | 'members' | 'settings' | 'export';
+  type Tab = 'pl' | 'accounts' | 'ledger' | 'income' | 'expenses' | 'reconcile' | 'categories' | 'members' | 'settings';
   const [tab, setTab] = useState<Tab>('pl');
-  const [exportFY, setExportFY] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applyingReconcile, setApplyingReconcile] = useState(false);
@@ -729,7 +728,7 @@ export default function AdminBudgetPage() {
     description: '', amount: '', currency: 'AUD', exchange_rate: '',
     amount_aud: '', amount_aud_overridden: false,
     expense_date: new Date().toISOString().split('T')[0],
-    category_id: '', paid_by_type: 'group_kitty', paid_by_member: '', paid_by_label: '', account_source_id: 'westpac_choice', notes: '',
+    category_id: '', paid_by_type: 'group_kitty', paid_by_member: '', paid_by_label: '', account_source_id: '', notes: '',
   });
 
   // UI state — income form
@@ -741,7 +740,7 @@ export default function AdminBudgetPage() {
   const [expandedMemberPayments, setExpandedMemberPayments] = useState<Record<string, boolean>>({});
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: 'westpac_choice', notes: '' });
+  const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: '', notes: '' });
   const [paymentForm, setPaymentForm] = useState({
     member_id: '',
     amount: '',
@@ -2504,7 +2503,7 @@ export default function AdminBudgetPage() {
     { key: 'ledger' as Tab, label: 'Ledger', icon: BookOpen },
     { key: 'income' as Tab, label: 'Income', icon: ArrowDownCircle },
     { key: 'expenses' as Tab, label: 'Expenses', icon: ArrowUpCircle },
-    { key: 'export' as Tab, label: 'Tax Export', icon: Download },
+    { key: 'reconcile' as Tab, label: `Reconcile${totalUnreconciled > 0 ? ` (${totalUnreconciled})` : ''}`, icon: AlertTriangle },
     { key: 'categories' as Tab, label: 'Categories', icon: TrendingUp },
     { key: 'members' as Tab, label: 'Members', icon: Users },
     { key: 'settings' as Tab, label: 'Settings', icon: Settings },
@@ -2526,11 +2525,16 @@ export default function AdminBudgetPage() {
           <DollarSign className="w-8 h-8 text-brand-tan" />
           <div>
             <h1 className="text-3xl font-bold text-brand-cream">Financial Manager</h1>
-            <p className="text-brand-cream/50 text-sm">Income · Expenses · Budget · Tax Export</p>
+            <p className="text-brand-cream/50 text-sm">Income · Expenses · Reconciliation · Budget</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-
+          {totalUnreconciled > 0 && (
+            <button onClick={() => setTab('reconcile')} className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-600/40 text-amber-400 rounded-lg text-sm font-medium hover:bg-amber-900/50 transition-colors">
+              <AlertTriangle className="w-4 h-4" />
+              {totalUnreconciled} unreconciled
+            </button>
+          )}
           <button onClick={fetchData} className="p-2 text-brand-cream/40 hover:text-brand-cream transition-colors" title="Refresh"><RefreshCw className="w-5 h-5" /></button>
         </div>
       </div>
@@ -2559,14 +2563,19 @@ export default function AdminBudgetPage() {
         ))}
       </div>
 
-      {pendingAccountAssignmentCount > 0 && (
+      {pendingChangeCount > 0 && (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-lg border border-brand-tan/30 bg-brand-dark-grey">
           <p className="text-sm text-brand-cream/80">
-            {pendingAccountAssignmentCount} account assignment{pendingAccountAssignmentCount === 1 ? '' : 's'} queued
+            {pendingChangeCount} change{pendingChangeCount === 1 ? '' : 's'} queued
+            {pendingAccountAssignmentCount > 0 ? ` · ${pendingAccountAssignmentCount} account assignment${pendingAccountAssignmentCount === 1 ? '' : 's'}` : ''}
+            {pendingReconcileCount > 0 ? ` · ${pendingReconcileCount} reconciliation change${pendingReconcileCount === 1 ? '' : 's'}` : ''}
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPendingAccountAssignments({})}
+              onClick={() => {
+                setPendingReconcileChanges({});
+                setPendingAccountAssignments({});
+              }}
               disabled={applyingReconcile}
               className="px-3 py-1.5 text-xs border border-brand-tan/30 rounded text-brand-cream/80 hover:bg-brand-tan/10 disabled:opacity-50"
             >
@@ -2598,9 +2607,9 @@ export default function AdminBudgetPage() {
             <p className="mt-1 text-xl font-semibold text-red-400">{fmt(overview.total_spent_aud)}</p>
           </div>
           <div className="rounded-xl border border-brand-tan/20 bg-brand-dark-grey px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Unassigned Transactions</p>
-            <p className={`mt-1 text-xl font-semibold ${(unassignedExpenses.length + unassignedIncome.length) > 0 ? 'text-amber-400' : 'text-green-400'}`}>
-              {unassignedExpenses.length + unassignedIncome.length === 0 ? '✓ All assigned' : unassignedExpenses.length + unassignedIncome.length}
+            <p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Outstanding Reconciliation</p>
+            <p className={`mt-1 text-xl font-semibold ${totalUnreconciled > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+              {totalUnreconciled}
             </p>
           </div>
         </div>
@@ -2626,6 +2635,8 @@ export default function AdminBudgetPage() {
             const wlNet  = accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0;
             const ppNet  = accountFlowSummary.find((r) => r.id === 'paypal')?.net ?? 0;
             const totalNet = wcNet + wlNet + ppNet;
+            const wcVar  = accountBalances.westpac_choice - wcNet;
+            const wlVar  = accountBalances.westpac_life - wlNet;
             return (
               <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-4">
@@ -2634,23 +2645,25 @@ export default function AdminBudgetPage() {
                     <h3 className="font-semibold text-brand-cream">Cash Position</h3>
                     <span className="text-xs text-brand-cream/30 ml-1">from recorded transactions</span>
                   </div>
-
+                  <button onClick={() => { setTab('accounts'); setEditingBalances(true); }} className="text-xs text-brand-tan hover:underline flex items-center gap-1">
+                    <Edit2 className="w-3 h-3" /> Set reconciliation balances
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
                     <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Choice</p></div>
                     <p className="text-lg font-semibold text-brand-cream">{fmt(wcNet)}</p>
-
+                    {accountBalances.westpac_choice > 0 && <p className={`text-[10px] mt-0.5 ${Math.abs(wcVar) < 1 ? 'text-green-400/60' : Math.abs(wcVar) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>Bank: {fmt(accountBalances.westpac_choice)} ({wcVar >= 0 ? '+' : ''}{fmt(wcVar)})</p>}
                   </div>
                   <div className="rounded-lg border border-brand-tan/20 bg-brand-black/30 px-4 py-3">
                     <div className="flex items-center gap-1.5 mb-1"><Building2 className="w-3.5 h-3.5 text-brand-cream/40" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Westpac Life</p></div>
                     <p className="text-lg font-semibold text-brand-cream">{fmt(wlNet)}</p>
-
+                    {accountBalances.westpac_life > 0 && <p className={`text-[10px] mt-0.5 ${Math.abs(wlVar) < 1 ? 'text-green-400/60' : Math.abs(wlVar) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>Bank: {fmt(accountBalances.westpac_life)} ({wlVar >= 0 ? '+' : ''}{fmt(wlVar)})</p>}
                   </div>
                   <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 px-4 py-3">
                     <div className="flex items-center gap-1.5 mb-1"><Wallet className="w-3.5 h-3.5 text-amber-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">PayPal</p></div>
                     <p className="text-lg font-semibold text-amber-300">{fmt(ppNet)}</p>
-
+                    {accountBalances.paypal > 0 && <p className="text-[10px] text-brand-cream/30 mt-0.5">Manual: {fmt(accountBalances.paypal)}</p>}
                   </div>
                   <div className="rounded-lg border border-green-600/30 bg-green-900/15 px-4 py-3">
                     <div className="flex items-center gap-1.5 mb-1"><DollarSign className="w-3.5 h-3.5 text-green-400/60" /><p className="text-[11px] uppercase tracking-wide text-brand-cream/45">Total Funds</p></div>
@@ -2749,7 +2762,7 @@ export default function AdminBudgetPage() {
                     <SortTh label="Inflow" colKey="inflow" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
                     <SortTh label="Outflow" colKey="outflow" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
                     <SortTh label="Net" colKey="net" sortKey={cashflowSortKey} sortDir={cashflowSortDir} onSort={handleCashflowSort} />
-  
+                    <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Vs Balance</th>
                     <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Member Portal</th>
                   </tr>
                 </thead>
@@ -2763,7 +2776,23 @@ export default function AdminBudgetPage() {
                       <td className="px-4 py-3 font-semibold">
                         <span className={row.net >= 0 ? 'text-brand-tan' : 'text-red-400'}>{fmt(row.net)}</span>
                       </td>
-
+                      <td className="px-4 py-3 font-semibold">
+                        {(() => {
+                          if (row.isUnassigned) return <span className="text-brand-cream/20 text-xs">—</span>;
+                          const acctId = row.id;
+                          const balanceValue = acctId === 'westpac_choice' ? accountBalances.westpac_choice
+                            : acctId === 'westpac_life' ? accountBalances.westpac_life
+                            : acctId === 'paypal' ? accountBalances.paypal
+                            : null;
+                          if (balanceValue === null) return <span className="text-brand-cream/20 text-xs">—</span>;
+                          const variance = balanceValue - row.net;
+                          return (
+                            <span className={Math.abs(variance) < 1 ? 'text-green-400 text-xs' : Math.abs(variance) < 100 ? 'text-amber-400 text-xs' : 'text-red-400 text-xs'}>
+                              {variance >= 0 ? '+' : ''}{fmt(variance)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         {row.isMemberPortalSource
                           ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-400 border border-green-600/30">Shown to members</span>
@@ -2774,7 +2803,7 @@ export default function AdminBudgetPage() {
                 </tbody>
               </table>
             </div>
-
+            <p className="px-5 py-2 text-xs text-brand-cream/30 border-t border-brand-tan/10">Vs Balance compares the entered account balance against ledger net (inflow − outflow). Near zero = records match.</p>
           </div>
 
           {/* Category breakdown */}
@@ -2909,33 +2938,88 @@ export default function AdminBudgetPage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-brand-cream">Account Balances</h2>
-              <p className="text-sm text-brand-cream/50 mt-0.5">Calculated from all recorded transactions assigned to each account.</p>
+              <p className="text-sm text-brand-cream/50 mt-0.5">Track actual cash held across Westpac and PayPal accounts. PayPal balance is entered manually.</p>
             </div>
+            {!editingBalances && (
+              <button onClick={() => { setEditingBalances(true); setBalanceForm({ ...accountBalances }); }} className="flex items-center gap-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black px-4 py-2 rounded-lg text-sm font-semibold">
+                <Edit2 className="w-4 h-4" /> Update Balances
+              </button>
+            )}
           </div>
 
-          {/* Balance cards — ledger net per account */}
-          {(() => {
+          {/* Balance edit form */}
+          {editingBalances && (
+            <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-xl p-6 space-y-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-brand-cream">Update Account Balances</h3>
+                <button onClick={() => setEditingBalances(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
+              </div>
+              <p className="text-xs text-brand-cream/50">Enter the current balances from your bank statements and PayPal account. These are display-only — they don't affect income/expense calculations.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Westpac Choice Basic (524337)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                    <input type="number" min="0" step="0.01" value={balanceForm.westpac_choice || ''} onChange={(e) => setBalanceForm((p) => ({ ...p, westpac_choice: parseFloat(e.target.value) || 0 }))} className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="0.00" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Westpac Life (253840)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                    <input type="number" min="0" step="0.01" value={balanceForm.westpac_life || ''} onChange={(e) => setBalanceForm((p) => ({ ...p, westpac_life: parseFloat(e.target.value) || 0 }))} className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="0.00" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1 flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-amber-400" /> PayPal Balance (AUD equivalent)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-brand-cream/40 text-sm">$</span>
+                    <input type="number" min="0" step="0.01" value={balanceForm.paypal || ''} onChange={(e) => setBalanceForm((p) => ({ ...p, paypal: parseFloat(e.target.value) || 0 }))} className="w-full pl-7 pr-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="0.00" />
+                  </div>
+                  <p className="text-xs text-brand-cream/30 mt-1">Log in to PayPal to get current AUD equivalent balance</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-brand-cream/60 mb-1">Balance Date</label>
+                  <input type="date" value={balanceForm.balance_date} onChange={(e) => setBalanceForm((p) => ({ ...p, balance_date: e.target.value }))} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setEditingBalances(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
+                <button onClick={handleSaveAccountBalances} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Save Balances'}</button>
+              </div>
+            </div>
+          )}
+
+          {/* Balance cards */}
+          {!editingBalances && (() => {
             const wcNet = accountFlowSummary.find((r) => r.id === 'westpac_choice')?.net ?? 0;
             const wlNet = accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0;
             const ppNet = accountFlowSummary.find((r) => r.id === 'paypal')?.net ?? 0;
             const cards = [
-              { label: 'Westpac Choice 524337', balance: wcNet, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
-              { label: 'Westpac Life 253840',   balance: wlNet, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
-              { label: 'PayPal',                balance: ppNet, icon: Wallet,    color: 'border-amber-600/20', textColor: 'text-amber-300'  },
-              { label: 'Total Funds',           balance: wcNet + wlNet + ppNet, icon: DollarSign, color: 'border-green-600/30', textColor: 'text-green-400' },
+              { label: 'Westpac Choice 524337', ledger: wcNet, snapshot: accountBalances.westpac_choice, icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
+              { label: 'Westpac Life 253840',   ledger: wlNet, snapshot: accountBalances.westpac_life,   icon: Building2, color: 'border-brand-tan/20', textColor: 'text-brand-cream' },
+              { label: 'PayPal',                ledger: ppNet, snapshot: accountBalances.paypal,          icon: Wallet,    color: 'border-amber-600/20', textColor: 'text-amber-300'  },
+              { label: 'Total Funds',           ledger: wcNet + wlNet + ppNet, snapshot: null,           icon: DollarSign, color: 'border-green-600/30', textColor: 'text-green-400' },
             ];
             return (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                {cards.map(({ label, balance, icon: Icon, color, textColor }) => (
-                  <div key={label} className={`rounded-xl border ${color} bg-brand-dark-grey px-5 py-4`}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className="w-4 h-4 text-brand-cream/40" />
-                      <p className="text-xs uppercase tracking-wide text-brand-cream/45">{label}</p>
+                {cards.map(({ label, ledger, snapshot, icon: Icon, color, textColor }) => {
+                  const variance = snapshot !== null && snapshot > 0 ? snapshot - ledger : null;
+                  return (
+                    <div key={label} className={`rounded-xl border ${color} bg-brand-dark-grey px-5 py-4`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Icon className="w-4 h-4 text-brand-cream/40" />
+                        <p className="text-xs uppercase tracking-wide text-brand-cream/45">{label}</p>
+                      </div>
+                      <p className={`text-2xl font-bold ${textColor}`}>{fmt(ledger)}</p>
+                      {variance !== null && (
+                        <p className={`text-[10px] mt-1 ${Math.abs(variance) < 1 ? 'text-green-400/60' : Math.abs(variance) < 100 ? 'text-amber-400/60' : 'text-red-400/60'}`}>
+                          Bank: {fmt(snapshot!)} · {variance >= 0 ? '+' : ''}{fmt(variance)} vs ledger
+                        </p>
+                      )}
                     </div>
-                    <p className={`text-2xl font-bold ${textColor}`}>{fmt(balance)}</p>
-                    <p className="text-[10px] mt-1 text-brand-cream/30">from recorded transactions</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             );
           })()}
@@ -3004,7 +3088,7 @@ export default function AdminBudgetPage() {
                 ].map(({ label, months }) => (
                   <div key={label} className="rounded-lg bg-amber-900/10 border border-amber-600/20 px-4 py-3 text-center">
                     <p className="text-xs text-brand-cream/40 mb-1">{label}</p>
-                    <p className="font-bold text-amber-300">{fmt(wlNet * (interestRatePa / 100) / 12 * months)}</p>
+                    <p className="font-bold text-amber-300">{fmt(accountBalances.westpac_life * (interestRatePa / 100) / 12 * months)}</p>
                   </div>
                 ))}
               </div>
@@ -3013,7 +3097,7 @@ export default function AdminBudgetPage() {
                 const tripStart = new Date('2025-07-01');
                 const todayDate = new Date();
                 const monthsElapsed = Math.max(0, (todayDate.getFullYear() - tripStart.getFullYear()) * 12 + todayDate.getMonth() - tripStart.getMonth());
-                const projected = wlNet * (interestRatePa / 100) / 12 * monthsElapsed;
+                const projected = accountBalances.westpac_life * (interestRatePa / 100) / 12 * monthsElapsed;
                 const variance = totalInterestEarned - projected;
                 return totalInterestEarned > 0 ? (
                   <div className="mt-3 pt-3 border-t border-amber-600/20 flex items-center gap-4 text-xs text-brand-cream/50">
@@ -3853,15 +3937,6 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'income' && (
         <div className="space-y-4">
-          {unassignedIncome.length > 0 && (
-            <div className="flex items-start gap-3 p-3 bg-amber-900/20 border border-amber-600/30 rounded-lg">
-              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-amber-400">
-                <span className="font-semibold">{unassignedIncome.length} income {unassignedIncome.length === 1 ? 'entry' : 'entries'} have no account assigned.</span>{' '}
-                Assign an account in the Account column below so these appear correctly in ledger and export reports.
-              </p>
-            </div>
-          )}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-brand-cream/60 text-sm">Manage member payments and additional income in one place</p>
@@ -4677,15 +4752,6 @@ export default function AdminBudgetPage() {
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'expenses' && (
         <div className="space-y-4">
-          {unassignedExpenses.length > 0 && (
-            <div className="flex items-start gap-3 p-3 bg-amber-900/20 border border-amber-600/30 rounded-lg">
-              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-amber-400">
-                <span className="font-semibold">{unassignedExpenses.length} {unassignedExpenses.length === 1 ? 'expense has' : 'expenses have'} no account assigned.</span>{' '}
-                Assign an account in the Account column below so these are correctly attributed in the ledger and tax reports.
-              </p>
-            </div>
-          )}
           <div className="flex items-center justify-between flex-wrap gap-3">
             <p className="text-brand-cream/60 text-sm">Log and manage all trip expenses</p>
             <div className="flex gap-2 flex-wrap">
@@ -5060,6 +5126,331 @@ export default function AdminBudgetPage() {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          RECONCILIATION TAB
+      ══════════════════════════════════════════════════════════════════════ */}
+      {tab === 'reconcile' && (
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 bg-amber-900/20 border border-amber-600/30 rounded-lg">
+            <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-amber-400">Reconciliation Check</p>
+              <p className="text-sm text-amber-400/70 mt-0.5">
+                Transactions without an account assigned cannot be reconciled. Manual entries are flagged until confirmed against your bank statement. Imported rows are auto-reconciled once an account is set.
+              </p>
+            </div>
+          </div>
+
+          {/* ── Bank balance reconciliation check ───────────────────────────── */}
+          {(() => {
+            const accounts = accountOptions.filter((a) => a.accountType !== 'paypal_wallet');
+            if (accounts.length === 0 || Object.values(accountBalances).every((v, i, arr) => i === arr.length - 1 || v === 0)) return null;
+            const reconciledByAccount: Record<string, number> = {};
+            ledger
+              .filter((row) => row.reconciled)
+              .forEach((row) => {
+                const acctId = getTransactionAccountId(row.notes, row.sub_type === 'member_payment' ? memberPortalAccountId : null);
+                if (acctId) {
+                  reconciledByAccount[acctId] = (reconciledByAccount[acctId] ?? 0) + row.amount_aud;
+                }
+              });
+            const knownBalances: Record<string, number> = {
+              westpac_choice: accountBalances.westpac_choice,
+              westpac_life: accountBalances.westpac_life,
+              paypal: accountBalances.paypal,
+            };
+            const hasAnyBalance = Object.values(knownBalances).some((v) => v > 0);
+            if (!hasAnyBalance) return null;
+            const discrepancies = BUDGET_ACCOUNTS.map((acct) => {
+              const bookBalance = reconciledByAccount[acct.id] ?? 0;
+              const bankBalance = knownBalances[acct.id] ?? 0;
+              const diff = bankBalance - bookBalance;
+              return { acct, bookBalance, bankBalance, diff };
+            }).filter((d) => d.bankBalance > 0 || d.bookBalance !== 0);
+            if (discrepancies.length === 0) return null;
+            const allMatch = discrepancies.every((d) => Math.abs(d.diff) < 0.01);
+            return (
+              <div className={`border rounded-xl p-5 space-y-3 ${allMatch ? 'bg-green-950/30 border-green-600/30' : 'bg-amber-950/30 border-amber-600/30'}`}>
+                <div className="flex items-center gap-2">
+                  {allMatch ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <AlertTriangle className="w-4 h-4 text-amber-400" />}
+                  <h3 className={`font-semibold text-sm ${allMatch ? 'text-green-300' : 'text-amber-300'}`}>
+                    Bank Balance Reconciliation {allMatch ? '— All match ✓' : '— Discrepancies found'}
+                  </h3>
+                  <button onClick={() => setTab('accounts')} className="ml-auto text-xs text-brand-cream/40 hover:text-brand-cream underline">Update balances →</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {discrepancies.map(({ acct, bookBalance, bankBalance, diff }) => {
+                    const matches = Math.abs(diff) < 0.01;
+                    return (
+                      <div key={acct.id} className={`p-3 rounded-lg border ${matches ? 'bg-green-950/20 border-green-600/20' : 'bg-amber-950/20 border-amber-500/30'}`}>
+                        <p className="text-xs text-brand-cream/50 font-medium mb-2">{acct.name}</p>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between"><span className="text-brand-cream/40">Bank balance:</span><span className="font-semibold text-brand-cream">{fmt(bankBalance)}</span></div>
+                          <div className="flex justify-between"><span className="text-brand-cream/40">Book balance:</span><span className="font-semibold text-brand-cream">{fmt(bookBalance)}</span></div>
+                          <div className={`flex justify-between pt-1 border-t border-brand-tan/10 ${matches ? 'text-green-400' : 'text-amber-400'}`}>
+                            <span>Difference:</span>
+                            <span className="font-bold">{diff >= 0 ? '+' : ''}{fmt(diff)}</span>
+                          </div>
+                        </div>
+                        {!matches && (
+                          <p className="text-[11px] text-amber-400/60 mt-1">
+                            {Math.abs(diff) < 1 ? 'Minor rounding — check FX or fees' : diff > 0 ? 'Bank higher — unrecorded income?' : 'Bank lower — unrecorded expense?'}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-brand-cream/30">Book balance = sum of all reconciled transactions per account. Set bank balances in the Accounts tab.</p>
+              </div>
+            );
+          })()}
+
+          {totalUnreconciled === 0 ? (
+            <div className="bg-brand-dark-grey border border-green-600/30 rounded-lg py-12 text-center">
+              <CheckCircle2 className="w-10 h-10 text-green-400 mx-auto mb-3" />
+              <p className="font-semibold text-green-400">All transactions reconciled</p>
+              <p className="text-sm text-brand-cream/40 mt-1">Every entry has an account assigned and has been confirmed</p>
+            </div>
+          ) : (
+            <>
+              {/* ── Unassigned Transactions (no account) ── */}
+              {(unassignedExpenses.length > 0 || unassignedIncome.length > 0) && (
+                <div className="bg-brand-dark-grey border border-red-600/30 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-red-600/20 flex items-center gap-3">
+                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    <h3 className="font-semibold text-red-400">No Account Assigned <span className="ml-2">{unassignedExpenses.length + unassignedIncome.length}</span></h3>
+                    <span className="text-xs text-brand-cream/40 ml-auto">These cannot be reconciled until an account is selected</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[780px] text-sm">
+                      <thead className="bg-brand-black">
+                        <tr>
+                          <SortTh label="Date" colKey="date" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <SortTh label="Description" colKey="description" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <SortTh label="Amount" colKey="amount" sortKey={unassignedSortKey} sortDir={unassignedSortDir} onSort={handleUnassignedSort} />
+                          <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Type</th>
+                          <th className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">Assign Account</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-brand-tan/10">
+                        {sortBy(unassignedExpenses, (e) => {
+                          if (unassignedSortKey === 'description') return e.description;
+                          if (unassignedSortKey === 'amount') return e.amount_aud;
+                          return e.expense_date;
+                        }, unassignedSortDir).map((e) => (
+                          <tr key={`ue-${e.id}`} className="hover:bg-red-900/10">
+                            <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.expense_date)}</td>
+                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+                            <td className="px-4 py-3 font-semibold text-red-400">−{fmt(e.amount_aud)}</td>
+                            <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-red-900/30 text-red-400">Expense</span></td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const key = getAccountAssignmentKey('expense', e.id);
+                                const pending = pendingAccountAssignments[key];
+                                return (
+                                  <>
+                              <select
+                                value={pending?.accountId ?? ''}
+                                onChange={(ev) => handleAssignAccount('expense', e.id, ev.target.value)}
+                                className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
+                              >
+                                <option value="">— Select account —</option>
+                                {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              </select>
+                              {pending && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="text-[11px] text-brand-tan">Queued</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => discardQueuedAccountAssignment('expense', e.id)}
+                                    className="text-[11px] text-brand-cream/60 hover:text-brand-cream/90 underline"
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              )}
+                                  </>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        ))}
+                        {sortBy(unassignedIncome, (e) => {
+                          if (unassignedSortKey === 'description') return e.description;
+                          if (unassignedSortKey === 'amount') return e.amount_aud;
+                          return e.income_date;
+                        }, unassignedSortDir).map((e) => (
+                          <tr key={`ui-${e.id}`} className="hover:bg-red-900/10">
+                            <td className="px-4 py-3 text-brand-cream/60 whitespace-nowrap">{fmtDate(e.income_date)}</td>
+                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+                            <td className="px-4 py-3 font-semibold text-green-400">+{fmt(e.amount_aud)}</td>
+                            <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded bg-green-900/30 text-green-400">Income</span></td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const key = getAccountAssignmentKey('income', e.id);
+                                const pending = pendingAccountAssignments[key];
+                                return (
+                                  <>
+                              <select
+                                value={pending?.accountId ?? ''}
+                                onChange={(ev) => handleAssignAccount('income', e.id, ev.target.value)}
+                                className="bg-brand-black border border-brand-tan/30 rounded px-2 py-1 text-xs text-brand-cream focus:outline-none focus:ring-1 focus:ring-brand-tan"
+                              >
+                                <option value="">— Select account —</option>
+                                {BUDGET_ACCOUNTS.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              </select>
+                              {pending && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="text-[11px] text-brand-tan">Queued</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => discardQueuedAccountAssignment('income', e.id)}
+                                    className="text-[11px] text-brand-cream/60 hover:text-brand-cream/90 underline"
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              )}
+                                  </>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {unreconciledExpenses.length > 0 && (
+                <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
+                    <h3 className="font-semibold text-brand-cream">Unreconciled Expenses <span className="text-amber-400 ml-2">{unreconciledExpenses.length}</span></h3>
+                    <button
+                      onClick={() => {
+                        let queued = 0;
+                        setPendingReconcileChanges((prev) => {
+                          const next = { ...prev };
+                          for (const e of unreconciledExpenses) {
+                            const key = getReconcileChangeKey('expense', e.id);
+                            if (next[key]?.reconciled === true) continue;
+                            next[key] = { type: 'expense', id: e.id, reconciled: true };
+                            queued++;
+                          }
+                          return next;
+                        });
+                        if (queued > 0) {
+                          showToast('success', `${queued} expense${queued === 1 ? '' : 's'} queued`);
+                        }
+                      }}
+                      className="text-xs text-brand-tan hover:underline"
+                    >
+	                      Queue all reconciled
+	                    </button>
+	                  </div>
+	                  <div className="overflow-x-auto">
+	                    <table className="w-full min-w-[760px] text-sm">
+	                      <thead className="bg-brand-black"><tr>{['Date','Description','Amount AUD','Category','Action'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+	                      <tbody className="divide-y divide-brand-tan/10">
+	                        {unreconciledExpenses.map((e) => (
+	                          <tr key={e.id} className="hover:bg-brand-tan/5">
+	                            <td className="px-4 py-3 text-brand-cream/60">{fmtDate(e.expense_date)}</td>
+	                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+	                            <td className="px-4 py-3 font-semibold text-red-400">-{fmt(Math.abs(e.amount_aud))}</td>
+	                            <td className="px-4 py-3 text-brand-cream/50">{e.category?.name || '—'}</td>
+	                            <td className="px-4 py-3">
+                                {(() => {
+                                  const key = getReconcileChangeKey('expense', e.id);
+                                  const pending = pendingReconcileChanges[key];
+                                  if (pending) {
+                                    return (
+                                      <button onClick={() => discardQueuedReconcile('expense', e.id)} className="flex items-center gap-1 text-xs text-brand-cream/70 hover:text-brand-cream border border-brand-tan/30 rounded px-2 py-1 hover:bg-brand-tan/10">
+                                        <X className="w-3.5 h-3.5" /> Undo queued
+                                      </button>
+                                    );
+                                  }
+                                  return (
+	                                <button onClick={() => queueReconcileChange('expense', e.id, true, e.reconciled)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
+	                                  <CheckCircle2 className="w-3.5 h-3.5" /> Queue reconcile
+	                                </button>
+                                  );
+                                })()}
+	                            </td>
+	                          </tr>
+	                        ))}
+	                      </tbody>
+	                    </table>
+	                  </div>
+	                </div>
+	              )}
+
+	              {unreconciledIncome.length > 0 && (
+	                <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-brand-tan/20 flex items-center justify-between">
+                    <h3 className="font-semibold text-brand-cream">Unreconciled Income <span className="text-amber-400 ml-2">{unreconciledIncome.length}</span></h3>
+                    <button
+                      onClick={() => {
+                        let queued = 0;
+                        setPendingReconcileChanges((prev) => {
+                          const next = { ...prev };
+                          for (const e of unreconciledIncome) {
+                            const key = getReconcileChangeKey('income', e.id);
+                            if (next[key]?.reconciled === true) continue;
+                            next[key] = { type: 'income', id: e.id, reconciled: true };
+                            queued++;
+                          }
+                          return next;
+                        });
+                        if (queued > 0) {
+                          showToast('success', `${queued} income entr${queued === 1 ? 'y' : 'ies'} queued`);
+                        }
+                      }}
+                      className="text-xs text-brand-tan hover:underline"
+                    >
+                      Queue all reconciled
+                    </button>
+                  </div>
+	                  <div className="overflow-x-auto">
+	                    <table className="w-full min-w-[700px] text-sm">
+	                      <thead className="bg-brand-black"><tr>{['Date','Description','Amount','Action'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs text-brand-cream/40 uppercase">{h}</th>)}</tr></thead>
+	                      <tbody className="divide-y divide-brand-tan/10">
+	                        {unreconciledIncome.map((e) => (
+	                          <tr key={e.id} className="hover:bg-brand-tan/5">
+	                            <td className="px-4 py-3 text-brand-cream/60">{fmtDate(e.income_date)}</td>
+	                            <td className="px-4 py-3 text-brand-cream">{e.description}</td>
+	                            <td className="px-4 py-3 font-semibold text-green-400">{fmt(e.amount_aud)}</td>
+	                            <td className="px-4 py-3">
+                                {(() => {
+                                  const key = getReconcileChangeKey('income', e.id);
+                                  const pending = pendingReconcileChanges[key];
+                                  if (pending) {
+                                    return (
+                                      <button onClick={() => discardQueuedReconcile('income', e.id)} className="flex items-center gap-1 text-xs text-brand-cream/70 hover:text-brand-cream border border-brand-tan/30 rounded px-2 py-1 hover:bg-brand-tan/10">
+                                        <X className="w-3.5 h-3.5" /> Undo queued
+                                      </button>
+                                    );
+                                  }
+                                  return (
+	                                <button onClick={() => queueReconcileChange('income', e.id, true, e.reconciled)} className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 border border-green-600/30 rounded px-2 py-1 hover:bg-green-900/20">
+	                                  <CheckCircle2 className="w-3.5 h-3.5" /> Queue reconcile
+	                                </button>
+                                  );
+                                })()}
+	                            </td>
+	                          </tr>
+	                        ))}
+	                      </tbody>
+	                    </table>
+	                  </div>
+	                </div>
+	              )}
+            </>
+          )}
         </div>
       )}
 
@@ -5560,359 +5951,6 @@ export default function AdminBudgetPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          EXPORT TAB — ATO-compliant tax records
-      ══════════════════════════════════════════════════════════════════════ */}
-      {tab === 'export' && (() => {
-        // Derive unique financial years from all transactions
-        const allDates = [
-          ...expenses.map((e) => e.expense_date),
-          ...incomeEntries.map((e) => e.income_date),
-        ];
-        const fySet = new Set<string>();
-        allDates.forEach((d) => {
-          const dt = parseLocalDate(d);
-          const fy = dt.getMonth() >= 6 ? dt.getFullYear() : dt.getFullYear() - 1;
-          fySet.add(String(fy));
-        });
-        const fyOptions = Array.from(fySet).sort((a, b) => Number(b) - Number(a));
-
-        // Helper: check if a date falls in a given financial year (Jul–Jun)
-        const inFY = (dateStr: string, fy: string) => {
-          if (!fy) return true;
-          const dt = parseLocalDate(dateStr);
-          const year = Number(fy);
-          return dt >= new Date(year, 6, 1) && dt < new Date(year + 1, 6, 1);
-        };
-
-        // GST helper — trip expenses are personal/club travel, generally not GST-registered
-        // Include GST column as 'N/A' unless category implies otherwise
-        const gstLabel = (e: Expense) =>
-          e.currency !== 'AUD' ? 'Foreign (no GST)' : 'N/A – personal/club';
-
-        // Payer label helper
-        const payerLabel = (e: Expense) =>
-          e.paid_by_type === 'group_kitty' ? 'Group Kitty'
-            : e.paid_by_type === 'member' ? (e.payer?.nickname || e.payer?.full_name || 'Member')
-            : (e.paid_by_label || 'External');
-
-        // ── Export functions ──────────────────────────────────────────────
-
-        const exportTransactionRegister = (fy: string) => {
-          const filteredExp = expenses.filter((e) => !fy || inFY(e.expense_date, fy));
-          const filteredInc = incomeEntries.filter((e) => !fy || inFY(e.income_date, fy));
-          const rows: string[][] = [
-            ['ATO Transaction Register — Whiskey Riders Morocco 2027'],
-            [fy ? `Financial Year: ${fy}–${Number(fy)+1}` : 'All Years'],
-            ['Generated:', new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })],
-            ['Record retention required: 5 years from date of transaction (ATO s262A ITAA 1936)'],
-            [],
-            ['Date', 'Type', 'Description', 'Category', 'Account', 'Currency', 'Original Amount', 'AUD Amount', 'Paid By / Source', 'GST Treatment', 'Notes'],
-          ];
-          // Income rows
-          filteredInc.forEach((e) => {
-            rows.push([
-              fmtDate(e.income_date), 'Income',
-              e.description,
-              e.category || 'Other',
-              getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
-              'AUD', String(e.amount_aud), String(e.amount_aud),
-              'Member/Club Income',
-              'N/A – personal/club',
-              parseTransactionNote(e.notes).text || '',
-            ]);
-          });
-          // Expense rows
-          filteredExp.forEach((e) => {
-            rows.push([
-              fmtDate(e.expense_date), 'Expense',
-              e.description,
-              e.category?.name || 'Uncategorised',
-              getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
-              e.currency,
-              String(Math.abs(e.amount || e.amount_aud)),
-              String(Math.abs(e.amount_aud)),
-              payerLabel(e),
-              gstLabel(e),
-              parseTransactionNote(e.notes).text || '',
-            ]);
-          });
-          // Totals
-          const totalInc = filteredInc.reduce((s, e) => s + e.amount_aud, 0);
-          const totalExp = filteredExp.reduce((s, e) => s + e.amount_aud, 0);
-          rows.push([], ['', '', '', '', '', '', '', '', '', ''],
-            ['TOTALS', '', '', '', '', '', '', '', '', ''],
-            ['Total Income (AUD)', '', '', '', '', '', '', String(totalInc), '', '', ''],
-            ['Total Expenses (AUD)', '', '', '', '', '', '', String(Math.abs(totalExp)), '', '', ''],
-            ['Net Position (AUD)', '', '', '', '', '', '', String(totalInc + totalExp), '', '', ''],
-          );
-          const fyStr = fy ? `FY${fy}-${Number(fy)+1}` : 'AllYears';
-          downloadCsv(`WR-Morocco2027-TransactionRegister-${fyStr}.csv`, rows);
-        };
-
-        const exportExpenseSummary = (fy: string) => {
-          const filtered = expenses.filter((e) => !fy || inFY(e.expense_date, fy));
-          const byCat: Record<string, { total: number; count: number; items: Expense[] }> = {};
-          filtered.forEach((e) => {
-            const cat = e.category?.name || 'Uncategorised';
-            if (!byCat[cat]) byCat[cat] = { total: 0, count: 0, items: [] };
-            byCat[cat].total += Math.abs(e.amount_aud);
-            byCat[cat].count++;
-            byCat[cat].items.push(e);
-          });
-          const rows: string[][] = [
-            ['ATO Expense Summary by Category — Whiskey Riders Morocco 2027'],
-            [fy ? `Financial Year: ${fy}–${Number(fy)+1}` : 'All Years'],
-            ['Generated:', new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })],
-            [],
-            ['Category', 'Number of Transactions', 'Total AUD', 'GST Treatment'],
-          ];
-          Object.entries(byCat)
-            .sort(([, a], [, b]) => b.total - a.total)
-            .forEach(([cat, { total, count }]) => {
-              rows.push([cat, String(count), String(total.toFixed(2)), 'N/A – personal/club travel']);
-            });
-          const grandTotal = filtered.reduce((s, e) => s + Math.abs(e.amount_aud), 0);
-          rows.push([], ['TOTAL', String(filtered.length), String(grandTotal.toFixed(2)), '']);
-          rows.push([]);
-          rows.push(['Detailed Transactions']);
-          rows.push(['Date', 'Category', 'Description', 'Paid By', 'Currency', 'Original', 'AUD', 'Account', 'Notes']);
-          filtered
-            .sort((a, b) => a.expense_date.localeCompare(b.expense_date))
-            .forEach((e) => {
-              rows.push([
-                fmtDate(e.expense_date),
-                e.category?.name || 'Uncategorised',
-                e.description,
-                payerLabel(e),
-                e.currency,
-                String(Math.abs(e.amount || e.amount_aud)),
-                String(Math.abs(e.amount_aud)),
-                getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
-                parseTransactionNote(e.notes).text || '',
-              ]);
-            });
-          const fyStr = fy ? `FY${fy}-${Number(fy)+1}` : 'AllYears';
-          downloadCsv(`WR-Morocco2027-ExpenseSummary-${fyStr}.csv`, rows);
-        };
-
-        const exportMemberCollections = (fy: string) => {
-          const filtered = incomeEntries.filter((e) =>
-            e.category !== 'interest' && (!fy || inFY(e.income_date, fy))
-          );
-          const rows: string[][] = [
-            ['ATO Income / Member Collections — Whiskey Riders Morocco 2027'],
-            [fy ? `Financial Year: ${fy}–${Number(fy)+1}` : 'All Years'],
-            ['Generated:', new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })],
-            ['Note: Member contributions to a shared trip kitty are not assessable income for the trip organiser'],
-            ['       and are not deductible for members. Records kept for 5 years per ATO s262A ITAA 1936.'],
-            [],
-            ['Date', 'Description', 'Category', 'Amount AUD', 'Account', 'Notes'],
-          ];
-          filtered
-            .sort((a, b) => a.income_date.localeCompare(b.income_date))
-            .forEach((e) => {
-              rows.push([
-                fmtDate(e.income_date),
-                e.description,
-                e.category || 'Member Payment',
-                String(e.amount_aud),
-                getAccountDisplayName(parseTransactionNote(e.notes).account_source_id),
-                parseTransactionNote(e.notes).text || '',
-              ]);
-            });
-          const total = filtered.reduce((s, e) => s + e.amount_aud, 0);
-          rows.push([], ['TOTAL', '', '', String(total.toFixed(2)), '', '']);
-          const fyStr = fy ? `FY${fy}-${Number(fy)+1}` : 'AllYears';
-          downloadCsv(`WR-Morocco2027-MemberCollections-${fyStr}.csv`, rows);
-        };
-
-        const exportFinancialYearSummary = () => {
-          const rows: string[][] = [
-            ['ATO Financial Year Summary — Whiskey Riders Morocco 2027'],
-            ['Generated:', new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })],
-            ['Record retention: 5 years per ATO s262A ITAA 1936 | Records in English ✓ | Exportable as CSV ✓'],
-            [],
-            ['Financial Year', 'Income (AUD)', 'Expenses (AUD)', 'Net Position (AUD)', 'Transaction Count'],
-          ];
-          const fyData: Record<string, { inc: number; exp: number; count: number }> = {};
-          incomeEntries.forEach((e) => {
-            const dt = parseLocalDate(e.income_date);
-            const fy = dt.getMonth() >= 6 ? `${dt.getFullYear()}–${dt.getFullYear()+1}` : `${dt.getFullYear()-1}–${dt.getFullYear()}`;
-            if (!fyData[fy]) fyData[fy] = { inc: 0, exp: 0, count: 0 };
-            fyData[fy].inc += e.amount_aud;
-            fyData[fy].count++;
-          });
-          expenses.forEach((e) => {
-            const dt = parseLocalDate(e.expense_date);
-            const fy = dt.getMonth() >= 6 ? `${dt.getFullYear()}–${dt.getFullYear()+1}` : `${dt.getFullYear()-1}–${dt.getFullYear()}`;
-            if (!fyData[fy]) fyData[fy] = { inc: 0, exp: 0, count: 0 };
-            fyData[fy].exp += Math.abs(e.amount_aud);
-            fyData[fy].count++;
-          });
-          Object.entries(fyData)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .forEach(([fy, { inc, exp, count }]) => {
-              rows.push([fy, String(inc.toFixed(2)), String(exp.toFixed(2)), String((inc - exp).toFixed(2)), String(count)]);
-            });
-          const totalInc = incomeEntries.reduce((s, e) => s + e.amount_aud, 0);
-          const totalExp = expenses.reduce((s, e) => s + Math.abs(e.amount_aud), 0);
-          rows.push(['TOTAL (all years)', String(totalInc.toFixed(2)), String(totalExp.toFixed(2)), String((totalInc - totalExp).toFixed(2)), String(incomeEntries.length + expenses.length)]);
-          downloadCsv('WR-Morocco2027-FinancialYearSummary.csv', rows);
-        };
-
-        return (
-          <div className="space-y-6">
-            {/* ATO info banner */}
-            <div className="flex items-start gap-3 p-4 bg-brand-dark-grey border border-brand-tan/20 rounded-xl">
-              <FileText className="w-5 h-5 text-brand-tan mt-0.5 flex-shrink-0" />
-              <div className="space-y-1">
-                <p className="font-semibold text-brand-cream">ATO Record-Keeping Compliance</p>
-                <p className="text-sm text-brand-cream/60">
-                  Australian tax law (ITAA 1936 s262A) requires financial records to be kept for <strong className="text-brand-cream/80">5 years</strong> from the date of transaction. Records must include date, amount, description, and purpose. All exports are in English and CSV format as required by the ATO.
-                </p>
-                <p className="text-xs text-brand-cream/40 mt-1">
-                  Note: Member contributions to a shared trip kitty are generally not assessable income for the organiser and not deductible for members. Consult your tax agent if any member is claiming trip costs as a work-related deduction.
-                </p>
-              </div>
-            </div>
-
-            {/* Financial Year filter */}
-            <div className="flex items-center gap-3 flex-wrap">
-                  <label className="text-sm text-brand-cream/60 font-medium">Filter by financial year:</label>
-                  <select
-                    value={exportFY}
-                    onChange={(e) => setExportFY(e.target.value)}
-                    className="px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream text-sm focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  >
-                    <option value="">All years</option>
-                    {fyOptions.map((fy) => (
-                      <option key={fy} value={fy}>{fy}–{Number(fy)+1}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-brand-cream/30">(Australian financial year: 1 Jul – 30 Jun)</span>
-
-                  <div className="ml-auto flex gap-2 flex-wrap">
-                    {/* Full data export */}
-                    <button
-                      onClick={() => exportTransactionRegister(exportFY)}
-                      className="flex items-center gap-2 bg-brand-tan hover:bg-brand-tan/90 text-brand-black px-4 py-2 rounded-lg text-sm font-semibold"
-                    >
-                      <Download className="w-4 h-4" /> Full Register
-                    </button>
-                    <button
-                      onClick={exportFinancialYearSummary}
-                      className="flex items-center gap-2 border border-brand-tan/40 hover:border-brand-tan text-brand-cream px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-tan/10"
-                    >
-                      <Download className="w-4 h-4" /> FY Summary
-                    </button>
-                  </div>
-                </div>
-
-            {/* Export cards */}
-            {(() => {
-              const exportFY2 = exportFY;
-              // Computed stats for the selected FY
-              const filteredExp = expenses.filter((e) => !exportFY2 || (() => {
-                const dt = parseLocalDate(e.expense_date);
-                const fy = dt.getMonth() >= 6 ? dt.getFullYear() : dt.getFullYear() - 1;
-                return String(fy) === exportFY2;
-              })());
-              const filteredInc = incomeEntries.filter((e) => !exportFY2 || (() => {
-                const dt = parseLocalDate(e.income_date);
-                const fy = dt.getMonth() >= 6 ? dt.getFullYear() : dt.getFullYear() - 1;
-                return String(fy) === exportFY2;
-              })());
-              const totalInc = filteredInc.reduce((s, e) => s + e.amount_aud, 0);
-              const totalExp = filteredExp.reduce((s, e) => s + Math.abs(e.amount_aud), 0);
-              const uniqueCategories = new Set(filteredExp.map((e) => e.category?.name || 'Uncategorised')).size;
-
-              const cards = [
-                {
-                  title: 'Transaction Register',
-                  subtitle: 'ATO s262A compliant — full record of all income and expenses',
-                  fields: ['Date', 'Type (Income/Expense)', 'Description & purpose', 'Category', 'Account', 'Currency & amount', 'AUD equivalent', 'GST treatment', 'Notes'],
-                  stats: `${filteredInc.length + filteredExp.length} transactions · ${fmt(totalInc)} income · ${fmt(totalExp)} expenses`,
-                  action: () => exportTransactionRegister(exportFY2),
-                  label: 'Export CSV',
-                  color: 'border-brand-tan/30',
-                },
-                {
-                  title: 'Expense Summary by Category',
-                  subtitle: 'Itemised expenses grouped by category with totals',
-                  fields: ['Category breakdown', 'Transaction count per category', 'Total AUD per category', 'Full line-item detail', 'GST treatment per line'],
-                  stats: `${filteredExp.length} expenses across ${uniqueCategories} categories · ${fmt(totalExp)} total`,
-                  action: () => exportExpenseSummary(exportFY2),
-                  label: 'Export CSV',
-                  color: 'border-red-600/20',
-                },
-                {
-                  title: 'Member Collections Report',
-                  subtitle: 'Income received from members — includes ATO note on tax treatment',
-                  fields: ['Date received', 'Member/description', 'Category (instalment, deposit, etc.)', 'Amount AUD', 'Account received into', 'Running total'],
-                  stats: `${filteredInc.length} income entries · ${fmt(totalInc)} total collected`,
-                  action: () => exportMemberCollections(exportFY2),
-                  label: 'Export CSV',
-                  color: 'border-green-600/20',
-                },
-                {
-                  title: 'Financial Year Summary',
-                  subtitle: 'Year-by-year income/expense totals across all trip years',
-                  fields: ['One row per financial year (Jul–Jun)', 'Total income AUD', 'Total expenses AUD', 'Net position', 'Transaction count'],
-                  stats: `Covers ${fyOptions.length} financial ${fyOptions.length === 1 ? 'year' : 'years'}`,
-                  action: exportFinancialYearSummary,
-                  label: 'Export CSV',
-                  color: 'border-blue-600/20',
-                },
-              ];
-
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {cards.map(({ title, subtitle, fields, stats, action, label, color }) => (
-                    <div key={title} className={`bg-brand-dark-grey border ${color} rounded-xl p-5 flex flex-col gap-4`}>
-                      <div>
-                        <h3 className="font-semibold text-brand-cream">{title}</h3>
-                        <p className="text-xs text-brand-cream/50 mt-0.5">{subtitle}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wide text-brand-cream/30 mb-1.5">Includes</p>
-                        <ul className="space-y-0.5">
-                          {fields.map((f) => (
-                            <li key={f} className="flex items-center gap-1.5 text-xs text-brand-cream/60">
-                              <span className="w-1 h-1 rounded-full bg-brand-tan/50 flex-shrink-0" />
-                              {f}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="mt-auto pt-3 border-t border-brand-tan/10 flex items-center justify-between">
-                        <p className="text-xs text-brand-cream/40">{stats}</p>
-                        <button
-                          onClick={action}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-tan/20 border border-brand-tan/40 text-brand-tan rounded-lg text-xs font-semibold hover:bg-brand-tan/30 transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5" /> {label}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-
-            {/* ATO retention reminder */}
-            <div className="flex items-start gap-3 p-4 bg-brand-black/40 border border-brand-tan/10 rounded-xl">
-              <Shield className="w-4 h-4 text-brand-cream/30 mt-0.5 flex-shrink-0" />
-              <div className="text-xs text-brand-cream/40 space-y-1">
-                <p><span className="text-brand-cream/60 font-medium">5-year retention rule:</span> Keep exported records until at least 5 years after the trip concludes (approx. June 2032 for Morocco 2027).</p>
-                <p><span className="text-brand-cream/60 font-medium">Format:</span> CSV files can be opened in Excel, Google Sheets, or Numbers and are in the ATO-required English language format.</p>
-                <p><span className="text-brand-cream/60 font-medium">GST:</span> This trip is run as a personal/club activity, not a GST-registered business. No GST input tax credits are claimable on these expenses. If your situation differs, consult your BAS agent.</p>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-            {/* ═══════════════════════════════════════════════════════════════════
           SETTINGS TAB
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'settings' && (
@@ -6071,9 +6109,9 @@ export default function AdminBudgetPage() {
                 </div>
                 <button onClick={() => handleSaveInterestRate(interestRatePa)} className="px-3 py-2 bg-brand-tan/20 border border-brand-tan/30 rounded-lg text-brand-tan text-sm font-semibold hover:bg-brand-tan/30">Save</button>
               </div>
-              {interestRatePa > 0 && (
+              {interestRatePa > 0 && accountBalances.westpac_life > 0 && (
                 <p className="text-xs text-amber-400/70 mt-1">
-                  Projected monthly interest: ~{fmt((accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0) * (interestRatePa / 100) / 12)} at ledger balance
+                  Projected monthly interest: ~{fmt(accountBalances.westpac_life * (interestRatePa / 100) / 12)} at current balance
                 </p>
               )}
             </div>
