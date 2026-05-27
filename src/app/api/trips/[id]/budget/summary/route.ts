@@ -271,6 +271,37 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
     });
 
+    // ── Member cost tracker items + assignments ───────────────────────────────
+    // Fetch all cost items for the trip, plus this member's self-funded assignments
+    let memberCostItems: any[] = [];
+    const { data: costItemsData } = await supabase
+      .from('trip_cost_items')
+      .select('id, name, description, sort_order')
+      .eq('trip_id', tripId)
+      .order('sort_order', { ascending: true });
+
+    if (costItemsData && costItemsData.length > 0) {
+      // Fetch assignments for the current user only (members see only their own)
+      const { data: assignmentsData } = await supabase
+        .from('member_cost_assignments')
+        .select('cost_item_id, is_self_funded, notes')
+        .eq('trip_id', tripId)
+        .eq('member_id', profile?.id ?? '');
+
+      const assignmentMap: Record<string, { is_self_funded: boolean; notes: string | null }> = {};
+      for (const a of assignmentsData ?? []) {
+        assignmentMap[a.cost_item_id] = { is_self_funded: a.is_self_funded, notes: a.notes ?? null };
+      }
+
+      memberCostItems = costItemsData.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description ?? null,
+        is_self_funded: assignmentMap[item.id]?.is_self_funded ?? false,
+        notes: assignmentMap[item.id]?.notes ?? null,
+      }));
+    }
+
     // ── Unified ledger (admin only) ───────────────────────────────────────────
     let ledger: any[] = [];
     if (hasAdminBudgetAccess) {
@@ -380,6 +411,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       income_entries: hasAdminBudgetAccess ? manualIncomeEntries : [],
       member_payments: showIndividual ? (hasAdminBudgetAccess ? memberPaymentsAll : memberBreakdown) : [],
       member_breakdown: showIndividual ? memberBreakdown : [],
+      member_cost_items: memberCostItems,
       ledger: hasAdminBudgetAccess ? ledger : [],
     });
   } catch (err) {
