@@ -57,7 +57,6 @@ type NewFieldDraft = {
   helper_text: string;
   is_required: boolean;
   options: string[];
-  save_to_library: boolean;
   category: string;
 };
 
@@ -84,7 +83,7 @@ export default function AdminFormsPage() {
   const [newField, setNewField] = useState<NewFieldDraft>({
     field_type: 'short_text', label: '', placeholder: '',
     helper_text: '', is_required: false, options: [],
-    save_to_library: false, category: '',
+    category: '',
   });
 
   // Library picker state
@@ -252,11 +251,10 @@ export default function AdminFormsPage() {
       setNewField({
         field_type: 'short_text', label: '', placeholder: '',
         helper_text: '', is_required: false, options: [],
-        save_to_library: false, category: '',
+        category: '',
       });
       loadFields(editingForm.id);
-      if (newField.save_to_library) flash('success', 'Field added and saved to library');
-      else flash('success', 'Field added');
+      flash('success', 'Field added');
     } else flash('error', json.error || 'Failed to add field');
   }
 
@@ -738,28 +736,20 @@ export default function AdminFormsPage() {
                               </div>
                             )}
 
-                            {/* Save to library toggle + category */}
                             <div className="rounded-lg border border-[#C9B98A]/15 bg-[#C9B98A]/3 p-3 space-y-2">
-                              <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-                                <input type="checkbox" checked={newField.save_to_library}
-                                  onChange={e => setNewField(p => ({ ...p, save_to_library: e.target.checked }))}
-                                  className="accent-[#C9B98A]" />
-                                <BookOpen size={13} className="text-[#C9B98A]/70" />
-                                <span>Save to Field Library</span>
-                                <span className="text-zinc-500 text-xs">(reusable across forms)</span>
-                              </label>
-                              {newField.save_to_library && (
-                                <div>
-                                  <label className="text-zinc-400 text-xs block mb-1">Category</label>
-                                  <select
-                                    value={newField.category}
-                                    onChange={e => setNewField(p => ({ ...p, category: e.target.value }))}
-                                    className="w-full bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-[#B5621E]">
-                                    <option value="">No category</option>
-                                    {LIBRARY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                                  </select>
-                                </div>
-                              )}
+                              <div className="text-zinc-300 text-sm">
+                                All new fields are automatically linked to the shared Field Library so they stay reusable and synced.
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 text-xs block mb-1">Category</label>
+                                <select
+                                  value={newField.category}
+                                  onChange={e => setNewField(p => ({ ...p, category: e.target.value }))}
+                                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-[#B5621E]">
+                                  <option value="">No category</option>
+                                  {LIBRARY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-3">

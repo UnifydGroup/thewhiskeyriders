@@ -224,6 +224,53 @@ export async function verifyRole(
   return { authenticated: true, authorized, user, profile };
 }
 
+export async function findOrCreateLibraryField(fieldData: {
+  field_type: string;
+  label: string;
+  placeholder?: string | null;
+  helper_text?: string | null;
+  options?: unknown;
+  settings?: unknown;
+  category?: string | null;
+  created_by?: string | null;
+}) {
+  const canonical = {
+    field_type: fieldData.field_type,
+    label: fieldData.label.trim(),
+    placeholder: fieldData.placeholder?.trim() || null,
+    helper_text: fieldData.helper_text?.trim() || null,
+    options: fieldData.options ?? null,
+    settings: fieldData.settings ?? null,
+    category: fieldData.category?.trim() || null,
+  };
+
+  const { data: existing, error: existingErr } = await supabase
+    .from('form_field_library')
+    .select('id')
+    .match(canonical)
+    .limit(1);
+
+  if (existingErr) {
+    throw existingErr;
+  }
+
+  if (existing && existing.length > 0) {
+    return existing[0].id;
+  }
+
+  const { data: inserted, error: insertErr } = await supabase
+    .from('form_field_library')
+    .insert({ ...canonical, created_by: fieldData.created_by || null })
+    .select()
+    .single();
+
+  if (insertErr) {
+    throw insertErr;
+  }
+
+  return inserted.id;
+}
+
 // Get user's trip role
 export async function getUserTripRole(userId: string, tripId: string) {
   const { data, error } = await supabase

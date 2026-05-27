@@ -6,6 +6,7 @@ import {
   ApiErrors,
   getJsonBody,
   supabase,
+  findOrCreateLibraryField,
 } from '@/lib/api/helpers';
 
 // GET /api/forms/[id]/fields
@@ -27,9 +28,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 //   A) Pick from library:  { library_field_id, is_required?, sort_order? }
 //      → inherits type/label/placeholder/helper_text/options from library
 //
-//   B) Create new:         { field_type, label, ..., save_to_library?, category? }
-//      → creates a standalone field; if save_to_library=true, also creates a
-//        form_field_library entry and links back via library_field_id
+//   B) Create new:         { field_type, label, ..., category? }
+//      → creates a library-linked field and keeps it synced against the shared library
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { authenticated, authorized, profile } = await verifyRole(request, [
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const {
     field_type, label, placeholder, helper_text,
     is_required, sort_order, options, settings,
-    save_to_library, category,
+    category,
   } = body;
 
   if (!field_type || !label?.trim()) {
@@ -111,27 +111,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const order = sort_order ?? await nextSortOrder();
+  const canonicalField = {
+    field_type,
+    label:       label.trim(),
+    placeholder: placeholder?.trim() || null,
+    helper_text: helper_text?.trim() || null,
+    options:     options || null,
+    settings:    settings || null,
+    category:    category?.trim() || null,
+    created_by:  profile.id,
+  };
+
   let library_field_id: string | null = null;
-
-  // Optionally save to library first
-  if (save_to_library) {
-    const { data: libField, error: libErr } = await supabase
-      .from('form_field_library')
-      .insert({
-        field_type,
-        label:       label.trim(),
-        placeholder: placeholder?.trim() || null,
-        helper_text: helper_text?.trim() || null,
-        options:     options || null,
-        settings:    settings || null,
-        category:    category?.trim() || null,
-        created_by:  profile.id,
-      })
-      .select()
-      .single();
-
-    if (libErr) return errorResponse(ApiErrors.INTERNAL_ERROR, `Library save failed: ${libErr.message}`);
-    library_field_id = libField.id;
+  try {
+    library_field_id = await findOrCreateLibraryField(canonicalField);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return errorResponse(ApiErrors.INTERNAL_ERROR, `Library save failed: ${message}`);
   }
 
   const { data, error } = await supabase
