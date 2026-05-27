@@ -33,8 +33,12 @@ export interface FormFieldLibrary {
   placeholder: string | null;
   helper_text: string | null;
   options: string[] | null;
-  settings: Record<string, unknown> | null;
-  category: string | null;         // e.g. "Travel", "Medical", "Personal"
+  settings: {
+    /** DB column on the profiles table this field maps to, e.g. "passport_number" */
+    profiles_column?: string;
+    [key: string]: unknown;
+  } | null;
+  category: string | null;         // "Profile" | "Address" | "Travel" | "Medical" | "Personal" | "Trip" | "Equipment" | "Logistics" | "Other"
   use_count: number;               // how many form_fields reference this
   created_by: string | null;
   created_at: string | null;

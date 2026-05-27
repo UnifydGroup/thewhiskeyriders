@@ -32,7 +32,7 @@ const FIELD_TYPES: { value: FormFieldType; label: string; icon: React.ReactNode;
   { value: 'acknowledgement', label: 'Acknowledgement',  icon: <CheckSquare size={14} />, hasOptions: false },
 ];
 
-const LIBRARY_CATEGORIES = ['Travel', 'Medical', 'Personal', 'Trip', 'Equipment', 'Logistics', 'Other'];
+const LIBRARY_CATEGORIES = ['Profile', 'Address', 'Travel', 'Medical', 'Personal', 'Trip', 'Equipment', 'Logistics', 'Other'];
 
 const STATUS_COLOURS: Record<FormStatus, string> = {
   draft:  'bg-zinc-700 text-zinc-200',
@@ -236,8 +236,9 @@ export default function AdminFormsPage() {
     setSavingField(true);
     const body = {
       ...newField,
-      options: newField.options.length ? newField.options : null,
-      category: newField.category || null,
+      options:          newField.options.length ? newField.options : null,
+      category:         newField.category || null,
+      save_to_library:  true,   // Always save to library — keeps library & form_fields in sync
     };
     const res  = await fetch(`/api/forms/${editingForm.id}/fields`, {
       method: 'POST',
@@ -548,6 +549,11 @@ export default function AdminFormsPage() {
                                     )}
                                   </span>
                                 )}
+                                {(field.library_field as any)?.settings?.profiles_column && (
+                                  <span className="text-[10px] text-blue-400/60 bg-blue-900/15 border border-blue-700/20 px-1.5 py-0.5 rounded-full" title={`Synced to profiles.${(field.library_field as any).settings.profiles_column}`}>
+                                    ⇄ profile
+                                  </span>
+                                )}
                               </div>
                               {field.helper_text && (
                                 <p className="text-zinc-500 text-xs mt-0.5 truncate">{field.helper_text}</p>
@@ -647,6 +653,11 @@ export default function AdminFormsPage() {
                                               <Tag size={8} /> {lf.category}
                                             </span>
                                           )}
+                                          {lf.settings?.profiles_column && (
+                                            <span className="flex items-center gap-0.5 text-[10px] text-blue-400/70 bg-blue-900/20 px-1.5 py-0.5 rounded-full border border-blue-700/20" title="Synced to member profile">
+                                              ⇄ profile
+                                            </span>
+                                          )}
                                         </div>
                                         {lf.description && (
                                           <p className="text-zinc-500 text-xs mt-0.5 truncate">{lf.description}</p>
@@ -654,6 +665,7 @@ export default function AdminFormsPage() {
                                         <p className="text-zinc-600 text-xs mt-0.5">
                                           Used in {lf.use_count} form{lf.use_count !== 1 ? 's' : ''}
                                           {lf.options?.length ? ` · ${lf.options.length} options` : ''}
+                                          {lf.settings?.profiles_column ? ` · profiles.${lf.settings.profiles_column}` : ''}
                                         </p>
                                       </div>
                                       {alreadyAdded ? (
