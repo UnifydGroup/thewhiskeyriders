@@ -18,7 +18,9 @@ export interface Form {
   trip_id: string | null;
   status: FormStatus;
   allow_multiple_submissions: boolean;
-  submission_deadline: string | null;
+  submission_deadline: string | null;  // closes_at — when form stops accepting submissions
+  goes_live_at: string | null;         // scheduled open time; null = manual status control
+  show_countdown: boolean;             // display countdown timer on form (going-live + live stages)
   notify_on_submission: boolean;
   created_by: string | null;
   created_at: string | null;

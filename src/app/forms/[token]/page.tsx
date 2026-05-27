@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
-import { CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
+import { CheckCircle, AlertCircle, ChevronDown, Clock } from 'lucide-react';
 import Image from 'next/image';
 import type { FormField } from '@/lib/types/database';
 
@@ -17,10 +17,69 @@ type FormData = {
   token: string;
   status: string;
   submission_deadline: string | null;
+  goes_live_at: string | null;
+  show_countdown: boolean;
   allow_multiple_submissions: boolean;
   trips: { name: string } | null;
   form_fields: FormField[];
 };
+
+// ── Countdown hook ───────────────────────────────────────────
+type CountdownParts = { days: number; hours: number; mins: number; secs: number; total: number };
+
+function useCountdown(targetIso: string | null | undefined): CountdownParts {
+  const calc = (): CountdownParts => {
+    if (!targetIso) return { days: 0, hours: 0, mins: 0, secs: 0, total: 0 };
+    const diff = Math.max(0, Math.floor((new Date(targetIso).getTime() - Date.now()) / 1000));
+    return {
+      total: diff,
+      days:  Math.floor(diff / 86400),
+      hours: Math.floor((diff % 86400) / 3600),
+      mins:  Math.floor((diff % 3600) / 60),
+      secs:  diff % 60,
+    };
+  };
+  const [parts, setParts] = useState<CountdownParts>(calc);
+  const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!targetIso) return;
+    setParts(calc());
+    ref.current = setInterval(() => setParts(calc()), 1000);
+    return () => { if (ref.current) clearInterval(ref.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetIso]);
+  return parts;
+}
+
+// ── Countdown display ─────────────────────────────────────────
+function CountdownDisplay({ parts, label }: { parts: CountdownParts; label: string }) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <p className="text-zinc-400 text-sm">{label}</p>
+      <div className="flex items-end gap-3">
+        {parts.days > 0 && (
+          <div className="flex flex-col items-center">
+            <span className="text-3xl font-bold text-white font-mono">{parts.days}</span>
+            <span className="text-zinc-500 text-xs uppercase tracking-widest">day{parts.days !== 1 ? 's' : ''}</span>
+          </div>
+        )}
+        <div className="flex flex-col items-center">
+          <span className="text-3xl font-bold text-white font-mono">{pad(parts.hours)}</span>
+          <span className="text-zinc-500 text-xs uppercase tracking-widest">hrs</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-3xl font-bold text-[#C9B98A] font-mono">{pad(parts.mins)}</span>
+          <span className="text-zinc-500 text-xs uppercase tracking-widest">min</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-3xl font-bold text-[#B5621E] font-mono">{pad(parts.secs)}</span>
+          <span className="text-zinc-500 text-xs uppercase tracking-widest">sec</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function PublicFormPage() {
   const params = useParams();
@@ -38,6 +97,10 @@ export default function PublicFormPage() {
   // Check if user is already logged in (for pre-fill check)
   const supabase = createClient();
 
+  // Countdown hooks — always called, conditionally used
+  const goesLiveCountdown = useCountdown(form?.goes_live_at);
+  const deadlineCountdown = useCountdown(form?.submission_deadline);
+
   const loadForm = useCallback(async () => {
     setLoading(true);
     try {
@@ -52,6 +115,14 @@ export default function PublicFormPage() {
       const json = await res.json();
       if (!json.success) { setError(json.error || 'Unable to load form.'); return; }
       setForm(json.data);
+      // If form is scheduled, re-poll once it goes live
+      if (json.data.status === 'scheduled' && json.data.goes_live_at) {
+        const msUntilLive = new Date(json.data.goes_live_at).getTime() - Date.now();
+        if (msUntilLive > 0 && msUntilLive < 24 * 60 * 60 * 1000) {
+          // Only auto-reload if within 24h (avoids holding long timers)
+          setTimeout(() => loadForm(), msUntilLive + 500);
+        }
+      }
 
       // Check existing submission
       const { data: { user } } = await supabase.auth.getUser();
@@ -153,6 +224,32 @@ export default function PublicFormPage() {
             <h2 className="text-2xl font-bold text-white">Already Submitted</h2>
             <p className="text-zinc-400">You&apos;ve already submitted this form. Contact an admin if you need to make changes.</p>
           </div>
+        ) : form?.status === 'scheduled' ? (
+          /* ── Not yet open: countdown to goes_live_at ─────────── */
+          <div className="text-center space-y-8 py-12">
+            <div className="space-y-2">
+              <Clock size={48} className="text-[#C9B98A] mx-auto" />
+              <h1 className="text-2xl font-bold text-white">{form.title}</h1>
+              {form.description && <p className="text-zinc-400 text-sm">{form.description}</p>}
+              {form.trips && <p className="text-[#C9B98A] text-sm">{form.trips.name}</p>}
+            </div>
+            <div className="border border-zinc-800 rounded-xl bg-zinc-900/60 px-8 py-6 space-y-4">
+              <p className="text-zinc-500 text-xs uppercase tracking-widest font-medium">Opens in</p>
+              {goesLiveCountdown.total > 0 ? (
+                <CountdownDisplay parts={goesLiveCountdown} label="" />
+              ) : (
+                <p className="text-[#C9B98A] text-sm">Opening now — refresh the page</p>
+              )}
+              {form.goes_live_at && (
+                <p className="text-zinc-600 text-xs mt-2">
+                  {new Date(form.goes_live_at).toLocaleString('en-AU', {
+                    weekday: 'long', day: 'numeric', month: 'long',
+                    year: 'numeric', hour: '2-digit', minute: '2-digit',
+                  })}
+                </p>
+              )}
+            </div>
+          </div>
         ) : form ? (
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Form header */}
@@ -160,12 +257,32 @@ export default function PublicFormPage() {
               <h1 className="text-2xl font-bold text-white">{form.title}</h1>
               {form.description && <p className="text-zinc-400">{form.description}</p>}
               {form.trips && <p className="text-[#C9B98A] text-sm">{form.trips.name}</p>}
-              {form.submission_deadline && (
-                <p className="text-zinc-500 text-xs">
-                  Deadline: {new Date(form.submission_deadline).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}
-                </p>
-              )}
             </div>
+
+            {/* Closing countdown banner (only when show_countdown + deadline set + time remaining) */}
+            {form.show_countdown && form.submission_deadline && deadlineCountdown.total > 0 && (
+              <div className="flex items-center justify-between gap-4 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 text-zinc-400 text-xs uppercase tracking-widest shrink-0">
+                  <Clock size={13} className="text-[#B5621E]" />
+                  Closes in
+                </div>
+                <div className="flex items-end gap-2 text-sm font-mono">
+                  {deadlineCountdown.days > 0 && (
+                    <span className="text-white font-bold">{deadlineCountdown.days}<span className="text-zinc-500 text-xs font-normal ml-0.5">d</span></span>
+                  )}
+                  <span className="text-white font-bold">{String(deadlineCountdown.hours).padStart(2,'0')}<span className="text-zinc-500 text-xs font-normal ml-0.5">h</span></span>
+                  <span className="text-[#C9B98A] font-bold">{String(deadlineCountdown.mins).padStart(2,'0')}<span className="text-zinc-500 text-xs font-normal ml-0.5">m</span></span>
+                  <span className="text-[#B5621E] font-bold">{String(deadlineCountdown.secs).padStart(2,'0')}<span className="text-zinc-500 text-xs font-normal ml-0.5">s</span></span>
+                </div>
+              </div>
+            )}
+
+            {/* Deadline date (fallback when countdown off or expired) */}
+            {form.submission_deadline && (!form.show_countdown || deadlineCountdown.total === 0) && (
+              <p className="text-zinc-500 text-xs">
+                Deadline: {new Date(form.submission_deadline).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
+            )}
 
             {/* Fields */}
             {form.form_fields.map((field) => (

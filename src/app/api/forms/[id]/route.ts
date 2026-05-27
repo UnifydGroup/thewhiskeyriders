@@ -56,7 +56,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
 
   const body = await getJsonBody(request);
-  const { title, description, status, trip_id, allow_multiple_submissions, submission_deadline, notify_on_submission } = body;
+  const {
+    title, description, status, trip_id,
+    allow_multiple_submissions, submission_deadline,
+    goes_live_at, show_countdown, notify_on_submission,
+  } = body;
 
   const updates: Record<string, unknown> = {};
   if (title !== undefined) updates.title = title.trim();
@@ -65,6 +69,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (trip_id !== undefined) updates.trip_id = trip_id || null;
   if (allow_multiple_submissions !== undefined) updates.allow_multiple_submissions = allow_multiple_submissions;
   if (submission_deadline !== undefined) updates.submission_deadline = submission_deadline || null;
+  if (goes_live_at !== undefined) updates.goes_live_at = goes_live_at || null;
+  if (show_countdown !== undefined) updates.show_countdown = Boolean(show_countdown);
   if (notify_on_submission !== undefined) updates.notify_on_submission = notify_on_submission;
 
   const { data, error } = await supabase
