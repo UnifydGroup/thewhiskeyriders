@@ -1,7 +1,8 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -62,6 +63,7 @@ type NewFieldDraft = {
 
 // ── Main page ────────────────────────────────────────────────
 export default function AdminFormsPage() {
+  const supabase = useMemo(() => createClient(), []);
   const [forms, setForms]   = useState<FormWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -112,55 +114,69 @@ export default function AdminFormsPage() {
   const memberName = (m: any) =>
     [m.first_name, m.surname].filter(Boolean).join(' ') || m.full_name || '—';
 
+  /** Fetch with the current Supabase session token attached. */
+  const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers as Record<string, string> | undefined),
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+    });
+  }, [supabase]);
+
   // ── data loaders ─────────────────────────────────────────────
   const loadForms = useCallback(async () => {
     setLoading(true);
-    const res  = await fetch('/api/forms');
+    const res  = await authFetch('/api/forms');
     const json = await res.json();
     setForms(json.success ? json.data : []);
     setLoading(false);
-  }, []);
+  }, [authFetch]);
 
   useEffect(() => { loadForms(); }, [loadForms]);
 
   const loadFields = useCallback(async (formId: string) => {
     setLoadingFields(true);
-    const res  = await fetch(`/api/forms/${formId}/fields`);
+    const res  = await authFetch(`/api/forms/${formId}/fields`);
     const json = await res.json();
     setFields(json.success ? json.data : []);
     setLoadingFields(false);
-  }, []);
+  }, [authFetch]);
 
   const loadLibrary = useCallback(async (search = '', category = '') => {
     setLoadingLibrary(true);
     const params = new URLSearchParams();
     if (search)   params.set('search', search);
     if (category) params.set('category', category);
-    const res  = await fetch(`/api/forms/field-library?${params}`);
+    const res  = await authFetch(`/api/forms/field-library?${params}`);
     const json = await res.json();
     setLibraryFields(json.success ? json.data : []);
     setLoadingLibrary(false);
-  }, []);
+  }, [authFetch]);
 
   const loadAssignments = useCallback(async (formId: string) => {
     setLoadingAssign(true);
     const [mr, ar] = await Promise.all([
-      fetch('/api/members'),
-      fetch(`/api/forms/${formId}/assign`),
+      authFetch('/api/members'),
+      authFetch(`/api/forms/${formId}/assign`),
     ]);
     const [mj, aj] = await Promise.all([mr.json(), ar.json()]);
-    setMembers(mj.success ? mj.data : []);
+    // /api/members returns { members: [...], pagination: {...} } inside data
+    setMembers(mj.success ? (mj.data?.members ?? mj.data ?? []) : []);
     setAssignments(aj.success ? aj.data.map((a: any) => a.member_id) : []);
     setLoadingAssign(false);
-  }, []);
+  }, [authFetch]);
 
   const loadResponses = useCallback(async (formId: string) => {
     setLoadingResp(true);
-    const res  = await fetch(`/api/forms/${formId}/responses`);
+    const res  = await authFetch(`/api/forms/${formId}/responses`);
     const json = await res.json();
     setResponses(json.success ? json.data : []);
     setLoadingResp(false);
-  }, []);
+  }, [authFetch]);
 
   // ── open builder ─────────────────────────────────────────────
   async function openBuilder(form: FormWithMeta) {
@@ -174,9 +190,8 @@ export default function AdminFormsPage() {
   async function handleCreate() {
     if (!newFormTitle.trim()) return;
     setCreating(true);
-    const res  = await fetch('/api/forms', {
+    const res  = await authFetch('/api/forms', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: newFormTitle.trim(), description: newFormDesc.trim() }),
     });
     const json = await res.json();
@@ -189,9 +204,8 @@ export default function AdminFormsPage() {
 
   // ── status change ────────────────────────────────────────────
   async function updateStatus(formId: string, status: FormStatus) {
-    const res  = await fetch(`/api/forms/${formId}`, {
+    const res  = await authFetch(`/api/forms/${formId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
     const json = await res.json();
@@ -204,7 +218,7 @@ export default function AdminFormsPage() {
   // ── delete form ──────────────────────────────────────────────
   async function deleteForm(formId: string) {
     if (!confirm('Delete this form and all its responses? This cannot be undone.')) return;
-    const res  = await fetch(`/api/forms/${formId}`, { method: 'DELETE' });
+    const res  = await authFetch(`/api/forms/${formId}`, { method: 'DELETE' });
     const json = await res.json();
     if (json.success) {
       flash('success', 'Deleted');
@@ -217,9 +231,8 @@ export default function AdminFormsPage() {
   async function handleAddFromLibrary(libField: FormFieldLibrary) {
     if (!editingForm) return;
     setSavingField(true);
-    const res  = await fetch(`/api/forms/${editingForm.id}/fields`, {
+    const res  = await authFetch(`/api/forms/${editingForm.id}/fields`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ library_field_id: libField.id }),
     });
     const json = await res.json();
@@ -240,9 +253,8 @@ export default function AdminFormsPage() {
       category:         newField.category || null,
       save_to_library:  true,   // Always save to library — keeps library & form_fields in sync
     };
-    const res  = await fetch(`/api/forms/${editingForm.id}/fields`, {
+    const res  = await authFetch(`/api/forms/${editingForm.id}/fields`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const json = await res.json();
@@ -263,7 +275,7 @@ export default function AdminFormsPage() {
   async function handleDeleteField(fieldId: string) {
     if (!editingForm) return;
     if (!confirm('Remove this field? Existing response data will be deleted.')) return;
-    await fetch(`/api/forms/${editingForm.id}/fields/${fieldId}`, { method: 'DELETE' });
+    await authFetch(`/api/forms/${editingForm.id}/fields/${fieldId}`, { method: 'DELETE' });
     loadFields(editingForm.id);
   }
 
@@ -276,9 +288,8 @@ export default function AdminFormsPage() {
     [updated[index], updated[swap]] = [updated[swap], updated[index]];
     const reordered = updated.map((f, i) => ({ ...f, sort_order: i }));
     setFields(reordered);
-    await fetch(`/api/forms/${editingForm.id}/fields`, {
+    await authFetch(`/api/forms/${editingForm.id}/fields`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields: reordered.map((f) => ({ id: f.id, sort_order: f.sort_order })) }),
     });
   }
@@ -297,16 +308,14 @@ export default function AdminFormsPage() {
     const assigned = assignments.includes(memberId);
     setSavingAssign(true);
     if (assigned) {
-      await fetch(`/api/forms/${editingForm.id}/assign`, {
+      await authFetch(`/api/forms/${editingForm.id}/assign`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ member_ids: [memberId] }),
       });
       setAssignments(p => p.filter(id => id !== memberId));
     } else {
-      await fetch(`/api/forms/${editingForm.id}/assign`, {
+      await authFetch(`/api/forms/${editingForm.id}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ member_ids: [memberId] }),
       });
       setAssignments(p => [...p, memberId]);
@@ -317,9 +326,8 @@ export default function AdminFormsPage() {
   async function assignAll() {
     if (!editingForm) return;
     setSavingAssign(true);
-    await fetch(`/api/forms/${editingForm.id}/assign`, {
+    await authFetch(`/api/forms/${editingForm.id}/assign`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ member_ids: 'all' }),
     });
     setSavingAssign(false);
