@@ -13,6 +13,7 @@ import { formatDate } from '@/lib/utils';
 import { Mail, MapPin, Phone, Route, Trophy, Users } from 'lucide-react';
 import type { BadgeType, Profile, Trip, TripRole } from '@/lib/types/database';
 import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
+import MemberFormsSection from '@/components/forms/MemberFormsSection';
 import { ADVENTURE_SCORE_EXPLANATION, calculateAdventureScore } from '@/lib/adventure-score';
 import { WorldMap } from '@/components/map/WorldMap';
 import { NewsCard } from '@/components/news/NewsCard';
@@ -79,6 +80,8 @@ export default function MemberProfilePage() {
   const [memberBadges, setMemberBadges] = useState<MemberBadgeSummary[]>([]);
   const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -86,6 +89,19 @@ export default function MemberProfilePage() {
         const {
           data: { session },
         } = await supabase.auth.getSession();
+
+        // Load current user's profile for permission checks
+        if (session?.user?.id) {
+          const { data: currentP } = await supabase
+            .from('profiles')
+            .select('id, role')
+            .eq('user_id', session.user.id)
+            .single();
+          if (currentP) {
+            setCurrentProfileId(currentP.id);
+            setCurrentUserRole(currentP.role);
+          }
+        }
 
         const [{ data: profileData }, { data: tripsData }, { data: badgesData }] = await Promise.all([
           supabase.from('profiles').select('*').eq('id', memberId).single(),
@@ -428,6 +444,12 @@ export default function MemberProfilePage() {
           </div>
         </section>
       )}
+
+      <MemberFormsSection
+        memberId={memberId}
+        isSelf={currentProfileId === memberId}
+        isAdmin={['super_admin', 'admin', 'trip_admin'].includes(currentUserRole ?? '')}
+      />
 
       <TaggedPhotosSection profile={profile} />
     </div>

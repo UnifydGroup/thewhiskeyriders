@@ -1,4 +1,70 @@
 export type UserRole = 'super_admin' | 'admin' | 'trip_admin' | 'member';
+
+// ── Forms ────────────────────────────────────────────────────
+export type FormStatus = 'draft' | 'active' | 'closed';
+export type FormFieldType =
+  | 'short_text' | 'long_text' | 'number' | 'currency'
+  | 'date' | 'date_range'
+  | 'single_choice' | 'multiple_choice' | 'dropdown'
+  | 'file_upload' | 'yes_no'
+  | 'section_header' | 'acknowledgement';
+
+export interface Form {
+  id: string;
+  title: string;
+  description: string | null;
+  slug: string;
+  token: string;
+  trip_id: string | null;
+  status: FormStatus;
+  allow_multiple_submissions: boolean;
+  submission_deadline: string | null;
+  notify_on_submission: boolean;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface FormField {
+  id: string;
+  form_id: string;
+  field_type: FormFieldType;
+  label: string;
+  placeholder: string | null;
+  helper_text: string | null;
+  is_required: boolean;
+  sort_order: number;
+  options: string[] | null;         // for choice fields
+  settings: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface FormAssignment {
+  id: string;
+  form_id: string;
+  member_id: string;
+  assigned_by: string | null;
+  assigned_at: string | null;
+  email_sent_at: string | null;
+}
+
+export interface FormResponse {
+  id: string;
+  form_id: string;
+  member_id: string | null;
+  submitted_at: string | null;
+  is_public: boolean;
+  ip_address: string | null;
+}
+
+export interface FormResponseValue {
+  id: string;
+  response_id: string;
+  field_id: string;
+  value_text: string | null;
+  value_json: unknown | null;
+  created_at: string | null;
+}
 export type TripStatus = 'upcoming' | 'active' | 'completed' | 'cancelled';
 export type TripRole = 'captain' | 'kitty_man' | 'organiser' | 'member';
 export type KeyDateType = 'departure' | 'arrival' | 'payment_due' | 'deadline' | 'event' | 'other';

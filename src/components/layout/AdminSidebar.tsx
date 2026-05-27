@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Activity,
   Bell,
+  ClipboardList,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -62,6 +63,7 @@ const adminNavItems: AdminNavItem[] = [
     label: 'Financial Manager',
     icon: DollarSign,
   },
+  { href: '/admin/forms', label: 'Form Builder', icon: ClipboardList },
   { href: '/admin/activity-log', label: 'Activity Log', icon: Activity },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
