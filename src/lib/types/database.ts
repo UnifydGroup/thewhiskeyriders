@@ -25,9 +25,26 @@ export interface Form {
   updated_at: string | null;
 }
 
+export interface FormFieldLibrary {
+  id: string;
+  field_type: FormFieldType;
+  label: string;
+  description: string | null;      // admin notes / purpose
+  placeholder: string | null;
+  helper_text: string | null;
+  options: string[] | null;
+  settings: Record<string, unknown> | null;
+  category: string | null;         // e.g. "Travel", "Medical", "Personal"
+  use_count: number;               // how many form_fields reference this
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface FormField {
   id: string;
   form_id: string;
+  library_field_id: string | null; // FK → form_field_library; null = one-off field
   field_type: FormFieldType;
   label: string;
   placeholder: string | null;

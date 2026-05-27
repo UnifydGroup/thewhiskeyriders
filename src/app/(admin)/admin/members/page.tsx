@@ -10,10 +10,11 @@ import { Spinner } from '@/components/ui/Spinner';
 import { ImageCropModal } from '@/components/ui/ImageCropModal';
 import {
   Edit2, Trash2, Archive, X, Save, AlertCircle, CheckCircle,
-  Users, Search, Shield, UserCheck, Bike, Plus, Camera, Mail
+  Users, Search, Shield, UserCheck, Bike, Plus, Camera, Mail, Download
 } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
 import { APPAREL_SIZES } from '@/lib/profile-options';
+import ExportMembersPanel from '@/components/admin/ExportMembersPanel';
 
 export default function MemberManagementPage() {
   const supabase = createClient();
@@ -56,6 +57,7 @@ export default function MemberManagementPage() {
   const [editingMemberTripIds, setEditingMemberTripIds] = useState<string[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
   // Password reset state
   const [resetEmailLoading, setResetEmailLoading] = useState<string | null>(null); // member id being reset
@@ -835,13 +837,22 @@ export default function MemberManagementPage() {
           <h1 className="text-3xl font-bold text-brand-cream mb-2">Members Management</h1>
           <p className="text-brand-cream/70">Manage all members, roles, details, and trip assignments</p>
         </div>
-        <Button
-          onClick={() => setIsCreatingMember(true)}
-          className="bg-brand-brown hover:bg-brand-brown/80 text-brand-black font-semibold flex items-center gap-2 whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" />
-          Add Member
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => setShowExport(true)}
+            className="bg-brand-dark-grey hover:bg-brand-dark-grey/70 border border-brand-brown/40 text-brand-cream font-semibold flex items-center gap-2 whitespace-nowrap"
+          >
+            <Download className="w-4 h-4" />
+            Export
+          </Button>
+          <Button
+            onClick={() => setIsCreatingMember(true)}
+            className="bg-brand-brown hover:bg-brand-brown/80 text-brand-black font-semibold flex items-center gap-2 whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            Add Member
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -1443,6 +1454,14 @@ export default function MemberManagementPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {/* ── Export Members Modal ─────────────────────────────── */}
+      {showExport && (
+        <ExportMembersPanel
+          members={members}
+          onClose={() => setShowExport(false)}
+        />
       )}
 
       <ImageCropModal
