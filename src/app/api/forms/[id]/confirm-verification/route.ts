@@ -45,8 +45,22 @@ export async function POST(
   }
 
   if (verification.verified_at) {
-    // Already verified — return success so the client can proceed
-    return successResponse({ verified: true, email: verification.email });
+    // Already verified — return success (idempotent). Attempt profile lookup too
+    // so a page refresh after verification still pre-fills the form.
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select(
+        'email, full_name, first_name, middle_name, surname, nickname, bio, ' +
+        'phone, phone_country_code, ' +
+        'emergency_contact, emergency_contact_number, ' +
+        'date_of_birth, ' +
+        'address_line1, address_line2, address_city, address_state, address_postcode, address_country, ' +
+        'passport_number, passport_expiry, ' +
+        'shirt_size, shorts_size'
+      )
+      .ilike('email', verification.email)
+      .maybeSingle();
+    return successResponse({ verified: true, email: verification.email, profile: existingProfile ?? null });
   }
 
   if (new Date(verification.expires_at) < new Date()) {
@@ -67,5 +81,25 @@ export async function POST(
     return errorResponse(ApiErrors.INTERNAL_ERROR, 'Failed to confirm verification');
   }
 
-  return successResponse({ verified: true, email: verification.email });
+  // Look up a matching member profile so the form can pre-fill fields —
+  // OTP ownership proof is equivalent to being logged in for pre-fill purposes.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select(
+      'email, full_name, first_name, middle_name, surname, nickname, bio, ' +
+      'phone, phone_country_code, ' +
+      'emergency_contact, emergency_contact_number, ' +
+      'date_of_birth, ' +
+      'address_line1, address_line2, address_city, address_state, address_postcode, address_country, ' +
+      'passport_number, passport_expiry, ' +
+      'shirt_size, shorts_size'
+    )
+    .ilike('email', verification.email)
+    .maybeSingle();
+
+  return successResponse({
+    verified: true,
+    email: verification.email,
+    profile: profile ?? null,
+  });
 }

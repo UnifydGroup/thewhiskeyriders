@@ -316,11 +316,33 @@ export default function PublicFormPage() {
     setConfirmingOtp(false);
     if (json.success && json.data.verified) {
       setVerificationStep('verified');
-      // Pre-fill the email field if there's a mapped field for it
+
       if (form) {
-        const emailField = form.form_fields.find(f => f.profiles_column === 'email');
-        if (emailField) {
-          setValue(emailField.id, verifyEmail);
+        const returnedProfile = json.data.profile as Record<string, unknown> | null;
+
+        if (returnedProfile) {
+          // Build a flat string map — same shape as the authenticated profile path
+          const flat: Record<string, string> = {};
+          for (const [k, v] of Object.entries(returnedProfile)) {
+            if (v !== null && v !== undefined) flat[k] = String(v);
+          }
+          setProfileData(flat);
+
+          // Pre-fill every mapped field from the profile, just like the logged-in flow
+          setValues(prev => {
+            const prefilled = { ...prev };
+            for (const field of form.form_fields) {
+              const col = field.profiles_column;
+              if (col && flat[col] && !prefilled[field.id]) {
+                prefilled[field.id] = flat[col];
+              }
+            }
+            return prefilled;
+          });
+        } else {
+          // No matching profile — still pre-fill the email field from the verified address
+          const emailField = form.form_fields.find(f => f.profiles_column === 'email');
+          if (emailField) setValue(emailField.id, verifyEmail);
         }
       }
     } else {
