@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -13,7 +14,7 @@ import {
   CheckSquare, AlignLeft, Hash, Calendar, List, ToggleLeft,
   Upload, Minus, AlertCircle, CheckCircle, FileText,
   BookOpen, Sparkles, Search, Tag, RefreshCw, Copy,
-  Pencil, Clock, CalendarClock, Timer, Eye,
+  Pencil, Clock, CalendarClock, Timer, Eye, Download, FileSpreadsheet,
 } from 'lucide-react';
 import type { Form, FormField, FormFieldLibrary, FormFieldType, FormStatus } from '@/lib/types/database';
 
@@ -261,6 +262,76 @@ export default function AdminFormsPage() {
     setResponses(json.success ? json.data : []);
     setLoadingResp(false);
   }, [authFetch]);
+
+  // ── Export responses to Excel ─────────────────────────────────────
+  function exportResponses() {
+    if (!editingForm || responses.length === 0) return;
+
+    // Columns = non-structural fields in sort order
+    const dataFields = fields.filter(f => f.field_type !== 'section_header' && f.field_type !== 'acknowledgement');
+
+    // Header row
+    const headers = ['Member Name', 'Email', 'Submitted', ...dataFields.map(f => f.label)];
+
+    // Data rows — one per response
+    const rows = responses.map((resp: any) => {
+      const name = resp.member
+        ? ([resp.member.first_name, resp.member.surname].filter(Boolean).join(' ') || resp.member.email)
+        : 'Anonymous';
+      const email = resp.member?.email || '';
+      const submitted = resp.submitted_at
+        ? new Date(resp.submitted_at).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        : '';
+
+      // Build a lookup from field_id → value for this response
+      const valueMap: Record<string, string> = {};
+      for (const val of resp.form_response_values || []) {
+        const fieldId = val.form_fields?.id;
+        if (!fieldId) continue;
+        if (val.value_json != null) {
+          valueMap[fieldId] = Array.isArray(val.value_json)
+            ? val.value_json.join(', ')
+            : String(val.value_json);
+        } else {
+          valueMap[fieldId] = val.value_text || '';
+        }
+      }
+
+      return [name, email, submitted, ...dataFields.map(f => valueMap[f.id] ?? '')];
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+    // Column widths
+    const colWidths = [
+      { wch: 24 }, // Member Name
+      { wch: 30 }, // Email
+      { wch: 14 }, // Submitted
+      ...dataFields.map(() => ({ wch: 22 })),
+    ];
+    ws['!cols'] = colWidths;
+    ws['!rows'] = [{ hpt: 20 }];
+
+    // Header row styling
+    for (let c = 0; c < headers.length; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c });
+      if (!ws[cellRef]) continue;
+      ws[cellRef].s = {
+        font:      { bold: true, color: { rgb: 'FFFFFF' }, name: 'Arial', sz: 10 },
+        fill:      { fgColor: { rgb: '1A1A1A' }, patternType: 'solid' },
+        alignment: { horizontal: 'left', vertical: 'center', wrapText: false },
+        border:    { bottom: { style: 'medium', color: { rgb: 'B5621E' } } },
+      };
+    }
+
+    const sheetName = editingForm.title.slice(0, 31).replace(/[:\\/?*\[\]]/g, '');
+    XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Responses');
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `form-responses-${dateStr}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
 
   // ── Open builder ─────────────────────────────────────────────────
   function openBuilder(form: FormWithMeta) {
@@ -768,6 +839,17 @@ export default function AdminFormsPage() {
                 {/* ══ RESPONSES TAB ══ */}
                 {activeTab === 'responses' && (
                   <div className="space-y-3">
+                    {responses.length > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-500 text-xs">{responses.length} response{responses.length !== 1 ? 's' : ''}</span>
+                        <button
+                          onClick={exportResponses}
+                          className="flex items-center gap-1.5 text-xs text-[#C9B98A] hover:text-[#B5621E] transition-colors"
+                        >
+                          <FileSpreadsheet size={13} /> Export to Excel
+                        </button>
+                      </div>
+                    )}
                     {loadingResp ? (
                       <div className="flex justify-center py-6"><Spinner /></div>
                     ) : responses.length === 0 ? (
