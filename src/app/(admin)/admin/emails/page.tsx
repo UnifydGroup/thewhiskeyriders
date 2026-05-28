@@ -122,7 +122,7 @@ const emptyTemplateForm = { name: '', description: '', subject: '', body: '' };
 
 const defaultHeader: HeaderSettings = {
   email_header_title: 'The Whiskey Riders',
-  email_header_tagline: 'Ride. Bond. Remember.',
+  email_header_tagline: 'Until We Ride',
   email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
   email_footer_image_url: null,
@@ -2271,7 +2271,7 @@ export default function AdminEmailsPage() {
                 <label className="text-sm font-medium text-brand-cream/90">Tagline</label>
                 <input type="text" value={header.email_header_tagline}
                   onChange={e => setHeader(p => ({ ...p, email_header_tagline: e.target.value }))}
-                  placeholder="Ride. Bond. Remember."
+                  placeholder="Until We Ride"
                   className="w-full rounded-lg border border-brand-brown/20 bg-brand-dark-grey/50 px-4 py-2 text-brand-cream placeholder:text-brand-cream/40 focus:border-brand-brown focus:outline-none"
                 />
               </div>

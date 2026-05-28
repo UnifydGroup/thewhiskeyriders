@@ -112,7 +112,7 @@ const welcomeEmailHtml = `<!DOCTYPE html>
 <div class="header">
   <div class="header-logo">🏍️</div>
   <h1>The Whiskey Riders</h1>
-  <div class="tagline">Ride. Bond. Remember.</div>
+  <div class="tagline">Until We Ride</div>
 </div>
 
 <!-- ════════════════════════════════════════════
@@ -377,7 +377,7 @@ const welcomeEmailHtml = `<!DOCTYPE html>
 ════════════════════════════════════════════ -->
 <div class="footer">
   <div class="footer-brand">The Whiskey Riders</div>
-  <div class="footer-tagline">Ride. Bond. Remember.</div>
+  <div class="footer-tagline">Until We Ride</div>
   <div class="footer-divider"></div>
   <p>
     You're receiving this because you've been added to the crew.<br/>

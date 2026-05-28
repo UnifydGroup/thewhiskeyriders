@@ -118,7 +118,7 @@ export function buildEmailHtml(args: {
 }): string {
   const { recipientName, subject, bodyHtml, ctaUrl, ctaLabel, previewText } = args;
   const headerTitle = args.headerTitle?.trim() || 'The Whiskey Riders';
-  const headerTagline = args.headerTagline?.trim() || 'Ride. Bond. Remember.';
+  const headerTagline = args.headerTagline?.trim() || 'Until We Ride';
   const headerImageUrl = args.headerImageUrl?.trim() || '';
   const footerText = args.footerText?.trim() || "You're receiving this because you're a member of The Whiskey Riders.";
   const footerImageUrl = args.footerImageUrl?.trim() || '';
@@ -197,7 +197,7 @@ export type EmailHeaderSettings = {
 
 const DEFAULT_EMAIL_HEADER: EmailHeaderSettings = {
   email_header_title: 'The Whiskey Riders',
-  email_header_tagline: 'Ride. Bond. Remember.',
+  email_header_tagline: 'Until We Ride',
   email_header_image_url: null,
   email_footer_text: "You're receiving this because you're a member of The Whiskey Riders.",
   email_footer_image_url: null,

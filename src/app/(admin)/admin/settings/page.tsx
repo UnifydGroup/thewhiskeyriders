@@ -159,7 +159,7 @@ const DEFAULT_SETTINGS: PortalSettings = {
 
   // Email header branding
   email_header_title: 'The Whiskey Riders',
-  email_header_tagline: 'Ride. Bond. Remember.',
+  email_header_tagline: 'Until We Ride',
 
   // Notification Preferences
   notify_on_trip_created: true,
@@ -617,7 +617,7 @@ export default function SettingsPage() {
                     type="text"
                     value={settings.email_header_tagline}
                     onChange={(e) => handleChange('email_header_tagline', e.target.value)}
-                    placeholder="Ride. Bond. Remember."
+                    placeholder="Until We Ride"
                   />
                 </div>
               </div>
@@ -628,7 +628,7 @@ export default function SettingsPage() {
                     {settings.email_header_title || 'The Whiskey Riders'}
                   </p>
                   <p className="text-white/70 text-xs tracking-wide mt-0.5">
-                    {settings.email_header_tagline || 'Ride. Bond. Remember.'}
+                    {settings.email_header_tagline || 'Until We Ride'}
                   </p>
                 </div>
                 <div className="bg-[#111] px-6 py-3">
