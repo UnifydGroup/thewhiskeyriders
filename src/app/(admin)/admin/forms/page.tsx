@@ -14,7 +14,7 @@ import {
   CheckSquare, AlignLeft, Hash, Calendar, List, ToggleLeft,
   Upload, Minus, AlertCircle, CheckCircle, FileText,
   BookOpen, Sparkles, Search, Tag, RefreshCw, Copy,
-  Pencil, Clock, CalendarClock, Timer, Eye, Download, FileSpreadsheet,
+  Pencil, Clock, CalendarClock, Timer, Eye, Download, FileSpreadsheet, ShieldCheck,
 } from 'lucide-react';
 import type { Form, FormField, FormFieldLibrary, FormFieldType, FormStatus } from '@/lib/types/database';
 
@@ -176,10 +176,11 @@ export default function AdminFormsPage() {
   const [activeTab, setActiveTab] = useState<'fields' | 'schedule' | 'assign' | 'responses'>('fields');
 
   // Schedule tab state
-  const [schedGoesLive, setSchedGoesLive]       = useState('');
-  const [schedClosesAt, setSchedClosesAt]       = useState('');
-  const [schedCountdown, setSchedCountdown]     = useState(false);
-  const [savingSchedule, setSavingSchedule]     = useState(false);
+  const [schedGoesLive, setSchedGoesLive]             = useState('');
+  const [schedClosesAt, setSchedClosesAt]             = useState('');
+  const [schedCountdown, setSchedCountdown]           = useState(false);
+  const [schedVerifyEmail, setSchedVerifyEmail]       = useState(false);
+  const [savingSchedule, setSavingSchedule]           = useState(false);
 
   // Assign tab
   const [members, setMembers]           = useState<any[]>([]);
@@ -346,6 +347,7 @@ export default function AdminFormsPage() {
     setSchedGoesLive(toLocalDatetimeValue(form.goes_live_at));
     setSchedClosesAt(toLocalDatetimeValue(form.submission_deadline));
     setSchedCountdown(form.show_countdown ?? false);
+    setSchedVerifyEmail((form as any).require_email_verification ?? false);
     loadFields(form.id);
   }
 
@@ -423,9 +425,10 @@ export default function AdminFormsPage() {
     if (!editingForm) return;
     setSavingSchedule(true);
     const payload: Record<string, unknown> = {
-      goes_live_at:        schedGoesLive ? new Date(schedGoesLive).toISOString() : null,
-      submission_deadline: schedClosesAt ? new Date(schedClosesAt).toISOString() : null,
-      show_countdown:      schedCountdown,
+      goes_live_at:                 schedGoesLive ? new Date(schedGoesLive).toISOString() : null,
+      submission_deadline:          schedClosesAt ? new Date(schedClosesAt).toISOString() : null,
+      show_countdown:               schedCountdown,
+      require_email_verification:   schedVerifyEmail,
     };
     const res  = await authFetch(`/api/forms/${editingForm.id}`, {
       method: 'PUT',
@@ -793,6 +796,7 @@ export default function AdminFormsPage() {
                     schedGoesLive={schedGoesLive} setSchedGoesLive={setSchedGoesLive}
                     schedClosesAt={schedClosesAt} setSchedClosesAt={setSchedClosesAt}
                     schedCountdown={schedCountdown} setSchedCountdown={setSchedCountdown}
+                    schedVerifyEmail={schedVerifyEmail} setSchedVerifyEmail={setSchedVerifyEmail}
                     goesLiveCountdown={goesLiveCountdown}
                     closesAtCountdown={closesAtCountdown}
                     savingSchedule={savingSchedule}
@@ -979,13 +983,15 @@ function FormCard({
 // ── Schedule tab ──────────────────────────────────────────────────
 function ScheduleTab({
   editingForm, schedGoesLive, setSchedGoesLive, schedClosesAt, setSchedClosesAt,
-  schedCountdown, setSchedCountdown, goesLiveCountdown, closesAtCountdown,
+  schedCountdown, setSchedCountdown, schedVerifyEmail, setSchedVerifyEmail,
+  goesLiveCountdown, closesAtCountdown,
   savingSchedule, onSave, onStatusChange,
 }: {
   editingForm: FormWithMeta;
   schedGoesLive: string; setSchedGoesLive: (v: string) => void;
   schedClosesAt: string; setSchedClosesAt: (v: string) => void;
   schedCountdown: boolean; setSchedCountdown: (v: boolean) => void;
+  schedVerifyEmail: boolean; setSchedVerifyEmail: (v: boolean) => void;
   goesLiveCountdown: Remaining;
   closesAtCountdown: Remaining;
   savingSchedule: boolean;
@@ -1130,6 +1136,36 @@ function ScheduleTab({
             )}
           </div>
         )}
+
+        {/* Email verification toggle */}
+        <label className="flex items-start gap-3 cursor-pointer select-none mt-4">
+          <div className="mt-0.5">
+            <input
+              type="checkbox"
+              checked={schedVerifyEmail}
+              onChange={e => setSchedVerifyEmail(e.target.checked)}
+              className="sr-only"
+            />
+            <div
+              onClick={() => setSchedVerifyEmail(!schedVerifyEmail)}
+              className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5 ${
+                schedVerifyEmail ? 'bg-[#B5621E]' : 'bg-zinc-700'
+              }`}>
+              <div className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                schedVerifyEmail ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5 text-sm text-zinc-200">
+              <ShieldCheck size={13} className="text-[#C9B98A]" />
+              Require email verification
+            </div>
+            <p className="text-zinc-500 text-xs mt-0.5">
+              Submitters must verify they own the email address they enter before the form can be submitted.
+            </p>
+          </div>
+        </label>
       </div>
 
       {/* Save + manual override */}

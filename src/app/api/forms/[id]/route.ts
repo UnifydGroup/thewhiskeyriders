@@ -60,6 +60,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     title, description, status, trip_id,
     allow_multiple_submissions, submission_deadline,
     goes_live_at, show_countdown, notify_on_submission,
+    require_email_verification,
   } = body;
 
   const updates: Record<string, unknown> = {};
@@ -72,6 +73,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (goes_live_at !== undefined) updates.goes_live_at = goes_live_at || null;
   if (show_countdown !== undefined) updates.show_countdown = Boolean(show_countdown);
   if (notify_on_submission !== undefined) updates.notify_on_submission = notify_on_submission;
+  if (require_email_verification !== undefined) updates.require_email_verification = Boolean(require_email_verification);
 
   const { data, error } = await supabase
     .from('forms')

@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { createHash } from 'crypto';
 import {
   verifyAuth,
   errorResponse,
@@ -33,7 +34,7 @@ export async function POST(
   const { data: form, error: formError } = await supabase
     .from('forms')
     .select(`
-      id, title, status, allow_multiple_submissions, submission_deadline,
+      id, title, status, allow_multiple_submissions, submission_deadline, goes_live_at, require_email_verification,
       form_fields(
         id, field_type, is_required,
         library_field:form_field_library(settings)
@@ -43,8 +44,14 @@ export async function POST(
     .single();
 
   if (formError || !form) return errorResponse(ApiErrors.NOT_FOUND, 'Form not found');
-  if (form.status !== 'active') return errorResponse(ApiErrors.FORBIDDEN, 'This form is not currently accepting submissions');
-  if (form.submission_deadline && new Date(form.submission_deadline) < new Date()) {
+
+  const now = new Date();
+  // Accept: status=active, OR a scheduled form where goes_live_at has passed
+  const isScheduledAndLive = form.goes_live_at && new Date(form.goes_live_at) <= now;
+  if (form.status !== 'active' && !isScheduledAndLive) {
+    return errorResponse(ApiErrors.FORBIDDEN, 'This form is not currently accepting submissions');
+  }
+  if (form.submission_deadline && new Date(form.submission_deadline) < now) {
     return errorResponse(ApiErrors.FORBIDDEN, 'The submission deadline has passed');
   }
 
@@ -66,9 +73,34 @@ export async function POST(
   }
 
   const body = await getJsonBody(request);
-  const { values } = body;
+  const { values, updateProfile = true, verification_id } = body;
   if (!values || typeof values !== 'object') {
     return errorResponse(ApiErrors.BAD_REQUEST, 'values object is required');
+  }
+
+  // ── Email verification gate ───────────────────────────────
+  if (form.require_email_verification) {
+    if (!verification_id) {
+      return errorResponse(ApiErrors.FORBIDDEN, 'Email verification is required for this form');
+    }
+    const { data: verification, error: vErr } = await supabase
+      .from('form_verifications')
+      .select('id, email, verified_at, expires_at')
+      .eq('id', verification_id)
+      .eq('form_id', form.id)
+      .single();
+
+    if (vErr || !verification) {
+      return errorResponse(ApiErrors.FORBIDDEN, 'Invalid verification token');
+    }
+    if (!verification.verified_at) {
+      return errorResponse(ApiErrors.FORBIDDEN, 'Email has not been verified yet');
+    }
+    if (new Date(verification.expires_at) < new Date()) {
+      return errorResponse(ApiErrors.FORBIDDEN, 'Verification has expired — please verify your email again');
+    }
+    // Invalidate token immediately after use (single-use)
+    await supabase.from('form_verifications').delete().eq('id', verification_id);
   }
 
   // ── Validate required fields ──────────────────────────────────
@@ -167,11 +199,14 @@ export async function POST(
 
   if (memberId) {
     // ── Authenticated: update directly ───────────────────────
-    if (hasProfileData) {
-      await supabase
+    if (hasProfileData && updateProfile !== false) {
+      const { error: profileErr } = await supabase
         .from('profiles')
         .update({ ...profileUpdates, updated_at: new Date().toISOString() })
         .eq('id', memberId);
+      if (profileErr) {
+        console.error('[form-submit] profile update failed:', profileErr.message);
+      }
     }
   } else if (submittedEmail) {
     // ── Unauthenticated: find by email ────────────────────────
@@ -182,46 +217,38 @@ export async function POST(
       .maybeSingle();
 
     if (existing) {
-      // Existing profile found — update it
+      // Existing profile found — link response and optionally update profile
       targetProfileId = existing.id;
       submitterLabel = submittedEmail;
-      if (hasProfileData) {
-        await supabase
+
+      // Always back-link the response to the matched profile
+      await supabase
+        .from('form_responses')
+        .update({ member_id: existing.id })
+        .eq('id', response.id);
+
+      if (hasProfileData && updateProfile !== false) {
+        const { error: profileErr } = await supabase
           .from('profiles')
           .update({ ...profileUpdates, updated_at: new Date().toISOString() })
           .eq('id', existing.id);
+        if (profileErr) {
+          console.error('[form-submit] profile update (email match) failed:', profileErr.message);
+        }
       }
     } else {
-      // No match — create a new pending profile
+      // No matching profile — this person is not yet a member.
+      // We cannot auto-create a profile because profiles.id must reference
+      // an auth.users row (FK constraint). Admins are notified so they can
+      // manually invite or register the submitter.
       const derivedFullName =
         profileUpdates['full_name'] ||
         [submittedFirstName, profileUpdates['middle_name'], submittedSurname]
           .filter(Boolean).join(' ') ||
         submittedEmail;
-
-      const { data: newProfile } = await supabase
-        .from('profiles')
-        .insert({
-          ...profileUpdates,
-          email: submittedEmail,
-          full_name: derivedFullName,
-          role: 'member',
-          status: 'pending',
-        })
-        .select('id')
-        .single();
-
-      if (newProfile) {
-        targetProfileId = newProfile.id;
-        newProfileCreated = true;
-        submitterLabel = derivedFullName;
-
-        // Back-link the response to the new profile
-        await supabase
-          .from('form_responses')
-          .update({ member_id: newProfile.id })
-          .eq('id', response.id);
-      }
+      submitterLabel = derivedFullName;
+      newProfileCreated = true; // flag so admins get the "new contact" notification
+      // targetProfileId remains null — response stays unlinked until admin onboards them
     }
   }
 
@@ -251,18 +278,20 @@ export async function POST(
       }))
     );
 
-    // Notification: new contact profile created
-    if (newProfileCreated) {
+    // Notification: unknown submitter (no existing profile matched)
+    if (newProfileCreated && !targetProfileId) {
       await supabase.from('notifications').insert(
         adminIds.map(uid => ({
           user_id: uid,
-          type: 'new_profile',
-          title: 'New contact from form',
-          message: `${submitterLabel} submitted "${form.title}" — a new contact profile has been created and is pending review.`,
-          link: '/admin/notifications',
+          type: 'new_contact',
+          title: 'New contact via form',
+          message: `${submitterLabel}${submittedEmail ? ` (${submittedEmail})` : ''} submitted "${form.title}" but is not yet a member. Invite them to create an account.`,
+          link: '/admin/members',
           metadata: {
             form_id: form.id,
-            profile_id: targetProfileId,
+            response_id: response.id,
+            email: submittedEmail,
+            name: submitterLabel,
           },
         }))
       );

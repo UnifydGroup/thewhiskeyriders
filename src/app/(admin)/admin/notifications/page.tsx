@@ -62,6 +62,7 @@ function timeAgo(iso: string) {
 const NOTIF_ICONS: Record<string, React.ReactNode> = {
   form_submission: <ClipboardList size={14} className="text-[#B5621E]" />,
   new_profile:     <UserPlus size={14} className="text-blue-400" />,
+  new_contact:     <UserPlus size={14} className="text-amber-400" />,
   system:          <Bell size={14} className="text-zinc-400" />,
 };
 
