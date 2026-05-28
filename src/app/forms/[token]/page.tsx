@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
-import { CheckCircle, AlertCircle, ChevronDown, Clock, RefreshCw, ShieldCheck, Mail, Send } from 'lucide-react';
+import { CheckCircle, AlertCircle, ChevronDown, Clock, RefreshCw, ShieldCheck, Mail, Send, LogIn } from 'lucide-react';
 import Image from 'next/image';
 import type { FormField } from '@/lib/types/database';
 
@@ -152,6 +152,7 @@ function ProfileUpdateModal({
 export default function PublicFormPage() {
   const params = useParams();
   const token = params.token as string;
+  const pathname = usePathname();
 
   const [form, setForm] = useState<FormData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -395,6 +396,18 @@ export default function PublicFormPage() {
       }
     }
 
+    // Validate email format for any email-mapped fields
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    for (const f of form.form_fields) {
+      if (f.profiles_column === 'email') {
+        const val = typeof values[f.id] === 'string' ? (values[f.id] as string).trim() : '';
+        if (val && !EMAIL_RE.test(val)) {
+          setSubmitError(`Please enter a valid email address in "${f.label}".`);
+          return;
+        }
+      }
+    }
+
     // If the member is logged in, check for profile changes that need confirmation
     if (profileData) {
       const changes = detectProfileChanges();
@@ -576,11 +589,24 @@ export default function PublicFormPage() {
             </div>
 
             {/* Pre-fill notice for logged-in members */}
-            {profileData && (
+            {profileData ? (
               <div className="flex items-center gap-2 text-xs text-zinc-500 bg-zinc-900/60 border border-zinc-800 rounded-lg px-3 py-2">
                 <CheckCircle size={12} className="text-[#C9B98A] shrink-0" />
                 Some fields have been pre-filled from your profile. Review and update as needed.
               </div>
+            ) : (
+              /* Login prompt for unauthenticated users */
+              <a
+                href={`/login?redirect=${encodeURIComponent(pathname)}`}
+                className="flex items-center gap-2.5 text-xs bg-zinc-900/60 border border-zinc-800 hover:border-zinc-600 rounded-lg px-3 py-2.5 transition-colors group"
+              >
+                <LogIn size={13} className="text-[#C9B98A] shrink-0" />
+                <span className="text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                  Already a member?{' '}
+                  <span className="text-[#C9B98A] underline underline-offset-2">Log in</span>
+                  {' '}to pre-fill your details automatically.
+                </span>
+              </a>
             )}
 
             {/* Closing countdown banner */}
@@ -684,13 +710,14 @@ function FormFieldRenderer({
       </label>
       {field.helper_text && <p className="text-zinc-500 text-xs">{field.helper_text}</p>}
 
-      {/* Short text */}
+      {/* Short text — use type="email" for email-mapped fields for browser-native validation */}
       {field.field_type === 'short_text' && (
         <Input
+          type={field.profiles_column === 'email' ? 'email' : 'text'}
           value={strVal}
           onChange={readOnly ? () => {} : (e) => onChange(e.target.value)}
           readOnly={readOnly}
-          placeholder={field.placeholder || ''}
+          placeholder={field.placeholder || (field.profiles_column === 'email' ? 'you@example.com' : '')}
           required={field.is_required}
           className={`w-full ${readOnly ? 'opacity-70 cursor-not-allowed' : ''}`}
         />

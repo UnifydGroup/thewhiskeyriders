@@ -79,6 +79,11 @@ export async function POST(
   }
 
   // ── Email verification gate ───────────────────────────────
+  // Track whether the submitter proved ownership of their email address.
+  // This is true for: (a) authenticated sessions, (b) forms that required OTP.
+  let emailWasVerified = !!memberId; // authenticated users are always considered verified
+  let otpVerifiedEmail: string | null = null; // the exact email that was OTP-verified
+
   if (form.require_email_verification) {
     if (!verification_id) {
       return errorResponse(ApiErrors.FORBIDDEN, 'Email verification is required for this form');
@@ -99,6 +104,13 @@ export async function POST(
     if (new Date(verification.expires_at) < new Date()) {
       return errorResponse(ApiErrors.FORBIDDEN, 'Verification has expired — please verify your email again');
     }
+    // Capture the verified email before invalidating the token.
+    // This is the authoritative email — we use it for profile matching rather
+    // than whatever was typed into the form body (prevents verifying email A
+    // then submitting with email B to tamper with another member's profile).
+    emailWasVerified = true;
+    otpVerifiedEmail = verification.email;
+
     // Invalidate token immediately after use (single-use)
     await supabase.from('form_verifications').delete().eq('id', verification_id);
   }
@@ -142,8 +154,18 @@ export async function POST(
       : val == null ? null : String(val);
   }
 
-  // Extract identity fields for profile matching
-  const submittedEmail = profileUpdates['email']?.trim().toLowerCase() || null;
+  // Validate email format if one was submitted
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (profileUpdates['email'] && !EMAIL_RE.test(profileUpdates['email'].trim())) {
+    return errorResponse(ApiErrors.BAD_REQUEST, 'Please enter a valid email address.');
+  }
+
+  // Extract identity fields for profile matching.
+  // If the form used OTP verification, trust the OTP-verified email over the
+  // submitted form value to prevent body-tampering attacks.
+  const submittedEmail = otpVerifiedEmail
+    || profileUpdates['email']?.trim().toLowerCase()
+    || null;
   const submittedFirstName = profileUpdates['first_name'] || null;
   const submittedSurname = profileUpdates['surname'] || null;
 
@@ -217,17 +239,20 @@ export async function POST(
       .maybeSingle();
 
     if (existing) {
-      // Existing profile found — link response and optionally update profile
+      // Existing profile found — always back-link the response so admins can see it.
       targetProfileId = existing.id;
       submitterLabel = submittedEmail;
 
-      // Always back-link the response to the matched profile
       await supabase
         .from('form_responses')
         .update({ member_id: existing.id })
         .eq('id', response.id);
 
-      if (hasProfileData && updateProfile !== false) {
+      // ⚠️ Only update profile data when the email address has been verified
+      // (either via OTP gate or because the user is authenticated). Without
+      // proof of ownership, updating could let anyone overwrite another
+      // member's profile by guessing their email address.
+      if (emailWasVerified && hasProfileData && updateProfile !== false) {
         const { error: profileErr } = await supabase
           .from('profiles')
           .update({ ...profileUpdates, updated_at: new Date().toISOString() })
