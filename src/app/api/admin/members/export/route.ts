@@ -137,28 +137,26 @@ export async function GET(request: NextRequest) {
   let paymentsData: unknown[] = [];
   if (include.includes('payments')) {
     const { data, error } = await supabase
-      .from('payments')
+      .from('member_payments')
       .select(`
         member_id,
         amount,
-        status,
-        due_date,
-        paid_date,
+        payment_date,
+        payment_method,
         notes,
         trips!inner(name)
       `)
       .in('member_id', memberIds)
-      .order('due_date', { ascending: true });
+      .order('payment_date', { ascending: true });
 
     if (error) return errorResponse(ApiErrors.INTERNAL_ERROR, error.message);
     paymentsData = (data || []).map((row: any) => ({
-      member_id:  row.member_id,
-      trip_name:  row.trips?.name,
-      amount:     row.amount,
-      status:     row.status,
-      due_date:   row.due_date,
-      paid_date:  row.paid_date,
-      notes:      row.notes,
+      member_id:      row.member_id,
+      trip_name:      row.trips?.name,
+      amount:         row.amount,
+      payment_date:   row.payment_date,
+      payment_method: row.payment_method,
+      notes:          row.notes,
     }));
   }
 

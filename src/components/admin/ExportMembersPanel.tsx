@@ -250,19 +250,18 @@ export default function ExportMembersPanel({ members, onClose }: ExportMembersPa
 
       // ══ Sheet 4: Payments ══════════════════════════════════════
       if (selectedSheets.has('payments') && payments.length > 0) {
-        const pmHeaders = ['Member Name', 'Email', 'Trip', 'Amount (AUD)', 'Status', 'Due Date', 'Paid Date', 'Notes'];
+        const pmHeaders = ['Member Name', 'Email', 'Trip', 'Amount (AUD)', 'Payment Date', 'Payment Method', 'Notes'];
         const pmRows = payments.map((p: any) => [
           memberMap[p.member_id]?.name  || '',
           memberMap[p.member_id]?.email || '',
-          p.trip_name  || '',
+          p.trip_name      || '',
           p.amount != null ? Number(p.amount) : '',
-          p.status     || '',
-          formatDate(p.due_date),
-          formatDate(p.paid_date),
-          p.notes      || '',
+          formatDate(p.payment_date),
+          p.payment_method || '',
+          p.notes          || '',
         ]);
         const wsPM = XLSX.utils.aoa_to_sheet([pmHeaders, ...pmRows]);
-        wsPM['!cols'] = [22, 28, 24, 14, 12, 14, 14, 32].map(wch => ({ wch }));
+        wsPM['!cols'] = [22, 28, 24, 14, 14, 18, 36].map(wch => ({ wch }));
         applyHeaderStyle(wsPM, 1, pmHeaders.length);
         XLSX.utils.book_append_sheet(wb, wsPM, 'Payments');
       }
