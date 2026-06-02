@@ -61,19 +61,19 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from('trip_members')
       .select(`
-        member_id,
+        user_id,
         trip_role,
         joined_at,
         trips!inner(
           id, name, destination, country, start_date, end_date, status
         )
       `)
-      .in('member_id', memberIds)
+      .in('user_id', memberIds)
       .order('joined_at', { ascending: false });
 
     if (error) return errorResponse(ApiErrors.INTERNAL_ERROR, error.message);
     tripsData = (data || []).map((row: any) => ({
-      member_id:   row.member_id,
+      member_id:   row.user_id,
       trip_role:   row.trip_role,
       joined_at:   row.joined_at,
       trip_name:   row.trips?.name,
