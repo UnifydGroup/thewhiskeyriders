@@ -325,6 +325,7 @@ const PAYMENT_TYPE_LABELS: Record<string, string> = {
   deposit: 'Deposit',
   final: 'Final',
   catchup: 'Catch-up',
+  refund: 'Refund',
   other: 'Other',
 };
 
@@ -1186,6 +1187,13 @@ export default function AdminBudgetPage() {
   const handleSavePayment = async () => {
     if (!paymentForm.member_id || !paymentForm.amount || !paymentForm.payment_date) {
       return showToast('error', 'Member, amount and date are required');
+    }
+    const parsedAmt = parseFloat(paymentForm.amount);
+    if (paymentForm.payment_type === 'refund' && parsedAmt >= 0) {
+      return showToast('error', 'Refund amount must be negative (e.g. -150.00)');
+    }
+    if (paymentForm.payment_type !== 'refund' && parsedAmt <= 0) {
+      return showToast('error', 'Payment amount must be greater than zero');
     }
 
     setSaving(true);
@@ -4046,6 +4054,41 @@ export default function AdminBudgetPage() {
               >
                 <Plus className="w-4 h-4" /> Add Other Income
               </button>
+              <button
+                onClick={() => {
+                  setIncomeForm((prev) => ({
+                    ...prev,
+                    category: 'refund',
+                    account_source_id: prev.account_source_id || getDefaultInternalAccountId(),
+                    description: '',
+                    amount_aud: '',
+                    income_date: new Date().toISOString().split('T')[0],
+                    notes: '',
+                  }));
+                  setShowIncomeForm(true);
+                  setShowPlannerIncomeSection(true);
+                  setShowRecurringForm(false);
+                  resetPaymentForm();
+                  setShowPaymentForm(false);
+                  setShowPaymentImport(false);
+                }}
+                className="flex items-center gap-2 border border-purple-600/40 hover:border-purple-400 text-purple-400 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-900/20"
+              >
+                <Plus className="w-4 h-4" /> Incoming Refund
+              </button>
+              <button
+                onClick={() => {
+                  setPaymentForm((prev) => ({ ...prev, payment_type: 'refund', amount: '' }));
+                  setEditingPayment(null);
+                  setShowPaymentForm(true);
+                  setShowLegacyPaymentSection(true);
+                  setShowIncomeForm(false);
+                  setShowPaymentImport(false);
+                }}
+                className="flex items-center gap-2 border border-purple-600/40 hover:border-purple-400 text-purple-400 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-900/20"
+              >
+                <Plus className="w-4 h-4" /> Refund Member
+              </button>
             </div>
           </div>
 
@@ -4057,13 +4100,23 @@ export default function AdminBudgetPage() {
             const selShare = selBreakdown?.kitty_share_aud ?? selBreakdown?.cost_share_aud ?? 0;
             const selRemaining = selShare > 0 ? selShare - selPaid : null;
             return (
-              <div className="bg-brand-dark-grey border border-brand-tan/30 rounded-xl p-5">
+              <div className={`bg-brand-dark-grey border rounded-xl p-5 ${paymentForm.payment_type === 'refund' ? 'border-purple-600/40' : 'border-brand-tan/30'}`}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-brand-cream">{editingPayment ? 'Edit Member Payment' : 'Record Member Payment'}</h3>
+                  <h3 className="font-semibold text-brand-cream">
+                    {editingPayment
+                      ? (parseTransactionNote(editingPayment.notes).payment_category === 'refund' ? 'Edit Member Refund' : 'Edit Member Payment')
+                      : (paymentForm.payment_type === 'refund' ? 'Refund to Member' : 'Record Member Payment')}
+                  </h3>
                   <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="text-brand-cream/40 hover:text-brand-cream">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+                {paymentForm.payment_type === 'refund' && (
+                  <div className="mb-4 flex items-start gap-2 px-4 py-3 rounded-lg bg-purple-900/20 border border-purple-600/30 text-sm text-purple-300">
+                    <span className="mt-0.5">↩</span>
+                    <span>This records money being returned <strong>to</strong> a member. Enter the amount as a negative number — it will reduce their total collected balance.</span>
+                  </div>
+                )}
 
                 {/* Member balance info */}
                 {paymentForm.member_id && selSummary && (
@@ -4132,19 +4185,25 @@ export default function AdminBudgetPage() {
                       <option value="deposit">Initial Deposit</option>
                       <option value="final">Final Payment</option>
                       <option value="catchup">Catch-up Payment</option>
+                      <option value="refund">Refund to Member</option>
                       <option value="other">Other</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">Amount (AUD) <span className="text-red-400">*</span></label>
+                    <label className="block text-xs font-medium text-brand-cream/60 mb-1">
+                      Amount (AUD) <span className="text-red-400">*</span>
+                      {paymentForm.payment_type === 'refund' && (
+                        <span className="ml-2 text-purple-400 font-normal">(enter as negative, e.g. -150.00)</span>
+                      )}
+                    </label>
                     <input
                       type="number"
-                      min="0"
+                      min={paymentForm.payment_type === 'refund' ? undefined : '0'}
                       step="0.01"
                       value={paymentForm.amount}
                       onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                      className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                      placeholder="0.00"
+                      className={`w-full px-3 py-2 bg-brand-black border rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan ${paymentForm.payment_type === 'refund' ? 'border-purple-600/50' : 'border-brand-tan/30'}`}
+                      placeholder={paymentForm.payment_type === 'refund' ? '-0.00' : '0.00'}
                     />
                   </div>
                   <div>
@@ -4199,7 +4258,13 @@ export default function AdminBudgetPage() {
                 </div>
                 <div className="flex justify-end gap-3 mt-4">
                   <button onClick={() => { setShowPaymentForm(false); resetPaymentForm(); }} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                  <button onClick={handleSavePayment} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : editingPayment ? 'Save Changes' : 'Record Payment'}</button>
+                  <button
+                    onClick={handleSavePayment}
+                    disabled={saving}
+                    className={`px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50 ${paymentForm.payment_type === 'refund' ? 'bg-purple-700 hover:bg-purple-600 text-white' : 'bg-brand-tan hover:bg-brand-tan/90 text-brand-black'}`}
+                  >
+                    {saving ? 'Saving…' : editingPayment ? 'Save Changes' : paymentForm.payment_type === 'refund' ? 'Record Refund' : 'Record Payment'}
+                  </button>
                 </div>
               </div>
             );
@@ -4528,8 +4593,9 @@ export default function AdminBudgetPage() {
                                             {memberTransactions.map((payment) => {
                                               const isChecked = selectedPaymentIds.has(payment.id);
                                               const typeLabel = getPaymentTypeLabel(payment.notes);
+                                              const isRefund = parseTransactionNote(payment.notes).payment_category === 'refund';
                                               return (
-                                                <tr key={payment.id} className={isChecked ? 'bg-brand-tan/5' : ''}>
+                                                <tr key={payment.id} className={isChecked ? 'bg-brand-tan/5' : isRefund ? 'bg-purple-900/10' : ''}>
                                                   <td className="px-3 py-2">
                                                     <input
                                                       type="checkbox"
@@ -4545,10 +4611,10 @@ export default function AdminBudgetPage() {
                                                     />
                                                   </td>
                                                   <td className="px-3 py-2 text-brand-cream/70">{fmtShort(payment.payment_date)}</td>
-                                                  <td className="px-3 py-2 font-semibold text-green-400">{fmt(payment.amount)}</td>
+                                                  <td className={`px-3 py-2 font-semibold ${isRefund ? 'text-purple-400' : 'text-green-400'}`}>{fmt(payment.amount)}</td>
                                                   <td className="px-3 py-2">
                                                     {typeLabel ? (
-                                                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-tan/10 text-brand-tan border border-brand-tan/20">
+                                                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold border ${isRefund ? 'bg-purple-900/20 text-purple-400 border-purple-600/30' : 'bg-brand-tan/10 text-brand-tan border-brand-tan/20'}`}>
                                                         {typeLabel}
                                                       </span>
                                                     ) : (
@@ -4610,11 +4676,17 @@ export default function AdminBudgetPage() {
               <div className="p-4 border-t border-brand-tan/20 space-y-4">
                 {/* Income entry form */}
                 {showIncomeForm && (
-                  <div className="bg-brand-black/30 border border-brand-tan/30 rounded-lg p-5">
+                  <div className={`bg-brand-black/30 border rounded-lg p-5 ${incomeForm.category === 'refund' ? 'border-purple-600/40' : 'border-brand-tan/30'}`}>
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-semibold text-brand-cream">New Income Entry</h3>
+                      <h3 className="font-semibold text-brand-cream">{incomeForm.category === 'refund' ? 'Record Incoming Refund' : 'New Income Entry'}</h3>
                       <button onClick={() => setShowIncomeForm(false)} className="text-brand-cream/40 hover:text-brand-cream"><X className="w-5 h-5" /></button>
                     </div>
+                    {incomeForm.category === 'refund' && (
+                      <div className="mb-4 flex items-start gap-2 px-4 py-3 rounded-lg bg-purple-900/20 border border-purple-600/30 text-sm text-purple-300">
+                        <span className="mt-0.5">↩</span>
+                        <span>This records a refund received <strong>from a vendor or supplier</strong> back into the trip account. It increases the available balance.</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="md:col-span-2"><label className="block text-xs font-medium text-brand-cream/60 mb-1">Description</label>
                         <input value={incomeForm.description} onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" placeholder="e.g. Westpac Life Interest" /></div>
@@ -4642,7 +4714,13 @@ export default function AdminBudgetPage() {
                     </div>
                     <div className="flex justify-end gap-3 mt-4">
                       <button onClick={() => setShowIncomeForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
-                      <button onClick={handleSaveIncome} disabled={saving} className="px-4 py-2 bg-brand-tan text-brand-black text-sm font-semibold rounded-lg hover:bg-brand-tan/90 disabled:opacity-50">{saving ? 'Saving…' : 'Add Entry'}</button>
+                      <button
+                        onClick={handleSaveIncome}
+                        disabled={saving}
+                        className={`px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50 ${incomeForm.category === 'refund' ? 'bg-purple-700 hover:bg-purple-600 text-white' : 'bg-brand-tan hover:bg-brand-tan/90 text-brand-black'}`}
+                      >
+                        {saving ? 'Saving…' : incomeForm.category === 'refund' ? 'Record Refund' : 'Add Entry'}
+                      </button>
                     </div>
                   </div>
                 )}
