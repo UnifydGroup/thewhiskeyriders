@@ -68,9 +68,9 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
 
     if (body.amount !== undefined) {
       const parsedAmount = Number(body.amount);
-      if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      if (Number.isNaN(parsedAmount) || parsedAmount === 0) {
         return NextResponse.json(
-          { error: 'amount must be a positive number' },
+          { error: 'amount must be a non-zero number' },
           { status: 400 }
         );
       }
