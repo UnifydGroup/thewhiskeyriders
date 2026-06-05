@@ -27,7 +27,6 @@ export async function POST(request: NextRequest) {
     const { member_id, trip_id, payment_date, amount, payment_method, notes } = body;
 
     if (!member_id || !trip_id || !payment_date || amount === undefined || amount === null) {
-      console.error('[member-payment POST] Missing fields', { member_id: !!member_id, trip_id: !!trip_id, payment_date: !!payment_date, amount });
       return NextResponse.json(
         { error: 'Missing required fields: member_id, trip_id, payment_date, amount' },
         { status: 400 }
@@ -36,14 +35,13 @@ export async function POST(request: NextRequest) {
 
     const parsedAmount = Number(amount);
     if (Number.isNaN(parsedAmount) || parsedAmount === 0) {
-      console.error('[member-payment POST] Invalid amount', { amount, parsedAmount });
       return NextResponse.json(
         { error: 'amount must be a non-zero number' },
         { status: 400 }
       );
     }
 
-    const { data: membership, error: membershipError } = await supabase
+    const { data: membership } = await supabase
       .from('trip_members')
       .select('id')
       .eq('trip_id', trip_id)
@@ -51,9 +49,8 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (!membership) {
-      console.error('[member-payment POST] Member not on trip', { trip_id, member_id, membershipError });
       return NextResponse.json(
-        { error: 'Selected member is not on this trip' },
+        { error: 'This member is not on the trip. Re-add them before recording a payment.' },
         { status: 400 }
       );
     }

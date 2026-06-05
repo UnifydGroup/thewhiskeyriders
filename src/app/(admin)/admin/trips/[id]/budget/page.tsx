@@ -1215,14 +1215,17 @@ export default function AdminBudgetPage() {
           notes: encodeTransactionNote(paymentForm.notes, paymentForm.account_source_id || null, undefined, paymentForm.payment_type || null),
         }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || (editingPayment ? 'Failed to update payment' : 'Failed to record payment'));
+      }
 
       showToast('success', isEditing ? 'Payment updated' : 'Payment recorded');
       setShowPaymentForm(false);
       resetPaymentForm();
       fetchData();
-    } catch {
-      showToast('error', editingPayment ? 'Failed to update payment' : 'Failed to record payment');
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : editingPayment ? 'Failed to update payment' : 'Failed to record payment');
     } finally {
       setSaving(false);
     }
@@ -4161,17 +4164,11 @@ export default function AdminBudgetPage() {
                       className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan"
                     >
                       <option value="">— Select member —</option>
-                      {memberPaymentSummary.length > 0
-                        ? memberPaymentSummary.map((m) => (
-                            <option key={m.member_id} value={m.member_id}>
-                              {getMemberListName(m)}
-                            </option>
-                          ))
-                        : tripMembers.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.nickname || m.full_name || m.id}
-                            </option>
-                          ))}
+                      {tripMembers.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nickname || m.full_name || m.id}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -4330,7 +4327,7 @@ export default function AdminBudgetPage() {
                     </button>
                   );
                 })}
-                <span className="text-xs text-brand-cream/25 ml-1">{memberPaymentSummary.length} tracked</span>
+                <span className="text-xs text-brand-cream/25 ml-1">{tripMembers.length} members</span>
               </div>
             </div>
 
@@ -4344,13 +4341,16 @@ export default function AdminBudgetPage() {
                   const remaining = share > 0 ? share - paid : 0;
                   const pct = share > 0 ? Math.min(100, (paid / share) * 100) : 0;
                   const isPaid = remaining <= 0;
+                  const isRemoved = !tripMembers.some((tm) => tm.id === m.member_id);
                   return (
-                    <div key={m.member_id} className={`rounded-lg border p-3 ${isPaid ? 'border-green-600/30 bg-green-900/10' : 'border-brand-tan/20 bg-brand-dark-grey'}`}>
+                    <div key={m.member_id} className={`rounded-lg border p-3 ${isRemoved ? 'border-red-600/20 bg-brand-dark-grey opacity-60' : isPaid ? 'border-green-600/30 bg-green-900/10' : 'border-brand-tan/20 bg-brand-dark-grey'}`}>
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <p className="font-semibold text-brand-cream text-sm">{m.nickname || m.full_name}</p>
-                        {isPaid
-                          ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-900/30 text-green-400 border border-green-600/30 whitespace-nowrap">Paid ✓</span>
-                          : <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-900/30 text-amber-400 border border-amber-600/30 whitespace-nowrap">{m.payment_count} payment{m.payment_count === 1 ? '' : 's'}</span>}
+                        {isRemoved
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-600/40 bg-red-900/20 text-red-400 font-semibold uppercase tracking-wide whitespace-nowrap">Removed</span>
+                          : isPaid
+                            ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-900/30 text-green-400 border border-green-600/30 whitespace-nowrap">Paid ✓</span>
+                            : <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-900/30 text-amber-400 border border-amber-600/30 whitespace-nowrap">{m.payment_count} payment{m.payment_count === 1 ? '' : 's'}</span>}
                       </div>
                       <p className="text-lg font-bold text-brand-tan">{fmt(paid)}</p>
                       {share > 0 && <p className="text-xs text-brand-cream/40 mb-2">of {fmt(share)} target{remaining > 0 ? ` · ${fmt(remaining)} remaining` : ''}</p>}
@@ -4370,8 +4370,13 @@ export default function AdminBudgetPage() {
               <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
                 <p className="text-sm text-brand-cream/70 mb-1">Total Members</p>
                 <p className="text-3xl font-bold text-brand-cream">
-                  {memberPaymentSummary.length}
+                  {tripMembers.length}
                 </p>
+                {memberPaymentSummary.filter((m) => !tripMembers.some((tm) => tm.id === m.member_id)).length > 0 && (
+                  <p className="text-xs text-red-400/70 mt-1">
+                    +{memberPaymentSummary.filter((m) => !tripMembers.some((tm) => tm.id === m.member_id)).length} removed (payment history retained)
+                  </p>
+                )}
               </div>
 
               <div className="bg-brand-dark-grey border border-brand-tan/20 rounded-lg p-6">
@@ -4432,10 +4437,11 @@ export default function AdminBudgetPage() {
                       const isFullyPaid = hasSchedule && member.total_paid >= memberTarget;
                       const isAhead = hasSchedule && !isFullyPaid && member.total_paid > expectedByMilestone;
                       const isOnTrack = hasSchedule && !isFullyPaid && member.total_paid >= expectedByMilestone;
+                      const isRemovedFromTrip = !tripMembers.some((tm) => tm.id === member.member_id);
 
                       return (
                         <Fragment key={member.member_id}>
-                          <tr className="border-b border-brand-tan/10 hover:bg-brand-dark-grey/50">
+                          <tr className={`border-b border-brand-tan/10 hover:bg-brand-dark-grey/50 ${isRemovedFromTrip ? 'opacity-60' : ''}`}>
                             <td className="px-6 py-4">
                               <div className="space-y-1">
                                 <button
@@ -4446,7 +4452,12 @@ export default function AdminBudgetPage() {
                                   {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                   <span className="font-medium">{getMemberDisplayName(member)}</span>
                                 </button>
-                                <p className="text-xs text-brand-cream/40">{memberTransactions.length} transactions</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs text-brand-cream/40">{memberTransactions.length} transactions</p>
+                                  {isRemovedFromTrip && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-600/40 bg-red-900/20 text-red-400 font-semibold uppercase tracking-wide">Removed from trip</span>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             <td className="px-6 py-4">
