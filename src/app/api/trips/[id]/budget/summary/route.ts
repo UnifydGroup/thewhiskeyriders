@@ -139,11 +139,22 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const totalIncomeAud = totalCollectedFromMembers + totalManualIncome;
 
+    // ── Trip members for per-member cost share ────────────────────────────────
+    const { data: tripMembers } = await supabase
+      .from('trip_members')
+      .select('user_id, profiles(id, full_name, nickname, avatar_url)')
+      .eq('trip_id', tripId);
+
+    const memberCount = (tripMembers ?? []).length;
+
     // ── Group vs personal planned split ─────────────────────────────────────
-    // Parse each category's notes JSON to get parts with payment_type
+    // Parse each category's notes JSON to get parts with payment_type.
+    // For per_person parts, use the actual memberCount (matching the client-side
+    // BudgetBuilder which always uses workingMemberCount). The stored part.member_count
+    // can become stale when the projected count changes, causing the target to drift.
     let totalGroupPlannedAud = 0;
     let totalPersonalPlannedAud = 0;
-    let personalBudgetPerMemberAud = 0; // calculated after memberCount is known
+    let personalBudgetPerMemberAud = 0;
 
     for (const cat of categories) {
       let parts: any[] = [];
@@ -160,7 +171,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         for (const part of parts) {
           const partTotal = part.basis === 'group'
             ? toNumber(part.amount_aud)
-            : toNumber(part.amount_aud) * Math.max(1, toNumber(part.member_count));
+            : toNumber(part.amount_aud) * Math.max(1, memberCount || toNumber(part.member_count));
           if (part.payment_type === 'personal') {
             totalPersonalPlannedAud += partTotal;
           } else {
@@ -169,14 +180,6 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }
     }
-
-    // ── Trip members for per-member cost share ────────────────────────────────
-    const { data: tripMembers } = await supabase
-      .from('trip_members')
-      .select('user_id, profiles(id, full_name, nickname, avatar_url)')
-      .eq('trip_id', tripId);
-
-    const memberCount = (tripMembers ?? []).length;
     const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
 
     // Kitty requirement = group budget minus interest that offsets it
