@@ -42,7 +42,6 @@ export default function TripEditorPage() {
     start_date: '',
     end_date: '',
     description: '',
-    itinerary: '',
     cover_image_url: '',
     status: 'upcoming',
     max_members: '',
@@ -90,7 +89,6 @@ export default function TripEditorPage() {
         start_date: tripData.start_date.split('T')[0],
         end_date: tripData.end_date.split('T')[0],
         description: tripData.description || '',
-        itinerary: tripData.itinerary || '',
         cover_image_url: tripData.cover_image_url || '',
         country_code: tripData.country_code || '',
         latitude: tripData.latitude != null ? String(tripData.latitude) : '',
@@ -235,6 +233,9 @@ export default function TripEditorPage() {
             <Users size={16} />
             Manage Members
           </Button>
+        </Link>
+        <Link href={`/admin/trips/${tripId}/itinerary`}>
+          <Button variant="secondary">Manage Itinerary</Button>
         </Link>
         <Link href={`/admin/trips/${tripId}/documents`}>
           <Button variant="secondary">Manage Documents</Button>
@@ -458,17 +459,6 @@ export default function TripEditorPage() {
             onChange={handleChange}
             placeholder="Trip overview and context..."
             rows={6}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-2">Schedule / Itinerary</label>
-          <TextArea
-            name="itinerary"
-            value={formData.itinerary}
-            onChange={handleChange}
-            placeholder={`Day 1 - Arrive in Marrakech\nDay 2 - Atlas Mountains\nDay 3 - Desert camp`}
-            rows={8}
           />
         </div>
 

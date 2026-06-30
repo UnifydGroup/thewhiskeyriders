@@ -44,7 +44,7 @@ type TripDocument = {
   created_at: string;
 };
 
-type TripTab = 'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes';
+type TripTab = 'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes' | 'itinerary';
 
 const TAB_LABELS: Record<TripTab, string> = {
   overview: 'Overview',
@@ -54,6 +54,7 @@ const TAB_LABELS: Record<TripTab, string> = {
   payments: 'Payments',
   budget: 'Trip Budget',
   votes: 'Votes',
+  itinerary: 'Itinerary',
 };
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -104,6 +105,9 @@ export default function TripDetailPage() {
   const [loading, setLoading] = useState(true);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [itinerarySegments, setItinerarySegments] = useState<any[]>([]);
+  const [itineraryLoading, setItineraryLoading] = useState(false);
+  const [itineraryError, setItineraryError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -286,6 +290,36 @@ export default function TripDetailPage() {
   }, [tab, trip?.id, supabase]);
 
   useEffect(() => {
+    if (tab !== 'itinerary' || !trip?.id) return;
+    let active = true;
+
+    const loadItinerary = async () => {
+      setItineraryLoading(true);
+      setItineraryError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error('Session expired');
+        const response = await fetch(`/api/trips/${trip.id}/itinerary`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || 'Failed to load itinerary');
+        if (active) setItinerarySegments(payload.segments ?? []);
+      } catch (err: unknown) {
+        if (active) {
+          setItinerarySegments([]);
+          setItineraryError(getErrorMessage(err, 'Failed to load itinerary'));
+        }
+      } finally {
+        if (active) setItineraryLoading(false);
+      }
+    };
+
+    loadItinerary();
+    return () => { active = false; };
+  }, [tab, trip?.id, supabase]);
+
+  useEffect(() => {
     const targetDate = trip ? getCountdownTargetDate(trip) : null;
     if (!trip?.countdown_enabled || !targetDate) {
       return;
@@ -350,8 +384,8 @@ export default function TripDetailPage() {
   }
 
   const tabs: TripTab[] = canViewBudgetTab
-    ? ['overview', 'news', 'photos', 'documents', 'payments', 'budget', 'votes']
-    : ['overview', 'news', 'photos', 'documents', 'payments', 'votes'];
+    ? ['overview', 'itinerary', 'news', 'photos', 'documents', 'payments', 'budget', 'votes']
+    : ['overview', 'itinerary', 'news', 'photos', 'documents', 'payments', 'votes'];
 
   return (
     <div className="space-y-8">
@@ -441,18 +475,6 @@ export default function TripDetailPage() {
       {/* Overview Tab */}
       {tab === 'overview' && (
         <div className="space-y-8">
-          {/* Schedule / Itinerary */}
-          {trip.itinerary && (
-            <div>
-              <h2 className="text-2xl font-bold text-brand-cream mb-4">Schedule & Itinerary</h2>
-              <Card>
-                <CardContent className="pt-6">
-                  <p className="text-brand-cream/80 whitespace-pre-wrap">{trip.itinerary}</p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
           {/* Key Dates */}
           {keyDates.length > 0 && (
             <div>
@@ -711,6 +733,100 @@ export default function TripDetailPage() {
             </p>
           </CardContent>
         </Card>
+      )}
+
+      {/* Itinerary Tab */}
+      {tab === 'itinerary' && (
+        <div className="space-y-8">
+          {itineraryLoading && (
+            <div className="flex items-center justify-center py-12">
+              <Spinner />
+            </div>
+          )}
+          {itineraryError && (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-red-400">{itineraryError}</p>
+              </CardContent>
+            </Card>
+          )}
+          {!itineraryLoading && !itineraryError && itinerarySegments.length === 0 && (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <p className="text-brand-cream/60 mb-2">Itinerary coming soon</p>
+                <p className="text-sm text-brand-cream/40">
+                  The trip plan will be published here as details are confirmed.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+          {!itineraryLoading && itinerarySegments.length > 0 && (() => {
+            const CATEGORY_META: Record<string, { label: string; colour: string }> = {
+              flight: { label: 'Flight', colour: 'border-blue-800/40 bg-blue-900/10' },
+              transfer: { label: 'Transfer', colour: 'border-yellow-800/40 bg-yellow-900/10' },
+              accommodation: { label: 'Accommodation', colour: 'border-purple-800/40 bg-purple-900/10' },
+              activity: { label: 'Activity', colour: 'border-green-800/40 bg-green-900/10' },
+            };
+            const grouped = new Map<string, typeof itinerarySegments>();
+            for (const seg of itinerarySegments) {
+              const arr = grouped.get(seg.date) ?? [];
+              arr.push(seg);
+              grouped.set(seg.date, arr);
+            }
+            const sortedDates = Array.from(grouped.keys()).sort();
+            return sortedDates.map((date, dayIdx) => {
+              const daySegs = grouped.get(date) ?? [];
+              const d = new Date(date + 'T00:00:00');
+              const dateLabel = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+              return (
+                <div key={date}>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-brown/20 border border-brand-brown/40 text-brand-tan text-sm font-bold shrink-0">
+                      {dayIdx + 1}
+                    </div>
+                    <p className="text-brand-tan font-semibold">{dateLabel}</p>
+                  </div>
+                  <div className="space-y-3 ml-11">
+                    {daySegs.map((seg: any) => {
+                      const meta = CATEGORY_META[seg.category] ?? { label: seg.category, colour: 'border-gray-700 bg-gray-900/20' };
+                      return (
+                        <div key={seg.id} className={`border rounded-lg p-4 ${meta.colour}`}>
+                          <p className="text-xs text-brand-cream/40 uppercase tracking-wide mb-1">{meta.label}</p>
+                          <p className="font-semibold text-brand-cream">{seg.title}</p>
+                          {seg.location_from && seg.location_to && (
+                            <p className="text-sm text-brand-cream/60 mt-1">{seg.location_from} → {seg.location_to}</p>
+                          )}
+                          {seg.location_from && !seg.location_to && (
+                            <p className="text-sm text-brand-cream/60 mt-1">{seg.location_from}</p>
+                          )}
+                          {(seg.start_time || seg.end_time) && (
+                            <p className="text-sm text-brand-cream/60 mt-0.5">
+                              {seg.start_time?.slice(0, 5)}{seg.start_time && seg.end_time && ' – '}{seg.end_time?.slice(0, 5)}
+                            </p>
+                          )}
+                          {seg.member_description && (
+                            <p className="text-sm text-brand-cream/80 mt-2 whitespace-pre-line">{seg.member_description}</p>
+                          )}
+                          {seg.contacts?.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {seg.contacts.map((c: any, i: number) => (
+                                <div key={i} className="flex flex-wrap items-center gap-2 text-sm text-brand-cream/70">
+                                  <span className="font-medium text-brand-cream">{c.name}</span>
+                                  {c.role && <span>· {c.role}</span>}
+                                  {c.phone && <a href={`tel:${c.phone}`} className="text-brand-tan hover:underline">{c.phone}</a>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </div>
       )}
     </div>
   );
