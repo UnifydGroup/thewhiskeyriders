@@ -16,7 +16,7 @@ type Params = Promise<{ id: string }>;
 export async function GET(request: NextRequest, props: { params: Params }) {
   try {
     const { id: tripId } = await props.params;
-    const { authenticated, role } = await verifyRole(request, [
+    const { authenticated, user, profile } = await verifyRole(request, [
       'member',
       'trip_admin',
       'admin',
@@ -25,10 +25,10 @@ export async function GET(request: NextRequest, props: { params: Params }) {
 
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
 
-    const isAdmin = ['admin', 'super_admin', 'trip_admin'].includes(role ?? '');
+    const isAdmin = ['admin', 'super_admin', 'trip_admin'].includes(profile?.role ?? '');
 
     if (!isAdmin) {
-      const isMember = await isUserTripMember(request, tripId);
+      const isMember = await isUserTripMember(user.id, tripId);
       if (!isMember) return errorResponse(ApiErrors.FORBIDDEN);
     }
 
@@ -56,8 +56,9 @@ export async function GET(request: NextRequest, props: { params: Params }) {
 export async function POST(request: NextRequest, props: { params: Params }) {
   try {
     const { id: tripId } = await props.params;
-    const { authenticated } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
+    const { authenticated, authorized } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
+    if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
 
     const body = await getJsonBody(request);
     if (!body) return errorResponse(ApiErrors.BAD_REQUEST, 'Missing request body');

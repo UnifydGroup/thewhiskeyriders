@@ -14,8 +14,9 @@ type Params = Promise<{ id: string; segmentId: string }>;
 export async function PUT(request: NextRequest, props: { params: Params }) {
   try {
     const { id: tripId, segmentId } = await props.params;
-    const { authenticated } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
+    const { authenticated, authorized } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
+    if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
 
     const body = await getJsonBody(request);
     if (!body) return errorResponse(ApiErrors.BAD_REQUEST, 'Missing request body');
@@ -74,8 +75,9 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
 export async function DELETE(request: NextRequest, props: { params: Params }) {
   try {
     const { id: tripId, segmentId } = await props.params;
-    const { authenticated } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
+    const { authenticated, authorized } = await verifyRole(request, ['trip_admin', 'admin', 'super_admin']);
     if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
+    if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
 
     const { error } = await supabase
       .from('trip_itinerary_segments')
