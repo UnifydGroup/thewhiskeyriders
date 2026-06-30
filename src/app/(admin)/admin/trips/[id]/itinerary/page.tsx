@@ -582,6 +582,7 @@ export default function ItineraryAdminPage() {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
+      setError(null);
       const token = await getToken();
 
       // Fetch trip name
