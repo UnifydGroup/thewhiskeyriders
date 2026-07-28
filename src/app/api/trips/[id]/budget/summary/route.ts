@@ -190,8 +190,10 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
     const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
 
-    // Kitty requirement = billable group budget minus interest that offsets it
-    const kittyRequirementAud = Math.max(0, totalGroupBillableAud - totalInterestIncome);
+    // Kitty requirement = billable group budget only. Interest earned on pooled funds is
+    // NOT subtracted here — it tops up the kitty for on-trip discretionary spend (food,
+    // drinks, entertainment) instead of lowering what each member is asked to contribute.
+    const kittyRequirementAud = totalGroupBillableAud;
     const kittyPerMemberAud = memberCount > 0 ? kittyRequirementAud / memberCount : 0;
     const costSharePerMember = memberCount > 0 ? totalBudgetAud / memberCount : 0;
 
