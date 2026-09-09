@@ -7,6 +7,7 @@ import {
   ApiErrors,
   getJsonBody,
 } from '@/lib/api/helpers';
+import { resolvePortalBaseUrl } from '@/lib/email/send';
 
 const _supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co';
 let _supabaseAdmin: ReturnType<typeof createClient> | null = null;
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     if (!email) return errorResponse(ApiErrors.BAD_REQUEST, 'Email is required');
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const siteUrl = resolvePortalBaseUrl(new URL(request.url).origin);
     const redirectTo = `${siteUrl}/auth/callback?next=/reset-password`;
 
     const supabaseAdmin = getSupabaseAdmin();

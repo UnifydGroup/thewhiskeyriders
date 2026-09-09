@@ -132,7 +132,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         })();
         if (!isTransfer) {
           totalManualIncome += toNumber(e.amount_aud);
-          if (e.category === 'interest') totalInterestIncome += toNumber(e.amount_aud);
+          if (e.category === 'interest' || e.category === 'interest_income') totalInterestIncome += toNumber(e.amount_aud);
         }
       }
     }
@@ -184,8 +184,10 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // Kitty requirement = group budget minus interest that offsets it
     const kittyRequirementAud = Math.max(0, totalGroupPlannedAud - totalInterestIncome);
-    const kittyPerMemberAud = memberCount > 0 ? kittyRequirementAud / memberCount : 0;
-    const costSharePerMember = memberCount > 0 ? totalBudgetAud / memberCount : 0;
+    // Round to cents — an unrounded per-member share (e.g. $5,000.0018) can make a member
+    // who has paid the intended full amount fail a `>=` comparison by a fraction of a cent.
+    const kittyPerMemberAud = memberCount > 0 ? Math.round((kittyRequirementAud / memberCount) * 100) / 100 : 0;
+    const costSharePerMember = memberCount > 0 ? Math.round((totalBudgetAud / memberCount) * 100) / 100 : 0;
 
     // Personal budget per member: sum of per_person personal parts' amount_aud
     // (group-basis personal parts split by memberCount)

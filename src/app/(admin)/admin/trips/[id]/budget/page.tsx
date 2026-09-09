@@ -4434,7 +4434,9 @@ export default function AdminBudgetPage() {
                       const hasSchedule = memberTarget > 0;
                       const remaining = Math.max(0, memberTarget - member.total_paid);
                       const percentPaid = memberTarget > 0 ? (member.total_paid / memberTarget) * 100 : 0;
-                      const isFullyPaid = hasSchedule && member.total_paid >= memberTarget;
+                      // 1-cent tolerance: a member who has paid the intended full target shouldn't
+                      // get bucketed as merely "Ahead" due to sub-cent float drift in memberTarget.
+                      const isFullyPaid = hasSchedule && member.total_paid >= memberTarget - 0.01;
                       const isAhead = hasSchedule && !isFullyPaid && member.total_paid > expectedByMilestone;
                       const isOnTrack = hasSchedule && !isFullyPaid && member.total_paid >= expectedByMilestone;
                       const isRemovedFromTrip = !tripMembers.some((tm) => tm.id === member.member_id);
