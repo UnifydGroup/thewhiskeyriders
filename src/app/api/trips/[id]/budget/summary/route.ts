@@ -153,6 +153,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     // BudgetBuilder which always uses workingMemberCount). The stored part.member_count
     // can become stale when the projected count changes, causing the target to drift.
     let totalGroupPlannedAud = 0;
+    let totalGroupBillableAud = 0;
     let totalPersonalPlannedAud = 0;
     let personalBudgetPerMemberAud = 0;
 
@@ -166,7 +167,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       }
       // Fallback: if no parts, treat entire category as group
       if (parts.length === 0) {
-        totalGroupPlannedAud += toNumber(cat.planned_aud);
+        const plannedAud = toNumber(cat.planned_aud);
+        totalGroupPlannedAud += plannedAud;
+        totalGroupBillableAud += plannedAud;
       } else {
         for (const part of parts) {
           const partTotal = part.basis === 'group'
@@ -176,16 +179,23 @@ export async function GET(request: NextRequest, { params }: Params) {
             totalPersonalPlannedAud += partTotal;
           } else {
             totalGroupPlannedAud += partTotal;
+            // Items explicitly flagged as excluded (e.g. covered by bank interest, not billed
+            // to members) still count as real group spend but are left out of what's billed.
+            if (part.include_in_member_budget !== false) {
+              totalGroupBillableAud += partTotal;
+            }
           }
         }
       }
     }
     const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
 
-    // Kitty requirement = group budget minus interest that offsets it
-    const kittyRequirementAud = Math.max(0, totalGroupPlannedAud - totalInterestIncome);
+    // Kitty requirement = billable group budget only. Interest earned on pooled funds is
+    // NOT subtracted here — it tops up the kitty for on-trip discretionary spend (food,
+    // drinks, entertainment) instead of lowering what each member is asked to contribute.
     // Round to cents — an unrounded per-member share (e.g. $5,000.0018) can make a member
     // who has paid the intended full amount fail a `>=` comparison by a fraction of a cent.
+    const kittyRequirementAud = totalGroupBillableAud;
     const kittyPerMemberAud = memberCount > 0 ? Math.round((kittyRequirementAud / memberCount) * 100) / 100 : 0;
     const costSharePerMember = memberCount > 0 ? Math.round((totalBudgetAud / memberCount) * 100) / 100 : 0;
 
@@ -394,6 +404,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         total_budget_aud: totalBudgetAud,
         total_planned_aud: categories.reduce((s: number, c: any) => s + toNumber(c.planned_aud), 0),
         total_group_planned_aud: totalGroupPlannedAud,
+        total_group_billable_aud: totalGroupBillableAud,
         total_personal_planned_aud: totalPersonalPlannedAud,
         total_income_aud: totalIncomeAud,
         total_collected_from_members_aud: totalCollectedFromMembers,

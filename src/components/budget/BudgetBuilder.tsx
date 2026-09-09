@@ -19,6 +19,9 @@ interface BudgetPart {
   amount_aud: number;
   member_count: number;
   payment_type: BudgetPaymentType;
+  /** When false, this group-kitty item's cost is excluded from what members are billed
+   *  (e.g. covered by bank interest) while still counting toward the category's real total cost. */
+  include_in_member_budget: boolean;
 }
 
 export interface BudgetCategory {
@@ -116,6 +119,7 @@ function parseCategoryNotes(
     amount_aud: Number(plannedAud) || 0,
     member_count: Math.max(1, defaultMemberCount),
     payment_type: 'group',
+    include_in_member_budget: true,
   };
 
   if (!rawNotes) return { notesText: '', parts: [fallback], committed_aud: 0 };
@@ -132,6 +136,7 @@ function parseCategoryNotes(
           amount_aud: Math.max(0, Number(p.amount_aud) || 0),
           member_count: Math.max(1, Number(p.member_count) || defaultMemberCount),
           payment_type: (p.payment_type === 'personal' ? 'personal' : 'group') as BudgetPaymentType,
+          include_in_member_budget: p.include_in_member_budget !== false,
         }))
         .filter((p) => p.name.length > 0 || p.amount_aud > 0);
       return {
@@ -309,6 +314,7 @@ export default function BudgetBuilder({
   const [partName, setPartName]       = useState('');
   const [partCoverage, setPartCoverage] = useState<CoverageType>('kitty_per_person');
   const [partAmount, setPartAmount]   = useState('');
+  const [partIncludeInBudget, setPartIncludeInBudget] = useState(true);
   const [savingPart, setSavingPart]   = useState(false);
   const partNameRef = useRef<HTMLInputElement>(null);
 
@@ -317,6 +323,7 @@ export default function BudgetBuilder({
     setPartName('');
     setPartCoverage('kitty_per_person');
     setPartAmount('');
+    setPartIncludeInBudget(true);
     setTimeout(() => partNameRef.current?.focus(), 50);
   };
 
@@ -326,6 +333,7 @@ export default function BudgetBuilder({
     setPartName(part.name);
     setPartCoverage(coverageFromPart(part));
     setPartAmount(String(part.amount_aud));
+    setPartIncludeInBudget(part.include_in_member_budget !== false);
     setTimeout(() => partNameRef.current?.focus(), 50);
   };
 
@@ -367,6 +375,7 @@ export default function BudgetBuilder({
         amount_aud: parseFloat(partAmount) || 0,
         member_count: workingMemberCount,
         payment_type,
+        include_in_member_budget: payment_type === 'personal' ? true : partIncludeInBudget,
       };
 
       let updated: BudgetPart[];
@@ -427,15 +436,24 @@ export default function BudgetBuilder({
   // ── Budget summary ──────────────────────────────────────────────────────────
   const summary = useMemo(() => {
     let groupKittyTotal = 0;
+    let excludedFromBillingTotal = 0;
     let personalPerPerson = 0;
 
     for (const cat of categories) {
       const { parts } = parseCategoryNotes(cat.notes, cat.planned_aud, workingMemberCount);
       for (const part of parts) {
         if (part.payment_type === 'group') {
-          groupKittyTotal += part.basis === 'per_person'
+          const partTotal = part.basis === 'per_person'
             ? Number(part.amount_aud) * workingMemberCount
             : Number(part.amount_aud);
+          // Items flagged "not billed to members" still count as real spend (tracked at the
+          // category level via planned_aud/spent_aud) but are excluded from what's collected
+          // from members — e.g. costs expected to be covered by bank interest instead.
+          if (part.include_in_member_budget === false) {
+            excludedFromBillingTotal += partTotal;
+          } else {
+            groupKittyTotal += partTotal;
+          }
         } else {
           // personal
           personalPerPerson += part.basis === 'per_person'
@@ -447,9 +465,9 @@ export default function BudgetBuilder({
 
     const kittyPerPerson  = workingMemberCount > 0 ? groupKittyTotal / workingMemberCount : 0;
     const totalPerPerson  = kittyPerPerson + personalPerPerson;
-    const totalTripCost   = groupKittyTotal + personalPerPerson * workingMemberCount;
+    const totalTripCost   = groupKittyTotal + excludedFromBillingTotal + personalPerPerson * workingMemberCount;
 
-    return { groupKittyTotal, kittyPerPerson, personalPerPerson, totalPerPerson, totalTripCost };
+    return { groupKittyTotal, excludedFromBillingTotal, kittyPerPerson, personalPerPerson, totalPerPerson, totalTripCost };
   }, [categories, workingMemberCount]);
 
   // Per-category breakdown for display
@@ -625,6 +643,11 @@ export default function BudgetBuilder({
                 {' · '}
                 collect {fmt(summary.groupKittyTotal)} from {workingMemberCount} members
               </p>
+              {summary.excludedFromBillingTotal > 0 && (
+                <p className="text-xs text-amber-400/70 mt-1">
+                  + {fmt(summary.excludedFromBillingTotal)} not billed to members (covered separately, e.g. bank interest)
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -809,6 +832,7 @@ export default function BudgetBuilder({
                                   name={partName} setName={setPartName}
                                   coverage={partCoverage} setCoverage={setPartCoverage}
                                   amount={partAmount} setAmount={setPartAmount}
+                                  includeInBudget={partIncludeInBudget} setIncludeInBudget={setPartIncludeInBudget}
                                   workingMemberCount={workingMemberCount}
                                   saving={savingPart}
                                   onSave={handleSavePart}
@@ -826,6 +850,11 @@ export default function BudgetBuilder({
                               <span className={`text-xs font-medium ${coverageMeta.color}`}>
                                 {coverageMeta.label}
                               </span>
+                              {part.payment_type === 'group' && part.include_in_member_budget === false && (
+                                <span className="block text-[11px] font-medium text-amber-400/80 mt-0.5">
+                                  Not billed to members
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-right text-brand-cream/70">
                               {fmtDec(Number(part.amount_aud))}
@@ -866,6 +895,7 @@ export default function BudgetBuilder({
                               name={partName} setName={setPartName}
                               coverage={partCoverage} setCoverage={setPartCoverage}
                               amount={partAmount} setAmount={setPartAmount}
+                              includeInBudget={partIncludeInBudget} setIncludeInBudget={setPartIncludeInBudget}
                               workingMemberCount={workingMemberCount}
                               saving={savingPart}
                               onSave={handleSavePart}
@@ -964,6 +994,8 @@ interface PartFormProps {
   setCoverage: (v: CoverageType) => void;
   amount: string;
   setAmount: (v: string) => void;
+  includeInBudget: boolean;
+  setIncludeInBudget: (v: boolean) => void;
   workingMemberCount: number;
   saving: boolean;
   onSave: () => void;
@@ -972,7 +1004,8 @@ interface PartFormProps {
 
 function PartForm({
   partNameRef, name, setName, coverage, setCoverage,
-  amount, setAmount, workingMemberCount, saving, onSave, onCancel,
+  amount, setAmount, includeInBudget, setIncludeInBudget,
+  workingMemberCount, saving, onSave, onCancel,
 }: PartFormProps) {
   const amountNum = parseFloat(amount) || 0;
   const previewTotal = coverage === 'kitty_per_person' ? amountNum * workingMemberCount : amountNum;
@@ -1027,6 +1060,22 @@ function PartForm({
           />
         </div>
       </div>
+
+      {/* Bill to members toggle — only meaningful for group-kitty items */}
+      {!isPersonal && (
+        <div className="sm:w-40">
+          <label className="block text-[11px] font-medium text-brand-cream/50 mb-1 uppercase tracking-wider">Billing</label>
+          <label className="flex items-center gap-2 px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-xs text-brand-cream/70 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeInBudget}
+              onChange={(e) => setIncludeInBudget(e.target.checked)}
+              className="w-3.5 h-3.5 accent-brand-tan"
+            />
+            {includeInBudget ? 'Bill to members' : 'Excluded (covered separately)'}
+          </label>
+        </div>
+      )}
 
       {/* Preview total + actions */}
       <div className="flex items-center gap-2 pb-0.5">
