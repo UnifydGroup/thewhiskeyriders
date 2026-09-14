@@ -2810,6 +2810,12 @@ export default function AdminBudgetPage() {
                   <span>Other income</span>
                   <span className="font-medium">{fmt(overview.total_manual_income_aud)}</span>
                 </div>
+                {(overview.total_interest_income_aud ?? 0) > 0 && (
+                  <div className="flex justify-between pl-3 text-amber-400/80">
+                    <span>↳ Interest earned</span>
+                    <span className="font-medium">{fmt(overview.total_interest_income_aud ?? 0)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-brand-cream/50 pt-2 border-t border-brand-tan/10">
                   <span>Budget target (group)</span>
                   <span>{fmt(overview.total_budget_aud)}</span>
@@ -4680,7 +4686,14 @@ export default function AdminBudgetPage() {
                 <p className="text-xs text-brand-cream/40 mt-0.5">Interest, refunds, inter-account transfers, and other non-member income</p>
               </div>
               <div className="flex items-center gap-3">
-                {incomeEntries.length > 0 && <span className="text-green-400 font-semibold text-sm">{fmt(incomeEntries.reduce((s, e) => s + e.amount_aud, 0))}</span>}
+                {incomeEntries.length > 0 && (
+                  <div className="text-right">
+                    <span className="text-green-400 font-semibold text-sm">{fmt(incomeEntries.reduce((s, e) => s + e.amount_aud, 0))}</span>
+                    {(overview?.total_interest_income_aud ?? 0) > 0 && (
+                      <p className="text-[11px] text-amber-400/70">Interest earned: {fmt(overview?.total_interest_income_aud ?? 0)}</p>
+                    )}
+                  </div>
+                )}
                 {showPlannerIncomeSection ? <ChevronUp className="w-5 h-5 text-brand-cream/50" /> : <ChevronDown className="w-5 h-5 text-brand-cream/50" />}
               </div>
             </button>
