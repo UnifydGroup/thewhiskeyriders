@@ -34,6 +34,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       contacts: data.contacts,
       documents: data.documents,
       expense_receipts: data.expenseReceipts,
+      members: data.members,
+      member_fields: data.memberFields,
     });
   } catch (err) {
     console.error('GET trip bible error:', err);

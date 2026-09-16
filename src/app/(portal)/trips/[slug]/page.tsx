@@ -71,6 +71,16 @@ type TripContact = {
   notes: string | null;
 };
 
+type TripMemberContact = {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  first_name?: string | null;
+  surname?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -123,6 +133,7 @@ export default function TripDetailPage() {
   const [itineraryLoading, setItineraryLoading] = useState(false);
   const [itineraryError, setItineraryError] = useState<string | null>(null);
   const [contacts, setContacts] = useState<TripContact[]>([]);
+  const [memberContacts, setMemberContacts] = useState<TripMemberContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [isDownloadingBible, setIsDownloadingBible] = useState(false);
@@ -347,15 +358,19 @@ export default function TripDetailPage() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) throw new Error('Session expired');
-        const response = await fetch(`/api/trips/${trip.id}/contacts`, {
+        const response = await fetch(`/api/trips/${trip.id}/bible`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success) throw new Error(payload.error || 'Failed to load contacts');
-        if (active) setContacts(payload.data?.contacts ?? []);
+        if (active) {
+          setContacts(payload.data?.contacts ?? []);
+          setMemberContacts(payload.data?.members ?? []);
+        }
       } catch (err: unknown) {
         if (active) {
           setContacts([]);
+          setMemberContacts([]);
           setContactsError(getErrorMessage(err, 'Failed to load contacts'));
         }
       } finally {
@@ -699,6 +714,42 @@ export default function TripDetailPage() {
                     </CardContent>
                   </Card>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Trip Members */}
+          <div>
+            <h2 className="text-xl font-bold text-brand-cream mb-3">Trip Members</h2>
+            {contactsLoading ? (
+              <div className="flex justify-center py-8"><Spinner /></div>
+            ) : memberContacts.length === 0 ? (
+              <Card><CardContent className="py-6 text-center text-brand-cream/60 text-sm">No trip members yet.</CardContent></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {memberContacts.map((member) => {
+                  const nameParts = [member.first_name, member.surname].filter(Boolean).join(' ');
+                  return (
+                    <Card key={member.id}>
+                      <CardContent className="py-4">
+                        <p className="font-semibold text-brand-cream">{member.display_name}</p>
+                        {nameParts && <p className="text-xs text-brand-cream/50">{nameParts}</p>}
+                        <div className="flex flex-wrap gap-3 mt-2 text-sm">
+                          {member.phone && (
+                            <a href={`tel:${member.phone}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                              <Phone className="w-3.5 h-3.5" /> {member.phone}
+                            </a>
+                          )}
+                          {member.email && (
+                            <a href={`mailto:${member.email}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                              <Mail className="w-3.5 h-3.5" /> {member.email}
+                            </a>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </div>

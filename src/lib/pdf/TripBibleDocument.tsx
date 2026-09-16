@@ -60,7 +60,7 @@ function Footer({ tripName }: { tripName: string }) {
 }
 
 export default function TripBibleDocument({ data }: { data: TripBibleData }) {
-  const { trip, itinerary, contacts, documents, expenseReceipts, isAdmin } = data;
+  const { trip, itinerary, contacts, documents, expenseReceipts, members, isAdmin } = data;
   const itineraryByDate = groupByDate(itinerary as { date: string }[]);
   const contactsByCategory = new Map<string, typeof contacts>();
   for (const contact of contacts) {
@@ -131,7 +131,7 @@ export default function TripBibleDocument({ data }: { data: TripBibleData }) {
       )}
 
       {/* Key Contacts */}
-      {contacts.length > 0 && (
+      {(contacts.length > 0 || members.length > 0) && (
         <Page size="A4" style={styles.page}>
           <Text style={styles.h2}>Key Contacts</Text>
           {Array.from(contactsByCategory.entries()).map(([category, list]) => (
@@ -150,6 +150,24 @@ export default function TripBibleDocument({ data }: { data: TripBibleData }) {
               ))}
             </View>
           ))}
+          {members.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.h3}>Trip Members</Text>
+              {members.map((member) => {
+                const nameParts = [member.first_name, member.surname].filter(Boolean).join(' ');
+                return (
+                  <View key={member.id} style={styles.card}>
+                    <Text style={styles.title}>{member.display_name}</Text>
+                    {nameParts && <Text style={styles.small}>{nameParts}</Text>}
+                    <View style={styles.row}>
+                      {member.phone && <Text style={styles.small}>Phone: {member.phone}</Text>}
+                      {member.email && <Text style={styles.small}>Email: {member.email}</Text>}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
           <Footer tripName={trip.name} />
         </Page>
       )}

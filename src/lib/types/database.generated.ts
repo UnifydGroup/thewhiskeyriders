@@ -2216,6 +2216,7 @@ export type Database = {
       }
       trips: {
         Row: {
+          bible_member_fields: Json
           countdown_enabled: boolean
           countdown_target_at: string | null
           country: string
@@ -2238,6 +2239,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          bible_member_fields?: Json
           countdown_enabled?: boolean
           countdown_target_at?: string | null
           country: string
@@ -2260,6 +2262,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          bible_member_fields?: Json
           countdown_enabled?: boolean
           countdown_target_at?: string | null
           country?: string

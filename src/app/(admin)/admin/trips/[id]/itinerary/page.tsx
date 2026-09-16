@@ -100,6 +100,16 @@ const STATUSES: { value: SegmentStatus; label: string; colour: string }[] = [
   { value: 'cancelled', label: 'Cancelled', colour: 'text-red-400 bg-red-900/30 border-red-700/50' },
 ];
 
+const CONTACT_CATEGORIES: { value: string; label: string }[] = [
+  { value: 'guide', label: 'Guide / Tour Lead' },
+  { value: 'accommodation', label: 'Accommodation' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'emergency', label: 'Emergency' },
+  { value: 'embassy', label: 'Embassy / Consulate' },
+  { value: 'insurance', label: 'Insurance' },
+  { value: 'general', label: 'General' },
+];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function categoryIcon(cat: Category) {
@@ -138,18 +148,63 @@ function groupByDate(segments: Segment[]): Map<string, Segment[]> {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+export type PickableContact = {
+  key: string;
+  name: string;
+  phone: string;
+  role: string;
+};
+
+const NEW_CONTACT_OPTION = '__new__';
+
 function ContactsEditor({
   contacts,
   onChange,
+  availableContacts,
+  onCreateContact,
 }: {
   contacts: Contact[];
   onChange: (contacts: Contact[]) => void;
+  availableContacts: PickableContact[];
+  onCreateContact: (data: { name: string; phone: string; role: string; category: string }) => Promise<PickableContact | null>;
 }) {
+  const [pickerValue, setPickerValue] = useState('');
+  const [showNewContactForm, setShowNewContactForm] = useState(false);
+  const [newContact, setNewContact] = useState({ name: '', phone: '', role: '', category: 'general' });
+  const [isCreating, setIsCreating] = useState(false);
+
   const add = () => onChange([...contacts, { name: '', phone: '', role: '' }]);
   const remove = (i: number) => onChange(contacts.filter((_, idx) => idx !== i));
   const update = (i: number, field: keyof Contact, value: string) => {
     const updated = contacts.map((c, idx) => (idx === i ? { ...c, [field]: value } : c));
     onChange(updated);
+  };
+
+  const handlePick = (value: string) => {
+    setPickerValue('');
+    if (value === NEW_CONTACT_OPTION) {
+      setShowNewContactForm(true);
+      return;
+    }
+    const picked = availableContacts.find((c) => c.key === value);
+    if (picked) {
+      onChange([...contacts, { name: picked.name, phone: picked.phone, role: picked.role }]);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!newContact.name.trim()) return;
+    setIsCreating(true);
+    try {
+      const created = await onCreateContact(newContact);
+      if (created) {
+        onChange([...contacts, { name: created.name, phone: created.phone, role: created.role }]);
+        setNewContact({ name: '', phone: '', role: '', category: 'general' });
+        setShowNewContactForm(false);
+      }
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -183,13 +238,82 @@ function ContactsEditor({
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        onClick={add}
-        className="text-xs text-brand-tan hover:text-brand-brown flex items-center gap-1 transition-colors"
-      >
-        <Plus size={12} /> Add contact
-      </button>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={pickerValue}
+          onChange={(e) => handlePick(e.target.value)}
+          className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
+        >
+          <option value="" disabled>
+            Add from contact list…
+          </option>
+          {availableContacts.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.name}
+              {c.role ? ` — ${c.role}` : ''}
+            </option>
+          ))}
+          <option value={NEW_CONTACT_OPTION}>+ New contact (add to Key Contacts)</option>
+        </select>
+        <button
+          type="button"
+          onClick={add}
+          className="text-xs text-brand-tan hover:text-brand-brown flex items-center gap-1 transition-colors"
+        >
+          <Plus size={12} /> Add blank contact
+        </button>
+      </div>
+
+      {showNewContactForm && (
+        <div className="border border-brand-tan/20 rounded-lg p-3 space-y-2 bg-gray-800/40">
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              placeholder="Name"
+              value={newContact.name}
+              onChange={(e) => setNewContact((p) => ({ ...p, name: e.target.value }))}
+            />
+            <select
+              value={newContact.category}
+              onChange={(e) => setNewContact((p) => ({ ...p, category: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+            >
+              {CONTACT_CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label}
+                </option>
+              ))}
+            </select>
+            <Input
+              placeholder="Phone"
+              value={newContact.phone}
+              onChange={(e) => setNewContact((p) => ({ ...p, phone: e.target.value }))}
+            />
+            <Input
+              placeholder="Role (e.g. Guide)"
+              value={newContact.role}
+              onChange={(e) => setNewContact((p) => ({ ...p, role: e.target.value }))}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={isCreating || !newContact.name.trim()}
+              className="text-xs px-3 py-1.5 bg-brand-tan text-black rounded font-medium disabled:opacity-50"
+            >
+              {isCreating ? 'Adding…' : 'Add to Key Contacts & Segment'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowNewContactForm(false)}
+              className="text-xs px-3 py-1.5 border border-gray-700 rounded text-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -201,11 +325,15 @@ function SegmentModal({
   onSave,
   onClose,
   isSaving,
+  availableContacts,
+  onCreateContact,
 }: {
   initial: SegmentFormData;
   onSave: (data: SegmentFormData) => void;
   onClose: () => void;
   isSaving: boolean;
+  availableContacts: PickableContact[];
+  onCreateContact: (data: { name: string; phone: string; role: string; category: string }) => Promise<PickableContact | null>;
 }) {
   const [form, setForm] = useState<SegmentFormData>(initial);
 
@@ -358,6 +486,8 @@ function SegmentModal({
             <ContactsEditor
               contacts={form.contacts}
               onChange={(contacts) => set('contacts', contacts)}
+              availableContacts={availableContacts}
+              onCreateContact={onCreateContact}
             />
           </div>
 
@@ -568,6 +698,7 @@ export default function ItineraryAdminPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [availableContacts, setAvailableContacts] = useState<PickableContact[]>([]);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -608,9 +739,75 @@ export default function ItineraryAdminPage() {
     }
   }, [tripId, getToken]);
 
+  const fetchAvailableContacts = useCallback(async () => {
+    try {
+      const token = await getToken();
+      const [contactsRes, membersRes] = await Promise.all([
+        fetch(`/api/trips/${tripId}/contacts`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`/api/trips/${tripId}/members`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const contactsData = contactsRes.ok ? await contactsRes.json() : null;
+      const membersData = membersRes.ok ? await membersRes.json() : null;
+
+      const fromContacts: PickableContact[] = (contactsData?.data?.contacts ?? []).map((c: any) => ({
+        key: `contact:${c.id}`,
+        name: c.name,
+        phone: c.phone ?? '',
+        role: c.role ?? '',
+      }));
+
+      const fromMembers: PickableContact[] = (membersData?.data?.members ?? []).map((m: any) => ({
+        key: `member:${m.user_id}`,
+        name: m.profiles?.nickname || m.profiles?.full_name || 'Unknown',
+        phone: m.profiles?.phone ?? '',
+        role: m.trip_role ?? 'Member',
+      }));
+
+      setAvailableContacts([...fromContacts, ...fromMembers]);
+    } catch {
+      // Non-critical: the contact picker just stays empty if this fails.
+    }
+  }, [tripId, getToken]);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchAvailableContacts();
+  }, [fetchData, fetchAvailableContacts]);
+
+  const handleCreateContact = useCallback(
+    async (data: { name: string; phone: string; role: string; category: string }): Promise<PickableContact | null> => {
+      try {
+        const token = await getToken();
+        const res = await fetch(`/api/trips/${tripId}/contacts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            name: data.name,
+            phone: data.phone || null,
+            role: data.role || null,
+            category: data.category,
+            member_visible: true,
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to create contact');
+
+        const created = payload.data.contact;
+        const pickable: PickableContact = {
+          key: `contact:${created.id}`,
+          name: created.name,
+          phone: created.phone ?? '',
+          role: created.role ?? '',
+        };
+        setAvailableContacts((prev) => [...prev, pickable]);
+        return pickable;
+      } catch (err: any) {
+        setError(err.message);
+        return null;
+      }
+    },
+    [tripId, getToken]
+  );
 
   const openAdd = () => {
     setEditingSegment(null);
@@ -797,6 +994,8 @@ export default function ItineraryAdminPage() {
           onSave={handleSave}
           onClose={() => setShowModal(false)}
           isSaving={isSaving}
+          availableContacts={availableContacts}
+          onCreateContact={handleCreateContact}
         />
       )}
     </div>

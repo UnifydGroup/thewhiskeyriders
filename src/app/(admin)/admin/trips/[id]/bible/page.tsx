@@ -78,6 +78,23 @@ type TripDocument = {
   created_at: string;
 };
 
+type TripMember = {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  first_name?: string | null;
+  surname?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
+
+type MemberFields = {
+  first_name: boolean;
+  surname: boolean;
+  email: boolean;
+  phone: boolean;
+};
+
 type ExpenseReceiptGroup = {
   id: string;
   description: string;
@@ -276,6 +293,14 @@ export default function TripBiblePage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [documents, setDocuments] = useState<TripDocument[]>([]);
   const [expenseReceipts, setExpenseReceipts] = useState<ExpenseReceiptGroup[]>([]);
+  const [members, setMembers] = useState<TripMember[]>([]);
+  const [memberFields, setMemberFields] = useState<MemberFields>({
+    first_name: false,
+    surname: false,
+    email: false,
+    phone: false,
+  });
+  const [isSavingMemberFields, setIsSavingMemberFields] = useState(false);
 
   const [showContactModal, setShowContactModal] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -309,6 +334,8 @@ export default function TripBiblePage() {
       setContacts(payload.data.contacts ?? []);
       setDocuments(payload.data.documents ?? []);
       setExpenseReceipts(payload.data.expense_receipts ?? []);
+      setMembers(payload.data.members ?? []);
+      setMemberFields((prev) => ({ ...prev, ...(payload.data.member_fields ?? {}) }));
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Failed to load Trip Bible'));
     } finally {
@@ -368,6 +395,28 @@ export default function TripBiblePage() {
       await fetchBible();
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Failed to delete contact'));
+    }
+  };
+
+  const handleSaveMemberFields = async (next: MemberFields) => {
+    setIsSavingMemberFields(true);
+    setError(null);
+    const previous = memberFields;
+    setMemberFields(next);
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/trips/${tripId}/bible/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ bible_member_fields: next }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.success) throw new Error(payload.error || 'Failed to save settings');
+    } catch (err: unknown) {
+      setMemberFields(previous);
+      setError(getErrorMessage(err, 'Failed to save member field settings'));
+    } finally {
+      setIsSavingMemberFields(false);
     }
   };
 
@@ -695,6 +744,67 @@ export default function TripBiblePage() {
               </div>
             </div>
           ))}
+
+          {/* Trip Members */}
+          <div>
+            <h3 className="text-sm font-semibold text-brand-tan uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Users size={14} />
+              Trip Members ({members.length})
+            </h3>
+
+            <Card className="p-4 mb-3">
+              <p className="text-xs font-medium text-gray-400 mb-2">
+                Show for each member {isSavingMemberFields && <span className="text-gray-500">(saving…)</span>}
+              </p>
+              <div className="flex flex-wrap gap-4">
+                {([
+                  ['first_name', 'First name'],
+                  ['surname', 'Surname'],
+                  ['email', 'Email'],
+                  ['phone', 'Phone'],
+                ] as [keyof MemberFields, string][]).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={memberFields[key]}
+                      onChange={(e) => handleSaveMemberFields({ ...memberFields, [key]: e.target.checked })}
+                      className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-brand-brown focus:ring-brand-brown/40"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Everyone always sees each member&apos;s name. This controls what else members see about each other here and in their own Trip Bible.</p>
+            </Card>
+
+            {members.length === 0 ? (
+              <Card className="p-6 text-center text-sm text-gray-400">No trip members yet.</Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {members.map((member) => {
+                  const nameParts = [member.first_name, member.surname].filter(Boolean).join(' ');
+                  return (
+                    <div key={member.id} className="border border-gray-700 rounded-lg bg-gray-900/60 p-3">
+                      <p className="font-medium truncate">{member.display_name}</p>
+                      {nameParts && <p className="text-sm text-gray-400">{nameParts}</p>}
+                      <div className="flex flex-wrap gap-3 mt-1 text-sm">
+                        {member.phone && (
+                          <a href={`tel:${member.phone}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                            <Phone size={12} /> {member.phone}
+                          </a>
+                        )}
+                        {member.email && (
+                          <a href={`mailto:${member.email}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                            <Mail size={12} /> {member.email}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

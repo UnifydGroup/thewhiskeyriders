@@ -72,15 +72,59 @@ export async function getTripBibleData(tripId: string, isAdmin: boolean, userId:
     .order('created_at', { ascending: false });
   if (!isAdmin) documentsQuery = documentsQuery.or(`user_id.is.null,user_id.eq.${userId}`);
 
+  const membersQuery = supabase
+    .from('trip_members')
+    .select(
+      `
+      trip_role,
+      profiles:user_id (id, first_name, surname, full_name, nickname, email, phone, phone_country_code, avatar_url)
+    `
+    )
+    .eq('trip_id', tripId);
+
   const [
     { data: itinerary, error: itineraryError },
     { data: contacts, error: contactsError },
     { data: documents, error: documentsError },
-  ] = await Promise.all([itineraryQuery, contactsQuery, documentsQuery]);
+    { data: memberRows, error: membersError },
+  ] = await Promise.all([itineraryQuery, contactsQuery, documentsQuery, membersQuery]);
 
   if (itineraryError) throw itineraryError;
   if (contactsError) throw contactsError;
   if (documentsError) throw documentsError;
+  if (membersError) throw membersError;
+
+  const memberFields = (trip.bible_member_fields ?? {}) as Record<string, boolean>;
+
+  const members = (memberRows ?? [])
+    .map((row) => row.profiles)
+    .filter((profile): profile is NonNullable<typeof profile> => !!profile)
+    .map((profile) => {
+      const base = {
+        id: profile.id,
+        display_name: profile.nickname?.trim() || profile.full_name?.trim() || 'Unknown',
+        avatar_url: profile.avatar_url,
+      };
+      if (isAdmin) {
+        return {
+          ...base,
+          first_name: profile.first_name,
+          surname: profile.surname,
+          email: profile.email,
+          phone: profile.phone_country_code && profile.phone ? `${profile.phone_country_code} ${profile.phone}` : profile.phone,
+        };
+      }
+      return {
+        ...base,
+        first_name: memberFields.first_name ? profile.first_name : undefined,
+        surname: memberFields.surname ? profile.surname : undefined,
+        email: memberFields.email ? profile.email : undefined,
+        phone: memberFields.phone
+          ? (profile.phone_country_code && profile.phone ? `${profile.phone_country_code} ${profile.phone}` : profile.phone)
+          : undefined,
+      };
+    })
+    .sort((a, b) => a.display_name.localeCompare(b.display_name));
 
   const documentsWithAccessUrls = await Promise.all(
     (documents ?? []).map(async (document) => ({
@@ -136,6 +180,8 @@ export async function getTripBibleData(tripId: string, isAdmin: boolean, userId:
     contacts: contacts ?? [],
     documents: documentsWithAccessUrls,
     expenseReceipts,
+    members,
+    memberFields,
   };
 }
 
