@@ -759,8 +759,10 @@ export default function ItineraryAdminPage() {
       const fromMembers: PickableContact[] = (membersData?.data?.members ?? []).map((m: any) => ({
         key: `member:${m.user_id}`,
         name: m.profiles?.nickname || m.profiles?.full_name || 'Unknown',
-        phone: m.profiles?.phone ?? '',
-        role: m.trip_role ?? 'Member',
+        phone: m.profiles?.phone
+          ? (m.profiles?.phone_country_code ? `${m.profiles.phone_country_code} ${m.profiles.phone}` : m.profiles.phone)
+          : '',
+        role: m.trip_role ? m.trip_role.charAt(0).toUpperCase() + m.trip_role.slice(1) : 'Member',
       }));
 
       setAvailableContacts([...fromContacts, ...fromMembers]);
