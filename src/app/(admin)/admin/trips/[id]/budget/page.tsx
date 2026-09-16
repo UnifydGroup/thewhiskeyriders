@@ -2506,6 +2506,9 @@ export default function AdminBudgetPage() {
       isUnassigned: id === '__unassigned__',
     }))
     .filter((row) => row.inflow !== 0 || row.outflow !== 0 || !row.isUnassigned);
+  const wcNet = accountFlowSummary.find((r) => r.id === 'westpac_choice')?.net ?? 0;
+  const wlNet = accountFlowSummary.find((r) => r.id === 'westpac_life')?.net ?? 0;
+  const ppNet = accountFlowSummary.find((r) => r.id === 'paypal')?.net ?? 0;
   const getTransactionAccountId = (rawNotes: string | null | undefined, fallbackAccountId?: string | null) => {
     const parsed = parseTransactionNote(rawNotes || null);
     return parsed.account_source_id || fallbackAccountId || null;
