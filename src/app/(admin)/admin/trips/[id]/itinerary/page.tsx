@@ -600,7 +600,7 @@ export default function ItineraryAdminPage() {
       });
       if (!segRes.ok) throw new Error('Failed to load itinerary');
       const sd = await segRes.json();
-      setSegments(sd.segments ?? []);
+      setSegments(sd.data?.segments ?? []);
     } catch (err: any) {
       setError(err.message);
     } finally {

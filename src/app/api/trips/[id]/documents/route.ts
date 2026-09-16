@@ -270,11 +270,33 @@ function isValidDocumentStoragePath(storagePath: string, tripId: string): boolea
   return storagePath.startsWith(`${tripId}/documents/`);
 }
 
-async function createSignedDocumentUpload(tripId: string, fileName: string) {
+async function bucketAllowsMimeType(bucket: string, mimeType: string): Promise<boolean> {
+  const { data, error } = await supabase.storage.getBucket(bucket);
+  if (error || !data) return true; // fail open if bucket metadata can't be read
+
+  const allowed = data.allowed_mime_types;
+  if (!allowed || allowed.length === 0) return true;
+
+  const normalized = mimeType.trim().toLowerCase();
+  return allowed.some((pattern: string) => {
+    const normalizedPattern = pattern.trim().toLowerCase();
+    if (normalizedPattern.endsWith('/*')) {
+      return normalized.startsWith(normalizedPattern.slice(0, -1));
+    }
+    return normalizedPattern === normalized;
+  });
+}
+
+async function createSignedDocumentUpload(tripId: string, fileName: string, mimeType: string) {
   const storagePath = createDocumentStoragePath(tripId, fileName);
   let lastError = 'Failed to create signed upload URL';
 
   for (const bucket of DOCUMENT_STORAGE_BUCKETS) {
+    if (!(await bucketAllowsMimeType(bucket, mimeType))) {
+      lastError = `${bucket} bucket does not accept ${mimeType} uploads`;
+      continue;
+    }
+
     const { data: signedUpload, error } = await supabase.storage
       .from(bucket)
       .createSignedUploadUrl(storagePath);
@@ -477,7 +499,7 @@ export async function POST(request: NextRequest, props: { params: Params }) {
           return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported file type');
         }
 
-        const signedUpload = await createSignedDocumentUpload(tripId, fileName);
+        const signedUpload = await createSignedDocumentUpload(tripId, fileName, resolvedFileType);
         return successResponse({
           bucket: signedUpload.bucket,
           storage_path: signedUpload.storagePath,

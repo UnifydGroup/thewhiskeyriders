@@ -322,7 +322,7 @@ export default function TripDetailPage() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || 'Failed to load itinerary');
-        if (active) setItinerarySegments(payload.segments ?? []);
+        if (active) setItinerarySegments(payload.data?.segments ?? []);
       } catch (err: unknown) {
         if (active) {
           setItinerarySegments([]);
