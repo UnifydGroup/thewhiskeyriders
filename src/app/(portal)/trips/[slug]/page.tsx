@@ -20,6 +20,9 @@ import {
   Download,
   Eye,
   Clock3,
+  BookOpen,
+  Phone,
+  Mail,
 } from 'lucide-react';
 import Link from 'next/link';
 import PaymentScheduleSection from '@/components/trip/PaymentScheduleSection';
@@ -44,10 +47,11 @@ type TripDocument = {
   created_at: string;
 };
 
-type TripTab = 'overview' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes' | 'itinerary';
+type TripTab = 'overview' | 'bible' | 'news' | 'photos' | 'documents' | 'payments' | 'budget' | 'votes' | 'itinerary';
 
 const TAB_LABELS: Record<TripTab, string> = {
   overview: 'Overview',
+  bible: 'Trip Bible',
   news: 'News',
   photos: 'Photos',
   documents: 'Documents',
@@ -55,6 +59,16 @@ const TAB_LABELS: Record<TripTab, string> = {
   budget: 'Trip Budget',
   votes: 'Votes',
   itinerary: 'Itinerary',
+};
+
+type TripContact = {
+  id: string;
+  category: string;
+  name: string;
+  role: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
 };
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -108,6 +122,10 @@ export default function TripDetailPage() {
   const [itinerarySegments, setItinerarySegments] = useState<any[]>([]);
   const [itineraryLoading, setItineraryLoading] = useState(false);
   const [itineraryError, setItineraryError] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<TripContact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [isDownloadingBible, setIsDownloadingBible] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -237,7 +255,7 @@ export default function TripDetailPage() {
   }, [canToggleBudgetPreview, budgetViewAsMember]);
 
   useEffect(() => {
-    if (tab !== 'documents' || !trip?.id) {
+    if ((tab !== 'documents' && tab !== 'bible') || !trip?.id) {
       return;
     }
 
@@ -290,7 +308,7 @@ export default function TripDetailPage() {
   }, [tab, trip?.id, supabase]);
 
   useEffect(() => {
-    if (tab !== 'itinerary' || !trip?.id) return;
+    if ((tab !== 'itinerary' && tab !== 'bible') || !trip?.id) return;
     let active = true;
 
     const loadItinerary = async () => {
@@ -318,6 +336,62 @@ export default function TripDetailPage() {
     loadItinerary();
     return () => { active = false; };
   }, [tab, trip?.id, supabase]);
+
+  useEffect(() => {
+    if (tab !== 'bible' || !trip?.id) return;
+    let active = true;
+
+    const loadContacts = async () => {
+      setContactsLoading(true);
+      setContactsError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error('Session expired');
+        const response = await fetch(`/api/trips/${trip.id}/contacts`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) throw new Error(payload.error || 'Failed to load contacts');
+        if (active) setContacts(payload.data?.contacts ?? []);
+      } catch (err: unknown) {
+        if (active) {
+          setContacts([]);
+          setContactsError(getErrorMessage(err, 'Failed to load contacts'));
+        }
+      } finally {
+        if (active) setContactsLoading(false);
+      }
+    };
+
+    loadContacts();
+    return () => { active = false; };
+  }, [tab, trip?.id, supabase]);
+
+  const handleDownloadBible = async () => {
+    if (!trip?.id) return;
+    setIsDownloadingBible(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Session expired');
+      const response = await fetch(`/api/trips/${trip.id}/bible/pdf`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!response.ok) throw new Error('Failed to generate PDF');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${trip.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-trip-bible.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download Trip Bible:', err);
+    } finally {
+      setIsDownloadingBible(false);
+    }
+  };
 
   useEffect(() => {
     const targetDate = trip ? getCountdownTargetDate(trip) : null;
@@ -384,8 +458,8 @@ export default function TripDetailPage() {
   }
 
   const tabs: TripTab[] = canViewBudgetTab
-    ? ['overview', 'itinerary', 'news', 'photos', 'documents', 'payments', 'budget', 'votes']
-    : ['overview', 'itinerary', 'news', 'photos', 'documents', 'payments', 'votes'];
+    ? ['overview', 'bible', 'itinerary', 'news', 'photos', 'documents', 'payments', 'budget', 'votes']
+    : ['overview', 'bible', 'itinerary', 'news', 'photos', 'documents', 'payments', 'votes'];
 
   return (
     <div className="space-y-8">
@@ -465,6 +539,7 @@ export default function TripDetailPage() {
                 : 'text-brand-cream/60 hover:text-brand-cream'
             }`}
           >
+            {t === 'bible' && <BookOpen className="w-4 h-4" />}
             {t === 'news' && <Newspaper className="w-4 h-4" />}
             {t === 'photos' && <ImageIcon className="w-4 h-4" />}
             {TAB_LABELS[t]}
@@ -569,6 +644,100 @@ export default function TripDetailPage() {
               <PaymentScheduleSection tripId={trip.id} tripName={trip.name} showPaymentInfo={true} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Trip Bible Tab — mobile-friendly hub: itinerary, key contacts, documents + PDF download */}
+      {tab === 'bible' && (
+        <div className="space-y-8">
+          <Card>
+            <CardContent className="py-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <p className="font-semibold text-brand-cream flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-brand-brown" />
+                  Everything for the trip in one place
+                </p>
+                <p className="text-sm text-brand-cream/60 mt-1">
+                  Itinerary, key contacts, and documents — download the whole thing for offline access.
+                </p>
+              </div>
+              <Button variant="primary" onClick={handleDownloadBible} disabled={isDownloadingBible} className="shrink-0">
+                <Download className="w-4 h-4 mr-2" />
+                {isDownloadingBible ? 'Preparing…' : 'Download Trip Bible PDF'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Key Contacts */}
+          <div>
+            <h2 className="text-xl font-bold text-brand-cream mb-3">Key Contacts</h2>
+            {contactsLoading ? (
+              <div className="flex justify-center py-8"><Spinner /></div>
+            ) : contactsError ? (
+              <Card><CardContent className="py-6 text-center text-red-300 text-sm">{contactsError}</CardContent></Card>
+            ) : contacts.length === 0 ? (
+              <Card><CardContent className="py-6 text-center text-brand-cream/60 text-sm">No key contacts published yet.</CardContent></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {contacts.map((contact) => (
+                  <Card key={contact.id}>
+                    <CardContent className="py-4">
+                      <p className="font-semibold text-brand-cream">{contact.name}</p>
+                      {contact.role && <p className="text-xs text-brand-cream/50">{contact.role}</p>}
+                      <div className="flex flex-wrap gap-3 mt-2 text-sm">
+                        {contact.phone && (
+                          <a href={`tel:${contact.phone}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                            <Phone className="w-3.5 h-3.5" /> {contact.phone}
+                          </a>
+                        )}
+                        {contact.email && (
+                          <a href={`mailto:${contact.email}`} className="text-brand-tan hover:underline flex items-center gap-1">
+                            <Mail className="w-3.5 h-3.5" /> {contact.email}
+                          </a>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Itinerary summary */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-bold text-brand-cream">Itinerary</h2>
+              <button onClick={() => setTab('itinerary')} className="text-sm text-brand-tan hover:underline">
+                View full itinerary →
+              </button>
+            </div>
+            {itineraryLoading ? (
+              <div className="flex justify-center py-8"><Spinner /></div>
+            ) : itinerarySegments.length === 0 ? (
+              <Card><CardContent className="py-6 text-center text-brand-cream/60 text-sm">Itinerary coming soon.</CardContent></Card>
+            ) : (
+              <p className="text-sm text-brand-cream/60">
+                {itinerarySegments.length} confirmed segments — see the Itinerary tab for the full day-by-day plan.
+              </p>
+            )}
+          </div>
+
+          {/* Documents summary */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-bold text-brand-cream">Documents</h2>
+              <button onClick={() => setTab('documents')} className="text-sm text-brand-tan hover:underline">
+                View all documents →
+              </button>
+            </div>
+            {documentsLoading ? (
+              <div className="flex justify-center py-8"><Spinner /></div>
+            ) : documents.length === 0 ? (
+              <Card><CardContent className="py-6 text-center text-brand-cream/60 text-sm">No documents shared yet.</CardContent></Card>
+            ) : (
+              <p className="text-sm text-brand-cream/60">{documents.length} documents shared for this trip.</p>
+            )}
+          </div>
         </div>
       )}
 

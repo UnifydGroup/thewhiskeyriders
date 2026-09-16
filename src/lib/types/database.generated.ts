@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -283,6 +283,406 @@ export type Database = {
           },
         ]
       }
+      email_templates: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          name: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          name: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          name?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          email_sent_at: string | null
+          form_id: string
+          id: string
+          member_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          email_sent_at?: string | null
+          form_id: string
+          id?: string
+          member_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          email_sent_at?: string | null
+          form_id?: string
+          id?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_assignments_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_assignments_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_field_library: {
+        Row: {
+          category: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          field_type: string
+          helper_text: string | null
+          id: string
+          label: string
+          options: Json | null
+          placeholder: string | null
+          settings: Json | null
+          updated_at: string
+          use_count: number
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          field_type: string
+          helper_text?: string | null
+          id?: string
+          label: string
+          options?: Json | null
+          placeholder?: string | null
+          settings?: Json | null
+          updated_at?: string
+          use_count?: number
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          field_type?: string
+          helper_text?: string | null
+          id?: string
+          label?: string
+          options?: Json | null
+          placeholder?: string | null
+          settings?: Json | null
+          updated_at?: string
+          use_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_field_library_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_fields: {
+        Row: {
+          created_at: string
+          field_type: string
+          form_id: string
+          helper_text: string | null
+          id: string
+          is_required: boolean
+          label: string
+          library_field_id: string | null
+          options: Json | null
+          placeholder: string | null
+          settings: Json | null
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          field_type: string
+          form_id: string
+          helper_text?: string | null
+          id?: string
+          is_required?: boolean
+          label: string
+          library_field_id?: string | null
+          options?: Json | null
+          placeholder?: string | null
+          settings?: Json | null
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          field_type?: string
+          form_id?: string
+          helper_text?: string | null
+          id?: string
+          is_required?: boolean
+          label?: string
+          library_field_id?: string | null
+          options?: Json | null
+          placeholder?: string | null
+          settings?: Json | null
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_fields_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_fields_library_field_id_fkey"
+            columns: ["library_field_id"]
+            isOneToOne: false
+            referencedRelation: "form_field_library"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_response_values: {
+        Row: {
+          created_at: string
+          field_id: string
+          id: string
+          response_id: string
+          value_json: Json | null
+          value_text: string | null
+        }
+        Insert: {
+          created_at?: string
+          field_id: string
+          id?: string
+          response_id: string
+          value_json?: Json | null
+          value_text?: string | null
+        }
+        Update: {
+          created_at?: string
+          field_id?: string
+          id?: string
+          response_id?: string
+          value_json?: Json | null
+          value_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_response_values_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "form_fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_response_values_response_id_fkey"
+            columns: ["response_id"]
+            isOneToOne: false
+            referencedRelation: "form_responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_responses: {
+        Row: {
+          form_id: string
+          id: string
+          ip_address: string | null
+          is_public: boolean
+          member_id: string | null
+          submitted_at: string
+        }
+        Insert: {
+          form_id: string
+          id?: string
+          ip_address?: string | null
+          is_public?: boolean
+          member_id?: string | null
+          submitted_at?: string
+        }
+        Update: {
+          form_id?: string
+          id?: string
+          ip_address?: string | null
+          is_public?: boolean
+          member_id?: string | null
+          submitted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_responses_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_responses_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_verifications: {
+        Row: {
+          created_at: string
+          email: string
+          expires_at: string
+          form_id: string
+          id: string
+          otp_hash: string
+          verified_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          expires_at: string
+          form_id: string
+          id?: string
+          otp_hash: string
+          verified_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          expires_at?: string
+          form_id?: string
+          id?: string
+          otp_hash?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_verifications_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forms: {
+        Row: {
+          allow_multiple_submissions: boolean
+          created_at: string
+          created_by: string | null
+          description: string | null
+          goes_live_at: string | null
+          id: string
+          notify_on_submission: boolean
+          require_email_verification: boolean
+          show_countdown: boolean
+          slug: string
+          status: string
+          submission_deadline: string | null
+          title: string
+          token: string
+          trip_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          allow_multiple_submissions?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          goes_live_at?: string | null
+          id?: string
+          notify_on_submission?: boolean
+          require_email_verification?: boolean
+          show_countdown?: boolean
+          slug: string
+          status?: string
+          submission_deadline?: string | null
+          title: string
+          token?: string
+          trip_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          allow_multiple_submissions?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          goes_live_at?: string | null
+          id?: string
+          notify_on_submission?: boolean
+          require_email_verification?: boolean
+          show_countdown?: boolean
+          slug?: string
+          status?: string
+          submission_deadline?: string | null
+          title?: string
+          token?: string
+          trip_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forms_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       galleries: {
         Row: {
           created_at: string | null
@@ -314,6 +714,58 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "galleries_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      member_cost_assignments: {
+        Row: {
+          cost_item_id: string
+          id: string
+          is_self_funded: boolean
+          member_id: string
+          notes: string | null
+          trip_id: string
+          updated_at: string
+        }
+        Insert: {
+          cost_item_id: string
+          id?: string
+          is_self_funded?: boolean
+          member_id: string
+          notes?: string | null
+          trip_id: string
+          updated_at?: string
+        }
+        Update: {
+          cost_item_id?: string
+          id?: string
+          is_self_funded?: boolean
+          member_id?: string
+          notes?: string | null
+          trip_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_cost_assignments_cost_item_id_fkey"
+            columns: ["cost_item_id"]
+            isOneToOne: false
+            referencedRelation: "trip_cost_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_cost_assignments_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_cost_assignments_trip_id_fkey"
             columns: ["trip_id"]
             isOneToOne: false
             referencedRelation: "trips"
@@ -571,6 +1023,50 @@ export type Database = {
           {
             foreignKeyName: "news_posts_author_id_fkey"
             columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          is_read: boolean
+          link: string | null
+          message: string
+          metadata: Json | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          message: string
+          metadata?: Json | null
+          title: string
+          type?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          message?: string
+          metadata?: Json | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -896,7 +1392,7 @@ export type Database = {
           password_changed: boolean | null
           phone: string | null
           phone_country_code: string | null
-          role: 'super_admin' | 'admin' | 'trip_admin' | 'member'
+          role: string
           shirt_size: string | null
           shorts_size: string | null
           status: string
@@ -930,7 +1426,7 @@ export type Database = {
           password_changed?: boolean | null
           phone?: string | null
           phone_country_code?: string | null
-          role?: 'super_admin' | 'admin' | 'trip_admin' | 'member'
+          role?: string
           shirt_size?: string | null
           shorts_size?: string | null
           status?: string
@@ -964,7 +1460,7 @@ export type Database = {
           password_changed?: boolean | null
           phone?: string | null
           phone_country_code?: string | null
-          role?: 'super_admin' | 'admin' | 'trip_admin' | 'member'
+          role?: string
           shirt_size?: string | null
           shorts_size?: string | null
           status?: string
@@ -977,7 +1473,7 @@ export type Database = {
       site_settings: {
         Row: {
           background_image_url: string
-          background_media_type: 'image' | 'video'
+          background_media_type: string
           background_opacity: number
           background_position_x: number
           background_position_y: number
@@ -985,6 +1481,7 @@ export type Database = {
           background_zoom: number
           email_footer_image_url: string | null
           email_footer_text: string
+          email_greeting: string
           email_header_image_url: string | null
           email_header_tagline: string
           email_header_title: string
@@ -996,7 +1493,7 @@ export type Database = {
         }
         Insert: {
           background_image_url?: string
-          background_media_type?: 'image' | 'video'
+          background_media_type?: string
           background_opacity?: number
           background_position_x?: number
           background_position_y?: number
@@ -1004,6 +1501,7 @@ export type Database = {
           background_zoom?: number
           email_footer_image_url?: string | null
           email_footer_text?: string
+          email_greeting?: string
           email_header_image_url?: string | null
           email_header_tagline?: string
           email_header_title?: string
@@ -1015,7 +1513,7 @@ export type Database = {
         }
         Update: {
           background_image_url?: string
-          background_media_type?: 'image' | 'video'
+          background_media_type?: string
           background_opacity?: number
           background_position_x?: number
           background_position_y?: number
@@ -1023,6 +1521,7 @@ export type Database = {
           background_zoom?: number
           email_footer_image_url?: string | null
           email_footer_text?: string
+          email_greeting?: string
           email_header_image_url?: string | null
           email_header_tagline?: string
           email_header_title?: string
@@ -1081,9 +1580,12 @@ export type Database = {
       trip_budget_settings: {
         Row: {
           created_at: string
+          enabled_currencies: string[]
           exchange_rate_mad_aud: number
           id: string
           notes: string | null
+          per_person_budget_aud: number
+          projected_member_count: number | null
           show_group_budget_to_members: boolean
           show_individual_breakdown_to_members: boolean
           total_budget_aud: number
@@ -1092,9 +1594,12 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          enabled_currencies?: string[]
           exchange_rate_mad_aud?: number
           id?: string
           notes?: string | null
+          per_person_budget_aud?: number
+          projected_member_count?: number | null
           show_group_budget_to_members?: boolean
           show_individual_breakdown_to_members?: boolean
           total_budget_aud?: number
@@ -1103,9 +1608,12 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          enabled_currencies?: string[]
           exchange_rate_mad_aud?: number
           id?: string
           notes?: string | null
+          per_person_budget_aud?: number
+          projected_member_count?: number | null
           show_group_budget_to_members?: boolean
           show_individual_breakdown_to_members?: boolean
           total_budget_aud?: number
@@ -1122,54 +1630,97 @@ export type Database = {
           },
         ]
       }
-      member_cost_assignments: {
+      trip_contacts: {
         Row: {
-          cost_item_id: string
+          category: string
           created_at: string
+          created_by: string | null
+          email: string | null
           id: string
-          is_self_funded: boolean
-          member_id: string
+          member_visible: boolean
+          name: string
           notes: string | null
+          phone: string | null
+          role: string | null
+          sort_order: number
           trip_id: string
           updated_at: string
         }
         Insert: {
-          cost_item_id: string
+          category?: string
           created_at?: string
+          created_by?: string | null
+          email?: string | null
           id?: string
-          is_self_funded?: boolean
-          member_id: string
+          member_visible?: boolean
+          name: string
           notes?: string | null
+          phone?: string | null
+          role?: string | null
+          sort_order?: number
           trip_id: string
           updated_at?: string
         }
         Update: {
-          cost_item_id?: string
+          category?: string
           created_at?: string
+          created_by?: string | null
+          email?: string | null
           id?: string
-          is_self_funded?: boolean
-          member_id?: string
+          member_visible?: boolean
+          name?: string
           notes?: string | null
+          phone?: string | null
+          role?: string | null
+          sort_order?: number
           trip_id?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "member_cost_assignments_cost_item_id_fkey"
-            columns: ["cost_item_id"]
-            isOneToOne: false
-            referencedRelation: "trip_cost_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "member_cost_assignments_member_id_fkey"
-            columns: ["member_id"]
+            foreignKeyName: "trip_contacts_created_by_fkey"
+            columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "member_cost_assignments_trip_id_fkey"
+            foreignKeyName: "trip_contacts_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_cost_items: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          sort_order: number
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          sort_order?: number
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          sort_order?: number
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_cost_items_trip_id_fkey"
             columns: ["trip_id"]
             isOneToOne: false
             referencedRelation: "trips"
@@ -1229,6 +1780,64 @@ export type Database = {
           {
             foreignKeyName: "trip_documents_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_expense_receipts: {
+        Row: {
+          created_at: string
+          expense_id: string
+          file_name: string
+          file_size: number | null
+          file_type: string
+          file_url: string
+          id: string
+          trip_id: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          expense_id: string
+          file_name: string
+          file_size?: number | null
+          file_type?: string
+          file_url: string
+          id?: string
+          trip_id: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          expense_id?: string
+          file_name?: string
+          file_size?: number | null
+          file_type?: string
+          file_url?: string
+          id?: string
+          trip_id?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_expense_receipts_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "trip_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trip_expense_receipts_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trip_expense_receipts_uploaded_by_fkey"
+            columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -1339,44 +1948,6 @@ export type Database = {
           },
         ]
       }
-      trip_cost_items: {
-        Row: {
-          created_at: string
-          description: string | null
-          id: string
-          name: string
-          sort_order: number
-          trip_id: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          description?: string | null
-          id?: string
-          name: string
-          sort_order?: number
-          trip_id: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          description?: string | null
-          id?: string
-          name?: string
-          sort_order?: number
-          trip_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "trip_cost_items_trip_id_fkey"
-            columns: ["trip_id"]
-            isOneToOne: false
-            referencedRelation: "trips"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       trip_income_entries: {
         Row: {
           amount_aud: number
@@ -1453,6 +2024,77 @@ export type Database = {
           },
         ]
       }
+      trip_itinerary_segments: {
+        Row: {
+          category: string
+          contacts: Json
+          created_at: string
+          date: string
+          end_time: string | null
+          id: string
+          internal_notes: string | null
+          location_from: string | null
+          location_to: string | null
+          member_description: string | null
+          member_visible: boolean
+          reference_number: string | null
+          sort_order: number
+          start_time: string | null
+          status: string
+          title: string
+          trip_id: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          contacts?: Json
+          created_at?: string
+          date: string
+          end_time?: string | null
+          id?: string
+          internal_notes?: string | null
+          location_from?: string | null
+          location_to?: string | null
+          member_description?: string | null
+          member_visible?: boolean
+          reference_number?: string | null
+          sort_order?: number
+          start_time?: string | null
+          status?: string
+          title: string
+          trip_id: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          contacts?: Json
+          created_at?: string
+          date?: string
+          end_time?: string | null
+          id?: string
+          internal_notes?: string | null
+          location_from?: string | null
+          location_to?: string | null
+          member_description?: string | null
+          member_visible?: boolean
+          reference_number?: string | null
+          sort_order?: number
+          start_time?: string | null
+          status?: string
+          title?: string
+          trip_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_itinerary_segments_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trip_key_dates: {
         Row: {
           date: string
@@ -1460,7 +2102,7 @@ export type Database = {
           id: string
           title: string
           trip_id: string
-          type: 'departure' | 'arrival' | 'payment_due' | 'deadline' | 'event' | 'other'
+          type: string
         }
         Insert: {
           date: string
@@ -1468,7 +2110,7 @@ export type Database = {
           id?: string
           title: string
           trip_id: string
-          type?: 'departure' | 'arrival' | 'payment_due' | 'deadline' | 'event' | 'other'
+          type?: string
         }
         Update: {
           date?: string
@@ -1488,164 +2130,26 @@ export type Database = {
           },
         ]
       }
-      notifications: {
-        Row: {
-          id: string;
-          user_id: string;
-          title: string;
-          message: string;
-          type: string;
-          link: string | null;
-          is_read: boolean;
-          created_at: string;
-          read_at: string | null;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          title: string;
-          message: string;
-          type: string;
-          link?: string | null;
-          is_read?: boolean;
-          created_at?: string;
-          read_at?: string | null;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          title?: string;
-          message?: string;
-          type?: string;
-          link?: string | null;
-          is_read?: boolean;
-          created_at?: string;
-          read_at?: string | null;
-        };
-        Relationships: [];
-      };
-      notification_preferences: {
-        Row: {
-          id: string;
-          user_id: string;
-          trip_updates: string;
-          payment_reminders: string;
-          award_voting: string;
-          new_gallery_photos: string;
-          new_comments: string;
-          system_announcements: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          trip_updates?: string;
-          payment_reminders?: string;
-          award_voting?: string;
-          new_gallery_photos?: string;
-          new_comments?: string;
-          system_announcements?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          trip_updates?: string;
-          payment_reminders?: string;
-          award_voting?: string;
-          new_gallery_photos?: string;
-          new_comments?: string;
-          system_announcements?: string;
-        };
-        Relationships: [];
-      };
-      email_templates: {
-        Row: {
-          id: string;
-          name: string;
-          slug: string;
-          subject: string;
-          body: string;
-          variables: string[];
-          is_default: boolean;
-          updated_by: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          name: string;
-          slug: string;
-          subject: string;
-          body: string;
-          variables?: string[];
-          is_default?: boolean;
-          updated_by: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          name?: string;
-          slug?: string;
-          subject?: string;
-          body?: string;
-          variables?: string[];
-          is_default?: boolean;
-          updated_by?: string;
-          updated_at?: string;
-        };
-        Relationships: [];
-      };
-      trip_payment_settings: {
-        Row: {
-          id: string; trip_id: string; flights_cost_aud: number;
-          show_payment_options: boolean; monthly_option_title: string;
-          monthly_option_amount_label: string | null; monthly_option_description: string | null;
-          quarterly_option_title: string; quarterly_option_amount_label: string | null;
-          quarterly_option_description: string | null; show_bank_details: boolean;
-          bank_account_name: string | null; bank_bsb: string | null;
-          bank_account_number: string | null; bank_payid: string | null;
-          bank_notes: string | null; created_at: string; updated_at: string;
-        };
-        Insert: {
-          id?: string; trip_id: string; flights_cost_aud?: number;
-          show_payment_options?: boolean; monthly_option_title?: string;
-          monthly_option_amount_label?: string | null; monthly_option_description?: string | null;
-          quarterly_option_title?: string; quarterly_option_amount_label?: string | null;
-          quarterly_option_description?: string | null; show_bank_details?: boolean;
-          bank_account_name?: string | null; bank_bsb?: string | null;
-          bank_account_number?: string | null; bank_payid?: string | null;
-          bank_notes?: string | null; created_at?: string; updated_at?: string;
-        };
-        Update: {
-          id?: string; trip_id?: string; flights_cost_aud?: number;
-          show_payment_options?: boolean; monthly_option_title?: string;
-          monthly_option_amount_label?: string | null; monthly_option_description?: string | null;
-          quarterly_option_title?: string; quarterly_option_amount_label?: string | null;
-          quarterly_option_description?: string | null; show_bank_details?: boolean;
-          bank_account_name?: string | null; bank_bsb?: string | null;
-          bank_account_number?: string | null; bank_payid?: string | null;
-          bank_notes?: string | null; updated_at?: string;
-        };
-        Relationships: [{ foreignKeyName: 'trip_payment_settings_trip_id_fkey'; columns: ['trip_id']; isOneToOne: true; referencedRelation: 'trips'; referencedColumns: ['id'] }];
-      };
       trip_members: {
         Row: {
           id: string
           joined_at: string | null
           trip_id: string
-          trip_role: 'captain' | 'kitty_man' | 'organiser' | 'member'
+          trip_role: string
           user_id: string
         }
         Insert: {
           id?: string
           joined_at?: string | null
           trip_id: string
-          trip_role?: 'captain' | 'kitty_man' | 'organiser' | 'member'
+          trip_role?: string
           user_id: string
         }
         Update: {
           id?: string
           joined_at?: string | null
           trip_id?: string
-          trip_role?: 'captain' | 'kitty_man' | 'organiser' | 'member'
+          trip_role?: string
           user_id?: string
         }
         Relationships: [
@@ -1730,7 +2234,7 @@ export type Database = {
           name: string
           slug: string
           start_date: string
-          status: 'upcoming' | 'active' | 'completed' | 'cancelled'
+          status: string
           updated_at: string | null
         }
         Insert: {
@@ -1752,7 +2256,7 @@ export type Database = {
           name: string
           slug: string
           start_date: string
-          status?: 'upcoming' | 'active' | 'completed' | 'cancelled'
+          status?: string
           updated_at?: string | null
         }
         Update: {
@@ -1894,6 +2398,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_user_role: { Args: never; Returns: string }
       is_admin: { Args: { user_id: string }; Returns: boolean }
       is_super_admin: { Args: { user_id: string }; Returns: boolean }
       is_trip_member: {
@@ -1918,12 +2423,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1947,11 +2452,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1972,11 +2477,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1997,11 +2502,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2014,11 +2519,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

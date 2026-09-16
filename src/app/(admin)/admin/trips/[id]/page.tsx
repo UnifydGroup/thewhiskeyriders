@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, TextArea } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
-import { ArrowLeft, SaveIcon, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, SaveIcon, Trash2, Users, BookOpen } from 'lucide-react';
 
 function toDateTimeLocalValue(value: string | null | undefined): string {
   if (!value) return '';
@@ -232,6 +232,12 @@ export default function TripEditorPage() {
           <Button variant="secondary" className="inline-flex items-center gap-2">
             <Users size={16} />
             Manage Members
+          </Button>
+        </Link>
+        <Link href={`/admin/trips/${tripId}/bible`}>
+          <Button variant="primary" className="inline-flex items-center gap-2">
+            <BookOpen size={16} />
+            Trip Bible
           </Button>
         </Link>
         <Link href={`/admin/trips/${tripId}/itinerary`}>
