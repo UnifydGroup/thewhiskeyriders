@@ -9,10 +9,11 @@ import {
   RefreshCw, Upload, ArrowDownCircle, ArrowUpCircle, AlertTriangle,
   BookOpen, ChevronDown, ChevronUp, Info, Wallet, Repeat, ArrowLeftRight,
   Building2, Landmark, Search, Download, Users, CheckSquare, Square,
-  Plane, Shield, FileText, GripVertical, Bell, ChevronRight, Send,
+  Plane, Shield, FileText, GripVertical, Bell, ChevronRight, Send, Paperclip,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
+import ExpenseReceiptManager from '@/components/budget/ExpenseReceiptManager';
 import BudgetBuilder from '@/components/budget/BudgetBuilder';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
@@ -31,6 +32,7 @@ interface Expense {
   paid_by_type: string; paid_by_label: string | null;
   payer: { id: string; full_name: string | null; nickname: string | null } | null;
   notes: string | null; source: string; reconciled: boolean;
+  receipts?: { id: string; file_name: string; file_type: string; created_at: string }[];
 }
 interface LedgerRow { id: string; type: 'income' | 'expense'; sub_type: string; date: string; description: string; amount_aud: number; running_balance: number; reconciled: boolean; source: string; category?: unknown; notes?: string | null; currency?: string; amount_original?: number; }
 interface MemberPayment { id: string; member_id: string; payment_date: string; amount: number; payment_method: string | null; notes: string | null; profiles?: { full_name: string | null; nickname: string | null }; }
@@ -5189,6 +5191,14 @@ export default function AdminBudgetPage() {
                   <label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes (optional)</label>
                   <textarea rows={2} value={expForm.notes} onChange={(e) => handleExpFormChange('notes', e.target.value)} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" />
                 </div>
+
+                <div className="md:col-span-2 border-t border-brand-tan/10 pt-4">
+                  {editingExp ? (
+                    <ExpenseReceiptManager tripId={tripId} expenseId={editingExp.id} />
+                  ) : (
+                    <p className="text-xs text-brand-cream/40">Save the expense first, then attach receipts.</p>
+                  )}
+                </div>
               </div>
               <div className="flex justify-end gap-3 mt-4">
                 <button onClick={() => setShowExpForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
@@ -5252,7 +5262,15 @@ export default function AdminBudgetPage() {
                         <tr key={exp.id} className={`hover:bg-brand-tan/5 ${!exp.reconciled && exp.source === 'manual' ? 'border-l-2 border-amber-500/40' : ''}`}>
                           <td className="px-3 py-3 text-brand-cream/60 whitespace-nowrap">{fmtShort(exp.expense_date)}</td>
                           <td className="px-3 py-3 text-brand-cream max-w-[160px]">
-                            <p className="truncate font-medium">{exp.description}</p>
+                            <p className="truncate font-medium flex items-center gap-1.5">
+                              {exp.description}
+                              {!!exp.receipts?.length && (
+                                <span title={`${exp.receipts.length} receipt${exp.receipts.length === 1 ? '' : 's'} attached`} className="inline-flex items-center gap-0.5 text-brand-tan/70 shrink-0">
+                                  <Paperclip className="w-3 h-3" />
+                                  <span className="text-[10px]">{exp.receipts.length}</span>
+                                </span>
+                              )}
+                            </p>
                             {exp.notes && <p className="text-xs text-brand-cream/40 truncate">{getTransactionNoteText(exp.notes)}</p>}
                           </td>
                           <td className="px-3 py-3">

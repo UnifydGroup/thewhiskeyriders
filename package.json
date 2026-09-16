@@ -5,13 +5,14 @@
   "scripts": {
     "migrations:apply": "node scripts/apply-supabase-migrations.mjs",
     "predev": "npm run migrations:apply",
-    "dev": "next dev -p 4000",
+    "dev": "next dev -p 4000 -H 0.0.0.0",
     "prebuild": "npm run migrations:apply",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
     "@supabase/ssr": "^0.10.0",

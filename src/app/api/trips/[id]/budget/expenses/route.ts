@@ -16,7 +16,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       .select(`
         *,
         category:trip_budget_categories(id, name, color),
-        payer:profiles!trip_expenses_paid_by_fkey(id, full_name, nickname)
+        payer:profiles!trip_expenses_paid_by_fkey(id, full_name, nickname),
+        receipts:trip_expense_receipts(id, file_name, file_type, created_at)
       `)
       .eq('trip_id', tripId)
       .order('expense_date', { ascending: false })
