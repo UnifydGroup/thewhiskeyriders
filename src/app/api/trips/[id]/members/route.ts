@@ -9,6 +9,7 @@ import {
   getIpAddress,
   supabase,
   isUserTripAdmin,
+  isUserTripMember,
   getCurrentUser,
   getUserProfile,
 } from '@/lib/api/helpers';
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest, props: { params: Params }) {
     const params = await props.params;
     const tripId = params.id;
 
-    const { authenticated } = await verifyRole(request, [
+    const { authenticated, user, profile } = await verifyRole(request, [
       'member',
       'trip_admin',
       'admin',
@@ -30,6 +31,14 @@ export async function GET(request: NextRequest, props: { params: Params }) {
 
     if (!authenticated) {
       return errorResponse(ApiErrors.UNAUTHORIZED);
+    }
+
+    const isGlobalAdmin = ['admin', 'super_admin', 'trip_admin'].includes(profile?.role ?? '');
+    if (!isGlobalAdmin) {
+      const isMember = await isUserTripMember(user!.id, tripId);
+      if (!isMember) {
+        return errorResponse(ApiErrors.FORBIDDEN);
+      }
     }
 
     const { data: members, error } = await supabase
