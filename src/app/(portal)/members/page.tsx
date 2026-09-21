@@ -83,10 +83,19 @@ const SORT_OPTIONS = [
   { value: 'adventure-score', label: 'Adventure score' },
   { value: 'name', label: 'Name' },
   { value: 'trip-count', label: 'Number of trips' },
+  { value: 'badge-count', label: 'Number of badges' },
 ] as const;
+
+const BADGE_TYPE_OPTIONS: { value: 'all' | BadgeType; label: string }[] = [
+  { value: 'all', label: 'All badge types' },
+  { value: 'achievement', label: 'Achievement' },
+  { value: 'trip', label: 'Trip' },
+  { value: 'role', label: 'Role' },
+];
 
 type MemberSort = (typeof SORT_OPTIONS)[number]['value'];
 type SortDirection = 'asc' | 'desc';
+type BadgeTypeFilter = 'all' | BadgeType;
 
 function getDisplayName(profile: MemberProfile): string {
   const nickname = profile.nickname?.trim();
@@ -123,6 +132,7 @@ export default function MembersPage() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<MemberSort>('adventure-score');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [badgeTypeFilter, setBadgeTypeFilter] = useState<BadgeTypeFilter>('all');
 
   useEffect(() => {
     const loadMembers = async () => {
@@ -220,9 +230,17 @@ export default function MembersPage() {
   const filteredMembers = useMemo(() => {
     const searchText = search.trim().toLowerCase();
     const directionFactor = sortDirection === 'asc' ? 1 : -1;
+    const badgeCountForMember = (member: MemberSummary) =>
+      badgeTypeFilter === 'all'
+        ? member.badges.length
+        : member.badges.filter((badge) => badge.badge_type === badgeTypeFilter).length;
 
     return members
       .filter((member) => {
+        if (badgeTypeFilter !== 'all' && !member.badges.some((badge) => badge.badge_type === badgeTypeFilter)) {
+          return false;
+        }
+
         if (!searchText) return true;
 
         const searchable = [
@@ -245,6 +263,8 @@ export default function MembersPage() {
           primaryComparison = getDisplayName(a.profile).localeCompare(getDisplayName(b.profile)) * directionFactor;
         } else if (sortBy === 'trip-count') {
           primaryComparison = (a.trips.length - b.trips.length) * directionFactor;
+        } else if (sortBy === 'badge-count') {
+          primaryComparison = (badgeCountForMember(a) - badgeCountForMember(b)) * directionFactor;
         } else {
           primaryComparison = (a.adventureScore - b.adventureScore) * directionFactor;
         }
@@ -254,7 +274,7 @@ export default function MembersPage() {
         if (b.adventureScore !== a.adventureScore) return b.adventureScore - a.adventureScore;
         return a.displayName.localeCompare(b.displayName);
       });
-  }, [members, search, sortBy, sortDirection]);
+  }, [members, search, sortBy, sortDirection, badgeTypeFilter]);
 
   const stats = useMemo(() => {
     const memberCount = members.length;
@@ -331,7 +351,24 @@ export default function MembersPage() {
               className="w-full rounded-lg border border-brand-brown/25 bg-brand-black/45 py-2.5 pl-10 pr-4 text-sm text-brand-cream placeholder:text-brand-cream/45 focus:border-brand-brown focus:outline-none focus:ring-2 focus:ring-brand-brown/20"
             />
           </div>
-          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto">
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto">
+            <div>
+              <label htmlFor="members-badge-type" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
+                Badge type
+              </label>
+              <select
+                id="members-badge-type"
+                value={badgeTypeFilter}
+                onChange={(event) => setBadgeTypeFilter(event.target.value as BadgeTypeFilter)}
+                className="w-full rounded-lg border border-brand-brown/25 bg-brand-black/45 px-3 py-2.5 text-sm text-brand-cream focus:border-brand-brown focus:outline-none focus:ring-2 focus:ring-brand-brown/20"
+              >
+                {BADGE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} className="bg-brand-dark-grey text-brand-cream">
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label htmlFor="members-sort" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
                 Sort by
