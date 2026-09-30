@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         return errorResponse(ApiErrors.BAD_REQUEST, 'Unsupported file type — only images and PDFs are allowed');
       }
 
-      const signedUpload = await createSignedReceiptUpload(tripId, expId, fileName);
+      const signedUpload = await createSignedReceiptUpload(tripId, expId, fileName, resolvedFileType);
       return successResponse({
         bucket: signedUpload.bucket,
         storage_path: signedUpload.storagePath,

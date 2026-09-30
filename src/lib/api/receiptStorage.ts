@@ -18,6 +18,18 @@ const EXTENSION_MIME_MAP: Record<string, string> = {
   heic: 'image/heic',
 };
 
+// The 'photos' bucket is configured in Supabase Storage with an images-only
+// allowed_mime_types list (it's the trip-photo-gallery bucket). Supabase only
+// enforces that restriction at actual upload time — NOT when the signed upload
+// URL is created — so a non-image file (e.g. a PDF receipt) was always handed
+// a signed URL for 'photos' first and only failed later, at the actual PUT,
+// with "mime type application/pdf is not supported". Route non-images straight
+// past it instead.
+function bucketOrderFor(mimeType: string): string[] {
+  if (mimeType.toLowerCase().startsWith('image/')) return RECEIPT_STORAGE_BUCKETS;
+  return RECEIPT_STORAGE_BUCKETS.filter((bucket) => bucket !== 'photos');
+}
+
 export type StorageReference = { bucket: string; path: string };
 
 function uniqueValues(values: string[]): string[] {
@@ -99,11 +111,16 @@ export function isValidReceiptStoragePath(storagePath: string, tripId: string, e
   return storagePath.startsWith(`${tripId}/expenses/${expenseId}/receipts/`);
 }
 
-export async function createSignedReceiptUpload(tripId: string, expenseId: string, fileName: string) {
+export async function createSignedReceiptUpload(
+  tripId: string,
+  expenseId: string,
+  fileName: string,
+  mimeType: string
+) {
   const storagePath = createReceiptStoragePath(tripId, expenseId, fileName);
   let lastError = 'Failed to create signed upload URL';
 
-  for (const bucket of RECEIPT_STORAGE_BUCKETS) {
+  for (const bucket of bucketOrderFor(mimeType)) {
     const { data: signedUpload, error } = await supabase.storage
       .from(bucket)
       .createSignedUploadUrl(storagePath);
