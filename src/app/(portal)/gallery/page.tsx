@@ -8,6 +8,10 @@ import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import type { Trip } from '@/lib/types/database';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
+import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
+import { cn } from '@/lib/utils';
 
 interface TripWithCover extends Trip {
   coverPhotoUrl?: string | null;
@@ -26,6 +30,7 @@ export default function GalleryPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<TripTypeFilterValue>('all');
 
   useEffect(() => {
     const loadTrips = async () => {
@@ -114,9 +119,11 @@ export default function GalleryPage() {
         .toLowerCase();
       const matchesQuery = !loweredQuery || searchableContent.includes(loweredQuery);
 
-      return matchesCountry && matchesQuery;
+      return matchesCountry && matchesQuery && matchesTripTypeFilter(trip, typeFilter);
     });
-  }, [countryFilter, searchQuery, trips]);
+  }, [countryFilter, searchQuery, trips, typeFilter]);
+
+  const typeCounts = useMemo(() => countByTripType(trips), [trips]);
 
   if (loading) {
     return (
@@ -140,6 +147,9 @@ export default function GalleryPage() {
       )}
 
       <div className="space-y-3">
+        {typeCounts.tweener > 0 && (
+          <TripTypeFilter value={typeFilter} onChange={setTypeFilter} counts={typeCounts} />
+        )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-2">
             <label className="text-xs uppercase tracking-wider text-brand-cream/60 mb-1 block">
@@ -173,7 +183,12 @@ export default function GalleryPage() {
         </div>
 
         <p className="text-sm text-brand-cream/70">
-          Showing {filteredTrips.length} of {trips.length} trip{trips.length !== 1 ? 's' : ''}
+          Showing {filteredTrips.length} of {trips.length} galler{trips.length !== 1 ? 'ies' : 'y'}
+          {typeCounts.tweener > 0 && (
+            <span className="text-brand-cream/50">
+              {' '}· {typeCounts.trip} official trip{typeCounts.trip !== 1 ? 's' : ''}, {typeCounts.tweener} tweener{typeCounts.tweener !== 1 ? 's' : ''}
+            </span>
+          )}
         </p>
       </div>
 
@@ -181,8 +196,13 @@ export default function GalleryPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTrips.map((trip) => (
             <Link key={trip.id} href={`/gallery/${trip.slug}`}>
-              <Card hoverable className="h-full">
-                <div className="h-40 bg-gradient-to-br from-brand-brown to-brand-tan relative overflow-hidden rounded-t-lg">
+              <Card hoverable className={cn('h-full', isTweener(trip) && 'border-dashed border-brand-tan/50')}>
+                <div
+                  className={cn(
+                    'h-40 bg-gradient-to-br relative overflow-hidden rounded-t-lg',
+                    isTweener(trip) ? 'from-brand-tan/80 to-brand-dark-grey' : 'from-brand-brown to-brand-tan'
+                  )}
+                >
                   {trip.coverPhotoUrl &&
                     (trip.coverMediaType === 'video' ? (
                       <video
@@ -198,6 +218,9 @@ export default function GalleryPage() {
                       <img src={trip.coverPhotoUrl} alt={trip.name} className="w-full h-full object-cover" />
                     ))}
                   <div className="absolute inset-0 bg-brand-black/40" />
+                  <div className="absolute top-3 left-3">
+                    <TripTypeBadge trip={trip} size="sm" className="bg-brand-black/70" />
+                  </div>
                 </div>
                 <CardHeader className="pt-4">
                   <CardTitle className="line-clamp-1">{trip.name}</CardTitle>
@@ -213,7 +236,9 @@ export default function GalleryPage() {
       ) : !errorMessage ? (
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-brand-cream/70 mb-4">No trips match your search</p>
+            <p className="text-brand-cream/70 mb-4">
+              {typeFilter === 'tweener' ? 'No tweeners match your search' : 'No trips match your search'}
+            </p>
             <p className="text-sm text-brand-cream/50">
               Try a different search query or clear the country filter
             </p>

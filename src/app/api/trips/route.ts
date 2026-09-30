@@ -11,6 +11,7 @@ import {
   supabase,
   generateSlug,
 } from '@/lib/api/helpers';
+import { parseTripType } from '@/lib/trip-type';
 
 // GET /api/trips - List all trips with filters
 export async function GET(request: NextRequest) {
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
     const { limit, offset } = getPagination(request);
     const status = request.nextUrl.searchParams.get('status');
     const country = request.nextUrl.searchParams.get('country');
+    const tripType = parseTripType(request.nextUrl.searchParams.get('trip_type'));
 
     let query = supabase.from('trips').select('*', { count: 'exact' });
 
@@ -38,6 +40,10 @@ export async function GET(request: NextRequest) {
 
     if (country) {
       query = query.eq('country', country);
+    }
+
+    if (tripType) {
+      query = query.eq('trip_type', tripType);
     }
 
     // Non-admins don't see cancelled trips
@@ -121,6 +127,7 @@ export async function POST(request: NextRequest) {
       itinerary: body.itinerary || null,
       cover_image_url: body.cover_image_url || null,
       status: body.status || 'upcoming',
+      trip_type: parseTripType(body.trip_type) ?? 'trip',
       max_members: body.max_members || null,
       created_by: user!.id,
     };

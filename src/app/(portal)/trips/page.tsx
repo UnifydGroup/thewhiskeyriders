@@ -11,6 +11,10 @@ import Link from 'next/link';
 import { Clock3, MapPin, Users } from 'lucide-react';
 import type { Trip } from '@/lib/types/database';
 import { WorldMap } from '@/components/map/WorldMap';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
+import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
+import { cn } from '@/lib/utils';
 
 type NextTripTicker = {
   trip: Trip;
@@ -44,6 +48,7 @@ export default function TripsPage() {
   const [myTripIds, setMyTripIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [showAllTrips, setShowAllTrips] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<TripTypeFilterValue>('all');
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const loadTripsAndMemberships = async () => {
@@ -122,9 +127,11 @@ export default function TripsPage() {
       </div>
     );
   }
-  // Filter trips based on membership
-  const myTrips = trips.filter((t) => myTripIds.has(t.id));
-  const tripsNotOn = trips.filter((t) => !myTripIds.has(t.id));
+  // Filter trips based on type (official vs tweener) and membership
+  const typeCounts = countByTripType(trips);
+  const visibleTrips = trips.filter((t) => matchesTripTypeFilter(t, typeFilter));
+  const myTrips = visibleTrips.filter((t) => myTripIds.has(t.id));
+  const tripsNotOn = visibleTrips.filter((t) => !myTripIds.has(t.id));
 
   const upcomingTrips = myTrips.filter((t) => t.status === 'upcoming');
   const activeTrips = myTrips.filter((t) => t.status === 'active');
@@ -138,8 +145,12 @@ export default function TripsPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl sm:text-4xl font-bold text-brand-cream mb-2">Adventures</h1>
-        <p className="text-brand-cream/70">Your motorcycle adventures</p>
+        <p className="text-brand-cream/70">Your motorcycle adventures — official trips and the tweeners in between</p>
       </div>
+
+      {typeCounts.tweener > 0 && (
+        <TripTypeFilter value={typeFilter} onChange={setTypeFilter} counts={typeCounts} />
+      )}
 
       {/* Next Trip Ticker */}
       {nextTripTicker && tickerTimeLeft && (
@@ -148,9 +159,10 @@ export default function TripsPage() {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
               <span className="inline-flex items-center gap-1.5 text-brand-tan font-semibold uppercase tracking-wide text-xs">
                 <Clock3 className="w-3.5 h-3.5" />
-                Next Trip
+                {isTweener(nextTripTicker.trip) ? 'Next Tweener' : 'Next Trip'}
               </span>
               <span className="text-brand-cream font-semibold">{nextTripTicker.trip.name}</span>
+              <TripTypeBadge trip={nextTripTicker.trip} />
               <span className="text-brand-cream/40 hidden sm:inline">•</span>
               <span className="text-brand-cream/70 text-xs sm:text-sm">
                 {formatDate(nextTripTicker.targetDate, 'MMM d, yyyy h:mm a')}
@@ -172,7 +184,7 @@ export default function TripsPage() {
       {/* World Map — shows all trips */}
       <div className="rounded-2xl border border-brand-brown/20 bg-brand-dark-grey/40 p-4 sm:p-6">
         <h2 className="text-lg font-semibold text-brand-cream mb-4">Ride Map</h2>
-        <WorldMap trips={trips} showStats />
+        <WorldMap trips={visibleTrips} showStats />
       </div>
       {/* Your Trips Section */}
       {myTrips.length > 0 ? (
@@ -214,7 +226,9 @@ export default function TripsPage() {
       ) : (
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-brand-cream/70 mb-4">You haven't been on any trips yet.</p>
+            <p className="text-brand-cream/70 mb-4">
+              {typeFilter === 'tweener' ? "You haven't been on any tweeners yet." : "You haven't been on any trips yet."}
+            </p>
             <p className="text-sm text-brand-cream/50">Check out available trips below!</p>
           </CardContent>
         </Card>
@@ -278,9 +292,17 @@ export default function TripsPage() {
 function TripCard({ trip }: { trip: Trip }) {
   return (
     <Link href={`/trips/${trip.slug}`}>
-      <Card hoverable className="h-full flex flex-col">
+      <Card
+        hoverable
+        className={cn('h-full flex flex-col', isTweener(trip) && 'border-dashed border-brand-tan/50')}
+      >
         {/* Cover image or gradient */}
-        <div className="h-48 bg-gradient-to-br from-brand-brown to-brand-tan relative overflow-hidden rounded-t-lg">
+        <div
+          className={cn(
+            'relative overflow-hidden rounded-t-lg bg-gradient-to-br',
+            isTweener(trip) ? 'h-36 from-brand-tan/80 to-brand-dark-grey' : 'h-48 from-brand-brown to-brand-tan'
+          )}
+        >
           {trip.cover_image_url && (
             <img
               src={trip.cover_image_url}
@@ -289,8 +311,9 @@ function TripCard({ trip }: { trip: Trip }) {
             />
           )}
           <div className="absolute inset-0 bg-brand-black/40" />
-          <div className="absolute bottom-4 left-4 right-4">
+          <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center gap-2">
             <Badge variant="primary">{trip.status}</Badge>
+            <TripTypeBadge trip={trip} size="sm" className="bg-brand-black/70" />
           </div>
         </div>
         <CardHeader className="pt-4">

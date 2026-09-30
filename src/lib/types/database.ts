@@ -89,6 +89,8 @@ export interface FormResponseValue {
   created_at: string | null;
 }
 export type TripStatus = 'upcoming' | 'active' | 'completed' | 'cancelled';
+/** 'trip' = official Whiskey Riders trip; 'tweener' = shorter, smaller in-between ride. */
+export type TripType = 'trip' | 'tweener';
 export type TripRole = 'captain' | 'kitty_man' | 'organiser' | 'member';
 export type KeyDateType = 'departure' | 'arrival' | 'payment_due' | 'deadline' | 'event' | 'other';
 export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'waived';
@@ -152,6 +154,8 @@ export interface Trip {
   itinerary: string | null;
   cover_image_url: string | null;
   status: TripStatus;
+  /** Official trip or a tweener. Defaults to 'trip'. */
+  trip_type?: TripType | null;
   max_members: number | null;
   created_by: string | null;
   created_at: string | null;

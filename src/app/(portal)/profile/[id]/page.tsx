@@ -9,7 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
-import { formatDate } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { isTweener } from '@/lib/trip-type';
 import { Mail, MapPin, Phone, Route, Trophy, Users } from 'lucide-react';
 import type { BadgeType, Profile, Trip, TripRole } from '@/lib/types/database';
 import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
@@ -22,7 +24,7 @@ import type { NewsItem } from '@/lib/news/types';
 type MemberTripRecord = {
   trip_role: TripRole;
   joined_at: string | null;
-  trips: Pick<Trip, 'id' | 'name' | 'destination' | 'country' | 'country_code' | 'slug' | 'status' | 'start_date' | 'end_date' | 'latitude' | 'longitude' | 'max_members' | 'cover_image_url' | 'description' | 'itinerary' | 'created_by' | 'created_at' | 'updated_at'> | null;
+  trips: Pick<Trip, 'id' | 'name' | 'destination' | 'country' | 'country_code' | 'slug' | 'status' | 'trip_type' | 'start_date' | 'end_date' | 'latitude' | 'longitude' | 'max_members' | 'cover_image_url' | 'description' | 'itinerary' | 'created_by' | 'created_at' | 'updated_at'> | null;
 };
 
 type MemberBadgeRecord = {
@@ -189,9 +191,14 @@ export default function MemberProfilePage() {
   const displayName = getDisplayName(profile);
   const nickname = profile.nickname?.trim() || 'No nickname';
   const uniqueCountries = new Set(memberTrips.map((trip) => trip.country)).size;
-  const completedTrips = memberTrips.filter((trip) => trip.status === 'completed').length;
+  const completedAll = memberTrips.filter((trip) => trip.status === 'completed');
+  const completedTrips = completedAll.filter((trip) => !isTweener(trip)).length;
+  const completedTweeners = completedAll.filter((trip) => isTweener(trip)).length;
+  const officialTripCount = memberTrips.filter((trip) => !isTweener(trip)).length;
+  const tweenerCount = memberTrips.length - officialTripCount;
   const adventureScore = calculateAdventureScore({
     completedTrips,
+    completedTweeners,
     badgeCount: memberBadges.length,
     uniqueCountries,
   });
@@ -237,7 +244,14 @@ export default function MemberProfilePage() {
             <Card className="border-brand-brown/25 bg-brand-black/40 p-3">
               <CardContent className="p-0">
                 <p className="text-[11px] uppercase tracking-wider text-brand-cream/60">Trips</p>
-                <p className="text-xl font-bold text-brand-cream">{memberTrips.length}</p>
+                <p className="text-xl font-bold text-brand-cream">
+                  {officialTripCount}
+                  {tweenerCount > 0 && (
+                    <span className="ml-1.5 text-xs font-semibold text-brand-tan">
+                      +{tweenerCount} tweener{tweenerCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </p>
               </CardContent>
             </Card>
             <Card className="border-brand-brown/25 bg-brand-black/40 p-3">
@@ -292,6 +306,7 @@ export default function MemberProfilePage() {
             <p className="text-sm text-brand-cream/70">{ADVENTURE_SCORE_EXPLANATION}</p>
             <div className="space-y-2 text-sm text-brand-cream/80">
               <p>Completed Trips: {completedTrips}</p>
+              <p>Completed Tweeners: {completedTweeners}</p>
               <p>Badges: {memberBadges.length}</p>
               <p>Countries Visited: {uniqueCountries}</p>
             </div>
@@ -417,9 +432,12 @@ export default function MemberProfilePage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {memberTrips.map((trip) => (
               <Link key={trip.id} href={`/trips/${trip.slug}`}>
-                <Card hoverable className="h-full">
+                <Card hoverable className={cn('h-full', isTweener(trip) && 'border-dashed border-brand-tan/50')}>
                   <CardContent className="space-y-2 pt-6">
-                    <p className="text-lg font-semibold text-brand-cream">{trip.name}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-lg font-semibold text-brand-cream">{trip.name}</p>
+                      <TripTypeBadge trip={trip} />
+                    </div>
                     <p className="text-sm text-brand-cream/70">{trip.destination}, {trip.country}</p>
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline">{trip.trip_role}</Badge>

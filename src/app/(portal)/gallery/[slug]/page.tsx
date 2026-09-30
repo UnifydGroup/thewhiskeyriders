@@ -9,6 +9,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import type { Trip } from '@/lib/types/database';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import PhotoGrid from '@/components/photos/PhotoGrid';
 import PhotoUploadDropzone from '@/components/photos/PhotoUploadDropzone';
 
@@ -206,7 +207,10 @@ export default function TripGalleryPage() {
         >
           ← Back to Gallery
         </Link>
-        <h1 className="text-4xl font-bold text-brand-cream mb-2">{trip.name} Gallery</h1>
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <h1 className="text-4xl font-bold text-brand-cream">{trip.name} Gallery</h1>
+          <TripTypeBadge trip={trip} size="sm" />
+        </div>
         <p className="text-brand-cream/70">
           {trip.destination}, {trip.country}
         </p>

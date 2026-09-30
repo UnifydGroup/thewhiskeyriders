@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, CalendarDays, DollarSign, FolderOpen } from 'lucide-react';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { isTweener } from '@/lib/trip-type';
 
 interface Trip {
   id: string;
   name: string;
   start_date: string | null;
+  trip_type?: string | null;
 }
 
 export default function FinancialManagerLandingPage() {
@@ -32,7 +35,7 @@ export default function FinancialManagerLandingPage() {
       try {
         const { data } = await supabase
           .from('trips')
-          .select('id, name, start_date');
+          .select('id, name, start_date, trip_type');
         const sorted = (data ?? []).sort((a, b) => {
           const aTime = a.start_date ? new Date(a.start_date).getTime() : 0;
           const bTime = b.start_date ? new Date(b.start_date).getTime() : 0;
@@ -104,7 +107,7 @@ export default function FinancialManagerLandingPage() {
           >
             <option value="">{loading ? 'Loading trips…' : '-- Select trip --'}</option>
             {trips.map((trip) => (
-              <option key={trip.id} value={trip.id}>{trip.name}</option>
+              <option key={trip.id} value={trip.id}>{trip.name}{isTweener(trip) ? ' · Tweener' : ''}</option>
             ))}
           </select>
 
@@ -135,7 +138,10 @@ export default function FinancialManagerLandingPage() {
               className="mb-2 flex w-full items-center justify-between rounded-lg border border-brand-tan/15 bg-brand-black/35 px-3 py-2 text-left transition-colors hover:border-brand-tan/35 hover:bg-brand-black/60"
             >
               <span>
-                <span className="block text-sm font-medium text-brand-cream">{trip.name}</span>
+                <span className="flex items-center gap-2 text-sm font-medium text-brand-cream">
+                  {trip.name}
+                  <TripTypeBadge trip={trip} />
+                </span>
                 <span className="text-xs text-brand-cream/50">{fmtDate(trip.start_date)}</span>
               </span>
               <FolderOpen className="h-4 w-4 text-brand-tan/70" />

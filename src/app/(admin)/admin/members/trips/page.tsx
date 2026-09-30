@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Bike, CheckCircle, AlertCircle, Save } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 
 export default function MemberTripsPage() {
   const supabase = createClient();
@@ -35,7 +36,7 @@ export default function MemberTripsPage() {
       // Load trips (newest first)
       const { data: tripsData } = await supabase
         .from('trips')
-        .select('id, name, start_date')
+        .select('id, name, start_date, trip_type')
         .order('start_date', { ascending: false });
       setTrips(tripsData || []);
 
@@ -204,7 +205,10 @@ export default function MemberTripsPage() {
               <th className="text-left py-3 px-4 text-brand-cream font-semibold">Member</th>
               {trips.map((trip) => (
                 <th key={trip.id} className="text-center py-3 px-4 text-brand-cream font-semibold text-sm">
-                  {trip.name}
+                  <div className="flex flex-col items-center gap-1">
+                    <span>{trip.name}</span>
+                    <TripTypeBadge trip={trip} />
+                  </div>
                 </th>
               ))}
             </tr>

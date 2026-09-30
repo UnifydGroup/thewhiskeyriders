@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { Award, Plus, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
+import { isTweener } from '@/lib/trip-type';
 
 type BadgeRecord = {
   id: string;
@@ -32,6 +33,7 @@ type TripRecord = {
   id: string;
   name: string;
   start_date: string | null;
+  trip_type?: string | null;
 };
 
 type UserBadgeRecord = {
@@ -72,7 +74,7 @@ export default function BadgeManagementPage() {
 
       const { data: tripsData } = await supabase
         .from('trips')
-        .select('id, name, start_date')
+        .select('id, name, start_date, trip_type')
         .order('start_date', { ascending: false });
       setTrips(tripsData || []);
 
@@ -346,7 +348,7 @@ export default function BadgeManagementPage() {
                 <option value="">Global / Not trip-specific</option>
                 {trips.map((trip) => (
                   <option key={trip.id} value={trip.id}>
-                    {trip.name}
+                    {trip.name}{isTweener(trip) ? ' · Tweener' : ''}
                   </option>
                 ))}
               </select>
@@ -380,7 +382,7 @@ export default function BadgeManagementPage() {
                 <option value="">Choose a trip...</option>
                 {trips.map((trip) => (
                   <option key={trip.id} value={trip.id}>
-                    {trip.name}
+                    {trip.name}{isTweener(trip) ? ' · Tweener' : ''}
                   </option>
                 ))}
               </select>

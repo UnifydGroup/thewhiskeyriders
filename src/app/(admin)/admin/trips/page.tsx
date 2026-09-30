@@ -7,11 +7,14 @@ import type { Trip } from '@/lib/types/database';
 import { PageHeader } from './PageHeader';
 import { TripsTable } from './TripsTable';
 import { TripsEmptyState } from './TripsEmptyState';
+import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
+import { countByTripType, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
 
 export default function AdminTripsPage() {
   const supabase = createClient();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [typeFilter, setTypeFilter] = useState<TripTypeFilterValue>('all');
 
   useEffect(() => {
     const loadTrips = async () => {
@@ -53,7 +56,17 @@ export default function AdminTripsPage() {
   return (
     <div className="space-y-8">
       <PageHeader />
-      {trips.length > 0 ? <TripsTable trips={trips} onDelete={handleDelete} /> : <TripsEmptyState />}
+      {trips.length > 0 ? (
+        <>
+          <TripTypeFilter value={typeFilter} onChange={setTypeFilter} counts={countByTripType(trips)} />
+          <TripsTable
+            trips={trips.filter((t) => matchesTripTypeFilter(t, typeFilter))}
+            onDelete={handleDelete}
+          />
+        </>
+      ) : (
+        <TripsEmptyState />
+      )}
     </div>
   );
 }

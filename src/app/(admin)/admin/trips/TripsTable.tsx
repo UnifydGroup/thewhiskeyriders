@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/Badge';
 import { formatDateShort } from '@/lib/utils';
 import type { Trip } from '@/lib/types/database';
 import { TripsActions } from './TripsActions';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 
 interface TripsTableProps {
   trips: Trip[];
@@ -18,6 +19,7 @@ export function TripsTable({ trips, onDelete }: TripsTableProps) {
             <thead>
               <tr className="border-b border-brand-brown/20">
                 <th className="text-left py-3 px-4 text-brand-cream font-semibold">Name</th>
+                <th className="text-left py-3 px-4 text-brand-cream font-semibold">Type</th>
                 <th className="text-left py-3 px-4 text-brand-cream font-semibold">Destination</th>
                 <th className="text-left py-3 px-4 text-brand-cream font-semibold">Dates</th>
                 <th className="text-left py-3 px-4 text-brand-cream font-semibold">Status</th>
@@ -32,6 +34,9 @@ export function TripsTable({ trips, onDelete }: TripsTableProps) {
                   className="border-b border-brand-brown/10 hover:bg-brand-dark-grey/50 transition-colors"
                 >
                   <td className="py-3 px-4 text-brand-cream font-medium">{trip.name}</td>
+                  <td className="py-3 px-4">
+                    <TripTypeBadge trip={trip} showOfficial />
+                  </td>
                   <td className="py-3 px-4 text-brand-cream/70">{trip.destination}</td>
                   <td className="py-3 px-4 text-brand-cream/70 text-xs">
                     {formatDateShort(trip.start_date)} - {formatDateShort(trip.end_date)}

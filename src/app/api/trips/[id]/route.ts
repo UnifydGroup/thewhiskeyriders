@@ -11,6 +11,7 @@ import {
   getUserProfile,
   getCurrentUser,
 } from '@/lib/api/helpers';
+import { parseTripType } from '@/lib/trip-type';
 
 type Params = Promise<{ id: string }>;
 
@@ -128,6 +129,13 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.itinerary !== undefined) updateData.itinerary = body.itinerary || null;
     if (body.cover_image_url !== undefined) updateData.cover_image_url = body.cover_image_url;
     if (body.status !== undefined) updateData.status = body.status;
+    if (body.trip_type !== undefined) {
+      const tripType = parseTripType(body.trip_type);
+      if (!tripType) {
+        return errorResponse(ApiErrors.BAD_REQUEST, "trip_type must be 'trip' or 'tweener'");
+      }
+      updateData.trip_type = tripType;
+    }
     if (body.max_members !== undefined) updateData.max_members = body.max_members;
 
     updateData.updated_at = new Date().toISOString();

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -45,7 +46,7 @@ async function getTrips() {
     
     const { data } = await supabase
       .from('trips')
-      .select('id, slug, name, destination, cover_image_url')
+      .select('id, slug, name, destination, cover_image_url, trip_type')
       .order('start_date', { ascending: false })
       .limit(12);
     
@@ -198,7 +199,8 @@ export default async function Home() {
       {trips.length > 0 && (
         <section className="py-20 px-4 sm:px-6 lg:px-8 bg-brand-black border-t border-brand-brown/20">
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-4xl font-bold text-center mb-12">Our Adventures</h2>
+            <h2 className="text-4xl font-bold text-center mb-3">Our Adventures</h2>
+            <p className="text-center text-brand-cream/60 mb-12">Official trips, plus the tweeners we squeeze in between.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {trips.map((trip) => (
                 <Link
@@ -216,6 +218,9 @@ export default async function Home() {
                       />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-brand-black via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity duration-300" />
+                    <div className="absolute top-3 left-3">
+                      <TripTypeBadge trip={trip} size="sm" className="bg-brand-black/70" />
+                    </div>
                   </div>
 
                   {/* Trip Info */}
