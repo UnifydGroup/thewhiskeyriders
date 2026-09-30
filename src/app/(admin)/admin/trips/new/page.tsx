@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -8,10 +8,13 @@ import { Button } from '@/components/ui/Button';
 import { Input, TextArea, Select } from '@/components/ui/Input';
 import { slugify } from '@/lib/utils';
 import Link from 'next/link';
+import { TripTypePicker } from '@/components/trip/TripTypePicker';
+import type { TripType } from '@/lib/types/database';
 export default function NewTripPage() {
   const router = useRouter();
   const supabase = createClient();
   const [formData, setFormData] = useState({
+    trip_type: 'trip' as TripType,
     name: '',
     destination: '',
     country: '',
@@ -28,6 +31,13 @@ export default function NewTripPage() {
     max_members: '',
   });
   const [isLoading, setIsLoading] = useState(false);
+  // Allow deep-linking straight into the tweener builder: /admin/trips/new?type=tweener
+  useEffect(() => {
+    const type = new URLSearchParams(window.location.search).get('type');
+    if (type === 'tweener') {
+      setFormData((prev) => ({ ...prev, trip_type: 'tweener' }));
+    }
+  }, []);
   const [error, setError] = useState('');
   const handleChange = (
     e: React.ChangeEvent<
@@ -71,6 +81,7 @@ export default function NewTripPage() {
           description: formData.description || null,
           itinerary: formData.itinerary || null,
           status: formData.status,
+          trip_type: formData.trip_type,
           max_members: formData.max_members ? parseInt(formData.max_members) : null,
           created_by: user.id,
         });
@@ -89,8 +100,14 @@ export default function NewTripPage() {
         <Link href="/admin/trips" className="text-brand-brown hover:text-brand-tan transition-colors mb-4 inline-block">
           ← Back to Trips
         </Link>
-        <h1 className="text-3xl font-bold text-brand-cream mb-2">Create New Trip</h1>
-        <p className="text-brand-cream/70">Add a new motorcycle adventure</p>
+        <h1 className="text-3xl font-bold text-brand-cream mb-2">
+          {formData.trip_type === 'tweener' ? 'Create New Tweener' : 'Create New Trip'}
+        </h1>
+        <p className="text-brand-cream/70">
+          {formData.trip_type === 'tweener'
+            ? 'A shorter in-between ride with a smaller crew'
+            : 'Add a new motorcycle adventure'}
+        </p>
       </div>
       {/* Form */}
       <Card>
@@ -104,17 +121,27 @@ export default function NewTripPage() {
                 {error}
               </div>
             )}
+            <div>
+              <label className="block text-sm font-medium text-brand-cream mb-2">
+                Type *
+              </label>
+              <TripTypePicker
+                value={formData.trip_type}
+                onChange={(trip_type) => setFormData((prev) => ({ ...prev, trip_type }))}
+                disabled={isLoading}
+              />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-brand-cream mb-2">
-                  Trip Name *
+                  {formData.trip_type === 'tweener' ? 'Tweener Name *' : 'Trip Name *'}
                 </label>
                 <Input
                   type="text"
                   name="name"
                   value={formData.name}
                   onChange={handleChange}
-                  placeholder="e.g., Morocco Desert Run 2024"
+                  placeholder={formData.trip_type === 'tweener' ? 'e.g., High Country Tweener 2026' : 'e.g., Morocco Desert Run 2024'}
                   required
                   disabled={isLoading}
                 />
@@ -336,7 +363,7 @@ export default function NewTripPage() {
                 size="md"
                 isLoading={isLoading}
               >
-                Create Trip
+                {formData.trip_type === 'tweener' ? 'Create Tweener' : 'Create Trip'}
               </Button>
               <Link href="/admin/trips">
                 <Button type="button" variant="ghost" size="md">

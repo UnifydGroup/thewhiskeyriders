@@ -10,6 +10,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Input } from '@/components/ui/Input';
 import PhotoGrid from '@/components/photos/PhotoGrid';
 import type { Gallery, Trip } from '@/lib/types/database';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { isTweener } from '@/lib/trip-type';
 
 interface GalleryWithTrip extends Gallery {
   trip?: Trip;
@@ -127,6 +129,12 @@ export default function GalleriesPage() {
   const filteredGalleries = useMemo(() => {
     if (tripFilter === 'all') {
       return galleries;
+    }
+    if (tripFilter === 'type:tweener') {
+      return galleries.filter((gallery) => isTweener(gallery.trip));
+    }
+    if (tripFilter === 'type:trip') {
+      return galleries.filter((gallery) => gallery.trip && !isTweener(gallery.trip));
     }
     return galleries.filter((gallery) => gallery.trip_id === tripFilter);
   }, [galleries, tripFilter]);
@@ -1265,7 +1273,7 @@ export default function GalleriesPage() {
                 <option value="">Select a trip</option>
                 {trips.map((trip) => (
                   <option key={trip.id} value={trip.id}>
-                    {trip.name} ({trip.destination})
+                    {trip.name} ({trip.destination}){isTweener(trip) ? ' · Tweener' : ''}
                   </option>
                 ))}
               </select>
@@ -1311,10 +1319,12 @@ export default function GalleriesPage() {
               onChange={(event) => setTripFilter(event.target.value)}
               className="w-full px-3 py-2 bg-brand-dark-grey border border-brand-brown/30 rounded text-brand-cream focus:outline-none focus:border-brand-brown"
             >
-              <option value="all">All Trips</option>
+              <option value="all">All Trips &amp; Tweeners</option>
+              <option value="type:trip">All Official Trips</option>
+              <option value="type:tweener">All Tweeners</option>
               {trips.map((trip) => (
                 <option key={trip.id} value={trip.id}>
-                  {trip.name}
+                  {trip.name}{isTweener(trip) ? ' · Tweener' : ''}
                 </option>
               ))}
             </select>
@@ -1351,7 +1361,10 @@ export default function GalleriesPage() {
                     </div>
                   )}
                   <CardHeader>
-                    <CardTitle className="line-clamp-1">{gallery.name}</CardTitle>
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="line-clamp-1">{gallery.name}</CardTitle>
+                      <TripTypeBadge trip={gallery.trip} />
+                    </div>
                     <CardDescription>
                       {gallery.trip?.name || 'Unknown Trip'} • {gallery.photoCount} item
                       {gallery.photoCount !== 1 ? 's' : ''}
@@ -1399,7 +1412,7 @@ export default function GalleriesPage() {
                           >
                             {trips.map((trip) => (
                               <option key={trip.id} value={trip.id}>
-                                {trip.name}
+                                {trip.name}{isTweener(trip) ? ' · Tweener' : ''}
                               </option>
                             ))}
                           </select>

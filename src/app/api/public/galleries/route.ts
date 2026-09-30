@@ -12,6 +12,7 @@ interface TripRow {
   start_date: string;
   end_date: string;
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
+  trip_type: string;
   cover_image_url: string | null;
 }
 
@@ -44,7 +45,7 @@ export async function GET() {
 
     const { data: tripsData, error: tripsError } = await supabase
       .from('trips')
-      .select('id, slug, name, destination, country, start_date, end_date, status, cover_image_url')
+      .select('id, slug, name, destination, country, start_date, end_date, status, trip_type, cover_image_url')
       .neq('status', 'cancelled')
       .order('start_date', { ascending: false });
 

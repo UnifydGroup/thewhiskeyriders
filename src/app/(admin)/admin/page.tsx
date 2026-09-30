@@ -29,6 +29,7 @@ export default function AdminDashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const [stats, setStats] = useState({
     totalTrips: 0,
+    totalTweeners: 0,
     totalMembers: 0,
     pendingApprovals: 0,
     pendingPayments: 0,
@@ -43,7 +44,12 @@ export default function AdminDashboardPage() {
         // Get trip count
         const { count: tripCount } = await supabase
           .from('trips')
-          .select('*', { count: 'exact', head: true });
+          .select('*', { count: 'exact', head: true })
+          .neq('trip_type', 'tweener');
+        const { count: tweenerCount } = await supabase
+          .from('trips')
+          .select('*', { count: 'exact', head: true })
+          .eq('trip_type', 'tweener');
         // Get member count
         const { count: memberCount } = await supabase
           .from('profiles')
@@ -57,7 +63,7 @@ export default function AdminDashboardPage() {
         let membersBehindCount = 0;
         const { data: trackedTrips, error: trackedTripsError } = await supabase
           .from('trips')
-          .select('id, name')
+          .select('id, name, trip_type')
           .in('status', ['active', 'upcoming']);
         if (trackedTripsError) throw trackedTripsError;
 
@@ -127,6 +133,7 @@ export default function AdminDashboardPage() {
           .eq('status', 'upcoming');
         setStats({
           totalTrips: tripCount || 0,
+          totalTweeners: tweenerCount || 0,
           totalMembers: memberCount || 0,
           pendingApprovals: pendingApprovalsCount || 0,
           pendingPayments: pendingOutstandingAmount,
@@ -181,6 +188,11 @@ export default function AdminDashboardPage() {
               <div>
                 <p className="text-brand-cream/70 text-sm font-medium mb-1">Total Trips</p>
                 <p className="text-3xl font-bold text-brand-cream">{stats.totalTrips}</p>
+                {stats.totalTweeners > 0 && (
+                  <p className="text-xs text-brand-tan mt-1">
+                    + {stats.totalTweeners} tweener{stats.totalTweeners !== 1 ? 's' : ''}
+                  </p>
+                )}
               </div>
               <div className="p-3 bg-brand-brown/20 rounded-lg">
                 <Bike className="w-6 h-6 text-brand-brown" />

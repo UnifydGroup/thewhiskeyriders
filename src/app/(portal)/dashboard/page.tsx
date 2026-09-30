@@ -12,6 +12,9 @@ import { Users, MapPin, Camera, Trophy } from 'lucide-react';
 import PaymentProgressCard from '@/components/dashboard/PaymentProgressCard';
 import { getMemberDisplayName } from '@/lib/member-display';
 import type { Profile, Trip, TripMember } from '@/lib/types/database';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { isTweener } from '@/lib/trip-type';
+import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
   const supabase = createClient();
@@ -111,7 +114,9 @@ export default function DashboardPage() {
   }
 
   const upcomingTrips = trips.filter((t) => t.status === 'upcoming').slice(0, 1);
-  const completedTrips = trips.filter((t) => t.status === 'completed').length;
+  const completedAll = trips.filter((t) => t.status === 'completed');
+  const completedTrips = completedAll.filter((t) => !isTweener(t)).length;
+  const completedTweeners = completedAll.filter((t) => isTweener(t)).length;
   const tripRoleById = new Map(tripMembers.map((member) => [member.trip_id, member.trip_role]));
 
   return (
@@ -146,6 +151,11 @@ export default function DashboardPage() {
                   <div>
                     <p className="text-brand-cream/70 text-sm font-medium mb-1">Trips Attended</p>
                     <p className="text-3xl font-bold text-brand-cream">{completedTrips}</p>
+                    {completedTweeners > 0 && (
+                      <p className="text-xs text-brand-tan mt-1">
+                        + {completedTweeners} tweener{completedTweeners !== 1 ? 's' : ''}
+                      </p>
+                    )}
                   </div>
                   <div className="p-3 bg-brand-brown/20 rounded-lg">
                     <MapPin className="w-6 h-6 text-brand-brown" />
@@ -211,7 +221,9 @@ export default function DashboardPage() {
               <Card hoverable>
                 <CardHeader>
                   <CardTitle>Next Adventure</CardTitle>
-                  <CardDescription>Your upcoming trip</CardDescription>
+                  <CardDescription>
+                    {isTweener(upcomingTrips[0]) ? 'Your upcoming tweener' : 'Your upcoming trip'}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
@@ -221,7 +233,8 @@ export default function DashboardPage() {
                       </h3>
                       <p className="text-brand-cream/70 mb-3">{upcomingTrips[0].destination}, {upcomingTrips[0].country}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TripTypeBadge trip={upcomingTrips[0]} size="sm" />
                       <Badge variant="primary">
                         {formatDateShort(upcomingTrips[0].start_date)} - {formatDateShort(upcomingTrips[0].end_date)}
                       </Badge>
@@ -249,7 +262,10 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {trips.map((trip) => (
                   <Link key={trip.id} href={`/trips/${trip.slug}`} className="block h-full">
-                    <Card hoverable className="h-full flex flex-col">
+                    <Card
+                      hoverable
+                      className={cn('h-full flex flex-col', isTweener(trip) && 'border-dashed border-brand-tan/50')}
+                    >
                       <CardHeader>
                         <CardTitle className="line-clamp-1">{trip.name}</CardTitle>
                         <CardDescription>{trip.destination}</CardDescription>
@@ -259,7 +275,8 @@ export default function DashboardPage() {
                           {formatDate(trip.start_date, 'MMM d')} - {formatDate(trip.end_date, 'MMM d, yyyy')}
                         </p>
                       </CardContent>
-                      <div className="pt-4 border-t border-brand-brown/10 flex flex-wrap gap-2">
+                      <div className="pt-4 border-t border-brand-brown/10 flex flex-wrap items-center gap-2">
+                        <TripTypeBadge trip={trip} size="sm" />
                         <Badge variant={trip.status === 'upcoming' ? 'primary' : 'secondary'}>
                           {trip.status}
                         </Badge>

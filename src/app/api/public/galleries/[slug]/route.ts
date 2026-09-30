@@ -11,6 +11,7 @@ interface TripRow {
   start_date: string;
   end_date: string;
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
+  trip_type: string;
 }
 
 interface ProfileLite {
@@ -65,7 +66,7 @@ export async function GET(
 
     const { data: tripData, error: tripError } = await supabase
       .from('trips')
-      .select('id, slug, name, destination, country, start_date, end_date, status')
+      .select('id, slug, name, destination, country, start_date, end_date, status, trip_type')
       .eq('slug', slug)
       .neq('status', 'cancelled')
       .maybeSingle();

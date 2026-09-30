@@ -9,6 +9,10 @@ import { Input, TextArea } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
 import { ArrowLeft, SaveIcon, Trash2, Users, BookOpen } from 'lucide-react';
+import { TripTypePicker } from '@/components/trip/TripTypePicker';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { getTripType } from '@/lib/trip-type';
+import type { TripType } from '@/lib/types/database';
 
 function toDateTimeLocalValue(value: string | null | undefined): string {
   if (!value) return '';
@@ -44,6 +48,7 @@ export default function TripEditorPage() {
     description: '',
     cover_image_url: '',
     status: 'upcoming',
+    trip_type: 'trip' as TripType,
     max_members: '',
   });
 
@@ -96,6 +101,7 @@ export default function TripEditorPage() {
         countdown_enabled: tripData.countdown_enabled === true,
         countdown_target_at: toDateTimeLocalValue(tripData.countdown_target_at),
         status: tripData.status,
+        trip_type: getTripType(tripData),
         max_members: tripData.max_members ? String(tripData.max_members) : '',
       });
     } catch (err: any) {
@@ -222,8 +228,13 @@ export default function TripEditorPage() {
           </button>
         </Link>
         <div>
-          <h1 className="text-3xl font-bold">Edit Trip</h1>
-          <p className="text-gray-400">{trip.name}</p>
+          <h1 className="text-3xl font-bold">
+            {formData.trip_type === 'tweener' ? 'Edit Tweener' : 'Edit Trip'}
+          </h1>
+          <p className="text-gray-400 flex items-center gap-2">
+            {trip.name}
+            <TripTypeBadge trip={{ trip_type: formData.trip_type }} showOfficial />
+          </p>
         </div>
       </div>
 
@@ -271,6 +282,13 @@ export default function TripEditorPage() {
 
       {/* Main Form */}
       <Card className="p-6 space-y-6">
+        <div>
+          <label className="block text-sm font-medium mb-2">Type</label>
+          <TripTypePicker
+            value={formData.trip_type}
+            onChange={(trip_type) => setFormData((prev) => ({ ...prev, trip_type }))}
+          />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Name */}
           <div>

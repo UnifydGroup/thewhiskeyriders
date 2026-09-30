@@ -7,6 +7,7 @@ import { geoNaturalEarth1, geoPath } from 'd3-geo';
 import { feature as topojsonFeature } from 'topojson-client';
 import { ALPHA3_TO_NUMERIC } from './country-codes';
 import type { Trip, TripStatus } from '@/lib/types/database';
+import { isTweener } from '@/lib/trip-type';
 
 const GEO_URL = '/world-110m.json';
 const MAP_WIDTH = 1000;
@@ -89,6 +90,8 @@ interface TripMarkerProps {
 function TripMarker({ trip, isSelected, zoom, x, y, onClick }: TripMarkerProps) {
   const isUpcoming = trip.status === 'upcoming' || trip.status === 'active';
   const color = STATUS_COLOR[trip.status];
+  // Tweeners render as a smaller diamond so they read differently from official trips
+  const tweener = isTweener(trip);
   // Scale pins inversely with zoom so they don't grow huge when zoomed in
   const r = Math.max(4, 8 / Math.sqrt(zoom));
   const pulseR = r * 2.2;
@@ -142,14 +145,29 @@ function TripMarker({ trip, isSelected, zoom, x, y, onClick }: TripMarkerProps) 
       )}
 
       {/* Main pin body */}
-      <circle
-        r={r}
-        fill={color}
-        stroke="#0D0D0D"
-        strokeWidth={1.5}
-        fillOpacity={0.95}
-        filter={isSelected ? 'url(#pin-glow)' : undefined}
-      />
+      {tweener ? (
+        <rect
+          x={-r * 0.8}
+          y={-r * 0.8}
+          width={r * 1.6}
+          height={r * 1.6}
+          transform="rotate(45)"
+          fill={color}
+          stroke="#0D0D0D"
+          strokeWidth={1.5}
+          fillOpacity={0.95}
+          filter={isSelected ? 'url(#pin-glow)' : undefined}
+        />
+      ) : (
+        <circle
+          r={r}
+          fill={color}
+          stroke="#0D0D0D"
+          strokeWidth={1.5}
+          fillOpacity={0.95}
+          filter={isSelected ? 'url(#pin-glow)' : undefined}
+        />
+      )}
 
       {/* Centre dot */}
       <circle r={r * 0.32} fill="#0D0D0D" fillOpacity={0.6} />
@@ -193,6 +211,11 @@ function TripPopup({ trip, onClose }: TripPopupProps) {
           >
             {STATUS_LABEL[trip.status]}
           </span>
+          {isTweener(trip) && (
+            <span className="ml-1.5 inline-block text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full mb-2 border border-dashed border-brand-tan text-brand-tan">
+              Tweener
+            </span>
+          )}
 
           {/* Trip name */}
           <h3 className="text-brand-cream font-bold text-base leading-tight mb-1 pr-5">
@@ -232,7 +255,7 @@ function TripPopup({ trip, onClose }: TripPopupProps) {
               (e.currentTarget as HTMLAnchorElement).style.background = `${color}22`;
             }}
           >
-            View Trip →
+            {isTweener(trip) ? 'View Tweener →' : 'View Trip →'}
           </Link>
         </div>
       </div>
@@ -242,11 +265,12 @@ function TripPopup({ trip, onClose }: TripPopupProps) {
 
 interface MapStatsProps {
   totalTrips: number;
+  totalTweeners?: number;
   uniqueCountries: number;
   memberMode?: boolean;
 }
 
-function MapStats({ totalTrips, uniqueCountries, memberMode }: MapStatsProps) {
+function MapStats({ totalTrips, totalTweeners = 0, uniqueCountries, memberMode }: MapStatsProps) {
   return (
     <div className="flex items-center gap-6 mb-3">
       <div className="flex items-center gap-2">
@@ -256,6 +280,16 @@ function MapStats({ totalTrips, uniqueCountries, memberMode }: MapStatsProps) {
           {memberMode ? (totalTrips === 1 ? 'trip' : 'trips') : 'adventures'}
         </span>
       </div>
+      {totalTweeners > 0 && (
+        <>
+          <div className="w-px h-5 bg-brand-brown/30" />
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rotate-45 inline-block bg-brand-tan" aria-hidden />
+            <span className="text-brand-tan font-bold text-lg">{totalTweeners}</span>
+            <span className="text-brand-cream/50 text-sm">{totalTweeners === 1 ? 'tweener' : 'tweeners'}</span>
+          </div>
+        </>
+      )}
       <div className="w-px h-5 bg-brand-brown/30" />
       <div className="flex items-center gap-2">
         <Map className="w-4 h-4 text-brand-tan" />
@@ -503,7 +537,8 @@ export function WorldMap({
     <div className="w-full">
       {showStats && (
         <MapStats
-          totalTrips={trips.length}
+          totalTrips={trips.filter((t) => !isTweener(t)).length}
+          totalTweeners={trips.filter((t) => isTweener(t)).length}
           uniqueCountries={uniqueCountries}
           memberMode={memberMode}
         />
@@ -654,6 +689,12 @@ export function WorldMap({
             />
             Upcoming
           </span>
+          {trips.some((t) => isTweener(t)) && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 ml-0.5 mr-0.5 rotate-45 inline-block" style={{ background: '#B5621E' }} />
+              Tweener
+            </span>
+          )}
         </div>
 
         {/* Drag hint */}

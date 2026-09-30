@@ -32,6 +32,8 @@ import MemberBudgetView from '@/components/budget/MemberBudgetView';
 import { getMemberDisplayName } from '@/lib/member-display';
 import type { Trip, TripKeyDate, TripUpdate, TripMember, Profile } from '@/lib/types/database';
 import { NewsCard } from '@/components/news/NewsCard';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { isTweener } from '@/lib/trip-type';
 import type { NewsItem } from '@/lib/news/types';
 
 type TripMemberWithProfile = TripMember & {
@@ -484,7 +486,15 @@ export default function TripDetailPage() {
           <Link href="/trips" className="text-brand-brown hover:text-brand-tan transition-colors mb-4 inline-block">
             ← Back to Trips
           </Link>
-          <h1 className="text-4xl font-bold text-brand-cream mb-2">{trip.name}</h1>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <h1 className="text-4xl font-bold text-brand-cream">{trip.name}</h1>
+            <TripTypeBadge trip={trip} size="sm" />
+          </div>
+          {isTweener(trip) && (
+            <p className="text-sm text-brand-tan/80 mb-2">
+              A tweener — a shorter in-between ride with a smaller crew.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-4 text-brand-cream/70">
             <div className="flex items-center gap-2">
               <MapPin className="w-5 h-5" />
@@ -508,7 +518,7 @@ export default function TripDetailPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Clock3 className="w-5 h-5 text-brand-brown" />
-                Trip Countdown
+                {isTweener(trip) ? 'Tweener Countdown' : 'Trip Countdown'}
               </CardTitle>
               <CardDescription className="text-brand-cream/70">
                 {trip.name} · {formatDate(tripCountdownTarget, 'MMM d, yyyy h:mm a')}

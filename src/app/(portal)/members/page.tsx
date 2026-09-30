@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { ADVENTURE_SCORE_EXPLANATION, calculateAdventureScore } from '@/lib/adventure-score';
+import { isTweener } from '@/lib/trip-type';
 import type { BadgeType, Profile, TripRole, TripStatus } from '@/lib/types/database';
 import { Compass, MapPin, Route, Search, Sparkles, Trophy, Users } from 'lucide-react';
 
@@ -28,6 +29,7 @@ type MemberTrip = {
     country: string;
     slug: string;
     status: TripStatus;
+    trip_type?: string | null;
     start_date: string;
   } | null;
 };
@@ -55,6 +57,7 @@ type TripSummary = {
   country: string;
   slug: string;
   status: TripStatus;
+  trip_type?: string | null;
   start_date: string;
   trip_role: TripRole;
 };
@@ -146,7 +149,7 @@ export default function MembersPage() {
           supabase
             .from('trip_members')
             .select(
-              'user_id, trip_role, joined_at, trips!trip_id(id, name, destination, country, slug, status, start_date)'
+              'user_id, trip_role, joined_at, trips!trip_id(id, name, destination, country, slug, status, trip_type, start_date)'
             ),
           supabase
             .from('user_badges')
@@ -199,9 +202,12 @@ export default function MembersPage() {
           });
           const badges = badgesByUser.get(profile.id) || [];
           const uniqueCountries = new Set(trips.map((trip) => trip.country).filter(Boolean)).size;
-          const completedTrips = trips.filter((trip) => trip.status === 'completed').length;
+          const completedAll = trips.filter((trip) => trip.status === 'completed');
+          const completedTrips = completedAll.filter((trip) => !isTweener(trip)).length;
+          const completedTweeners = completedAll.length - completedTrips;
           const adventureScore = calculateAdventureScore({
             completedTrips,
+            completedTweeners,
             badgeCount: badges.length,
             uniqueCountries,
           });
@@ -443,8 +449,13 @@ export default function MembersPage() {
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <Badge variant="outline" className="border-brand-brown/50 text-brand-tan">
                         <Users className="mr-1 inline h-3 w-3" />
-                        {member.trips.length} trips
+                        {member.trips.filter((trip) => !isTweener(trip)).length} trips
                       </Badge>
+                      {member.trips.some((trip) => isTweener(trip)) && (
+                        <Badge variant="outline" className="border-dashed border-brand-tan/60 text-brand-tan">
+                          {member.trips.filter((trip) => isTweener(trip)).length} tweeners
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="border-brand-brown/50 text-brand-tan">
                         <Trophy className="mr-1 inline h-3 w-3" />
                         {member.badges.length} badges
@@ -464,7 +475,16 @@ export default function MembersPage() {
                       ) : (
                         <div className="flex flex-wrap gap-2">
                           {member.trips.map((trip) => (
-                            <Badge key={trip.id} variant="secondary" className="max-w-full truncate bg-brand-tan/90">
+                            <Badge
+                              key={trip.id}
+                              variant="secondary"
+                              title={isTweener(trip) ? `${trip.name} (tweener)` : trip.name}
+                              className={
+                                isTweener(trip)
+                                  ? 'max-w-full truncate border border-dashed border-brand-tan bg-transparent text-brand-tan'
+                                  : 'max-w-full truncate bg-brand-tan/90'
+                              }
+                            >
                               <MapPin className="mr-1 inline h-3 w-3" />
                               {trip.destination}
                             </Badge>

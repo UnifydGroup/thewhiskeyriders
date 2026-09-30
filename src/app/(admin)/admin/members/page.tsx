@@ -13,6 +13,7 @@ import {
   Users, Search, Shield, UserCheck, Bike, Plus, Camera, Mail, Download
 } from 'lucide-react';
 import { getMemberDisplayName } from '@/lib/member-display';
+import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { APPAREL_SIZES } from '@/lib/profile-options';
 import ExportMembersPanel from '@/components/admin/ExportMembersPanel';
 
@@ -200,7 +201,7 @@ export default function MemberManagementPage() {
       // Load trips
       const { data: tripsData } = await supabase
         .from('trips')
-        .select('id, name, slug, start_date, end_date')
+        .select('id, name, slug, start_date, end_date, trip_type')
         .order('start_date', { ascending: false });
       if (tripsData) {
         setTrips(tripsData);
@@ -209,7 +210,7 @@ export default function MemberManagementPage() {
       // Load member trips
       const { data: memberTripsData } = await supabase
         .from('trip_members')
-        .select('user_id, trip_id, trips(id, name, slug)');
+        .select('user_id, trip_id, trips(id, name, slug, trip_type)');
 
       if (memberTripsData) {
         const tripsMap = new Map<string, any[]>();
@@ -1154,6 +1155,7 @@ export default function MemberManagementPage() {
                               <span key={trip.id} className="text-xs bg-brand-brown/20 text-brand-cream px-2 py-1 rounded flex items-center gap-1">
                                 <Bike className="w-3 h-3" />
                                 {trip.name}
+                                <TripTypeBadge trip={trip} />
                               </span>
                             ))}
                           </div>
@@ -1414,6 +1416,7 @@ export default function MemberManagementPage() {
                             className="h-4 w-4"
                           />
                           <span>{trip.name}</span>
+                          <TripTypeBadge trip={trip} />
                         </label>
                       ))}
                     </div>
