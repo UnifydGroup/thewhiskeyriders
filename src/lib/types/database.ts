@@ -127,6 +127,8 @@ export interface Profile {
   shirt_size: string | null;
   shorts_size: string | null;
   nickname: string | null;
+  /** Member-chosen dashboard hero background. Null = use the next trip's cover image. */
+  dashboard_background_url?: string | null;
   status: string;
   created_at: string | null;
   updated_at: string | null;

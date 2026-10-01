@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
 import { ChangePasswordModal } from '@/components/auth/ChangePasswordModal';
 import TripCountdown from '@/components/dashboard/TripCountdown';
+import HeroBackgroundPicker from '@/components/dashboard/HeroBackgroundPicker';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { cn, formatDate } from '@/lib/utils';
 import { isTweener } from '@/lib/trip-type';
@@ -298,6 +299,7 @@ export default function DashboardPage() {
   });
 
   const countdownTarget = nextTrip ? getCountdownTargetDate(nextTrip) : null;
+  const heroBackground = profile.dashboard_background_url || nextTrip?.cover_image_url || null;
   const paidPercent = payment && payment.target > 0 ? Math.min(100, Math.round((payment.paid / payment.target) * 100)) : 0;
 
   const earnedIds = new Set(badges.map((b) => b.id));
@@ -359,9 +361,10 @@ export default function DashboardPage() {
 
       {/* Hero: rider + next adventure */}
       <section className="relative overflow-hidden rounded-2xl border border-brand-brown/25 bg-brand-black">
-        {nextTrip?.cover_image_url && (
+        {heroBackground && (
           <Image
-            src={nextTrip.cover_image_url}
+            key={heroBackground}
+            src={heroBackground}
             alt=""
             fill
             unoptimized
@@ -371,7 +374,15 @@ export default function DashboardPage() {
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-brand-black via-brand-black/75 to-brand-black/30" />
 
-        <div className="relative grid grid-cols-1 gap-6 p-5 pt-10 sm:p-8 sm:pt-16 lg:grid-cols-[1.15fr_1fr] lg:gap-8">
+        <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
+          <HeroBackgroundPicker
+            profileId={profile.id}
+            hasCustomBackground={Boolean(profile.dashboard_background_url)}
+            onChange={(url) => setProfile((previous) => (previous ? { ...previous, dashboard_background_url: url } : previous))}
+          />
+        </div>
+
+        <div className="relative grid grid-cols-1 gap-6 p-5 pt-16 sm:p-8 sm:pt-20 lg:grid-cols-[1.15fr_1fr] lg:gap-8">
           <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:items-end sm:text-left">
             <div className="relative flex-shrink-0">
               <Avatar

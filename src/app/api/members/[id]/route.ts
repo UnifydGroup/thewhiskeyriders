@@ -205,6 +205,9 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.full_name !== undefined) updateData.full_name = normalizeTextValue(body.full_name);
 
     if (body.avatar_url !== undefined) updateData.avatar_url = normalizeTextValue(body.avatar_url);
+    if (body.dashboard_background_url !== undefined) {
+      updateData.dashboard_background_url = normalizeTextValue(body.dashboard_background_url);
+    }
     if (body.bio !== undefined) updateData.bio = normalizeTextValue(body.bio);
     if (body.phone_country_code !== undefined) {
       updateData.phone_country_code = normalizeTextValue(body.phone_country_code);
