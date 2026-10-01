@@ -35,6 +35,7 @@ import { NewsCard } from '@/components/news/NewsCard';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { isTweener } from '@/lib/trip-type';
 import type { NewsItem } from '@/lib/news/types';
+import { getCountdownParts, getCountdownTargetDate } from '@/lib/trip-countdown';
 
 type TripMemberWithProfile = TripMember & {
   profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url'> | null;
@@ -88,27 +89,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
-}
-
-function getCountdownTargetDate(trip: Pick<Trip, 'start_date' | 'countdown_target_at'>): Date | null {
-  if (trip.countdown_target_at) {
-    const explicitDate = new Date(trip.countdown_target_at);
-    if (!Number.isNaN(explicitDate.getTime())) {
-      return explicitDate;
-    }
-  }
-
-  const fallbackDate = new Date(`${trip.start_date}T00:00:00`);
-  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
-}
-
-function getCountdownParts(milliseconds: number) {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return { days, hours, minutes, seconds };
 }
 
 export default function TripDetailPage() {

@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -10,11 +11,12 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
 import { formatDate } from '@/lib/utils';
-import { Mail, Phone, Edit } from 'lucide-react';
+import { Mail, Phone, Edit, Trophy } from 'lucide-react';
 import type { Profile } from '@/lib/types/database';
 import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
 import { NewsCard } from '@/components/news/NewsCard';
 import type { NewsItem } from '@/lib/news/types';
+import { loadMemberBadges, type MemberBadgeSummary } from '@/lib/badges/memberBadges';
 
 function getDisplayName(profile: Profile) {
   const fullName = [profile.first_name, profile.middle_name, profile.surname]
@@ -33,6 +35,7 @@ export default function ProfilePage() {
   const supabase = createClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [taggedNews, setTaggedNews] = useState<NewsItem[]>([]);
+  const [badges, setBadges] = useState<MemberBadgeSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,6 +53,10 @@ export default function ProfilePage() {
         const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
         if (data) {
           setProfile(data);
+
+          loadMemberBadges(supabase, data.id)
+            .then(setBadges)
+            .catch((badgeError) => console.error('Failed to load badges:', badgeError));
 
           if (session?.access_token) {
             const response = await fetch('/api/news?placement=rider&limit=20', {
@@ -316,14 +323,41 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div>
-        <h2 className="text-2xl font-bold text-brand-cream mb-4">Achievements</h2>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-brand-cream/70 mb-4">No badges yet</p>
-            <p className="text-sm text-brand-cream/50">Complete trips and earn special badges!</p>
-          </CardContent>
-        </Card>
+      <div id="badges" className="scroll-mt-24">
+        <h2 className="text-2xl font-bold text-brand-cream mb-4">Badges</h2>
+        {badges.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <Trophy className="mx-auto mb-2 h-6 w-6 text-brand-brown/70" />
+              <p className="text-brand-cream/70 mb-4">No badges yet</p>
+              <p className="text-sm text-brand-cream/50">Complete trips and earn special badges!</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {badges.map((badge) => (
+              <Card key={`${badge.id}-${badge.trip_slug || 'global'}`} className="border-brand-brown/25">
+                <CardContent className="flex items-start gap-4">
+                  <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full border-2 border-brand-tan bg-brand-brown/20 text-2xl">
+                    {badge.icon}
+                  </span>
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-semibold text-brand-cream">{badge.name}</p>
+                    {badge.description && <p className="text-sm text-brand-cream/70">{badge.description}</p>}
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-brand-cream/55">
+                      {badge.awarded_at && <span>Awarded {formatDate(badge.awarded_at, 'MMM d, yyyy')}</span>}
+                      {badge.trip_slug && (
+                        <Link href={`/trips/${badge.trip_slug}`} className="text-brand-brown hover:text-brand-tan">
+                          {badge.trip_name || 'View trip'}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
