@@ -17,6 +17,8 @@ import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
 import { NewsCard } from '@/components/news/NewsCard';
 import type { NewsItem } from '@/lib/news/types';
 import { loadMemberBadges, type MemberBadgeSummary } from '@/lib/badges/memberBadges';
+import { BadgePatch } from '@/components/badges/BadgePatch';
+import { yearFromTripName } from '@/lib/badges/badgeArt';
 
 function getDisplayName(profile: Profile) {
   const fullName = [profile.first_name, profile.middle_name, profile.surname]
@@ -337,10 +339,15 @@ export default function ProfilePage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {badges.map((badge) => (
               <Card key={`${badge.id}-${badge.trip_slug || 'global'}`} className="border-brand-brown/25">
-                <CardContent className="flex items-start gap-4">
-                  <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full border-2 border-brand-tan bg-brand-brown/20 text-2xl">
-                    {badge.icon}
-                  </span>
+                <CardContent className="flex items-center gap-4">
+                  <BadgePatch
+                    name={badge.name}
+                    badgeType={badge.badge_type}
+                    icon={badge.icon}
+                    year={yearFromTripName(badge.trip_name)}
+                    size={72}
+                    className="drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
+                  />
                   <div className="min-w-0 space-y-1">
                     <p className="font-semibold text-brand-cream">{badge.name}</p>
                     {badge.description && <p className="text-sm text-brand-cream/70">{badge.description}</p>}

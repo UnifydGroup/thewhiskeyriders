@@ -20,11 +20,14 @@ import { buildFramedPhotoUrl } from '@/lib/photos/imageTransforms';
 import { loadTaggedPhotos, type TaggedPhoto } from '@/lib/photos/taggedPhotos';
 import {
   loadBadgeCatalog,
+  buildBadgeShelf,
   loadMemberBadges,
   type BadgeCatalogItem,
   type MemberBadgeSummary,
 } from '@/lib/badges/memberBadges';
-import { ArrowRight, Camera, Lock } from 'lucide-react';
+import { ArrowRight, Camera } from 'lucide-react';
+import { BadgePatch } from '@/components/badges/BadgePatch';
+import { yearFromTripName } from '@/lib/badges/badgeArt';
 import type { Profile, Trip, TripRole } from '@/lib/types/database';
 import type { NewsItem } from '@/lib/news/types';
 
@@ -304,14 +307,8 @@ export default function DashboardPage() {
   const heroFraming = profile.dashboard_background_url ? profile.dashboard_background_framing : nextTrip?.cover_image_framing;
   const paidPercent = payment && payment.target > 0 ? Math.min(100, Math.round((payment.paid / payment.target) * 100)) : 0;
 
-  const earnedIds = new Set(badges.map((b) => b.id));
-  const lockedBadges = badgeCatalog.filter((b) => !earnedIds.has(b.id));
-  const badgeShelf = [
-    ...badges.map((badge) => ({ ...badge, earned: true as const })),
-    ...lockedBadges.map((badge) => ({ ...badge, earned: false as const, trip_name: null })),
-  ].slice(0, 6);
-  const earnedBadgeTypes = new Set(badges.map((b) => b.id)).size;
-  const badgeTotal = badgeCatalog.length;
+  const { items: shelfItems, earnedCount: earnedBadgeTypes, total: badgeTotal } = buildBadgeShelf(badges, badgeCatalog);
+  const badgeShelf = shelfItems.slice(0, 6);
 
   const filledFields = PROFILE_FIELDS.filter(({ key }) => {
     const value = profile[key];
@@ -588,23 +585,33 @@ export default function DashboardPage() {
         {badgeShelf.length === 0 ? (
           <p className="text-sm text-brand-cream/60">No badges yet. Complete trips to start earning them.</p>
         ) : (
-          <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
+          <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-6">
             {badgeShelf.map((badge) => (
-              <div key={`${badge.id}-${badge.trip_name ?? ''}`} className="flex flex-col items-center gap-2 text-center" title={badge.description ?? undefined}>
-                {badge.earned ? (
-                  <span className="flex h-16 w-16 items-center justify-center rounded-full border-[3px] border-brand-tan bg-brand-brown/25 text-3xl sm:h-20 sm:w-20">
-                    {badge.icon}
-                  </span>
-                ) : (
-                  <span className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-brand-brown/40 bg-brand-black/60 text-brand-cream/40 sm:h-20 sm:w-20">
-                    <Lock className="h-5 w-5" aria-label="Not earned yet" />
-                  </span>
-                )}
+              <div key={badge.key} className="group flex flex-col items-center gap-2 text-center" title={badge.description ?? undefined}>
+                <div className="relative transition-transform duration-200 group-hover:-translate-y-1 group-hover:rotate-[-3deg]">
+                  <BadgePatch
+                    name={badge.name}
+                    badgeType={badge.badge_type}
+                    icon={badge.icon}
+                    year={badge.earned ? yearFromTripName(badge.latestTripName) : null}
+                    locked={!badge.earned}
+                    size={84}
+                    className="drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)] sm:h-[110px] sm:w-[100px]"
+                  />
+                  {badge.count > 1 && (
+                    <span
+                      className="absolute -right-1 top-0 rounded-full border-2 border-brand-black bg-brand-brown px-1.5 py-0.5 text-xs font-extrabold text-brand-cream tabular-nums"
+                      aria-label={`Earned ${badge.count} times`}
+                    >
+                      ×{badge.count}
+                    </span>
+                  )}
+                </div>
                 <span className={cn('text-sm font-semibold leading-tight', badge.earned ? 'text-brand-cream' : 'text-brand-cream/60')}>
                   {badge.name}
                 </span>
                 <span className="text-xs text-brand-cream/55 line-clamp-2">
-                  {badge.earned ? badge.trip_name || (badge.awarded_at ? formatDate(badge.awarded_at, 'yyyy') : '') : badge.description || 'Not earned yet'}
+                  {badge.earned ? badge.latestTripName || '' : badge.description || 'Not earned yet'}
                 </span>
               </div>
             ))}

@@ -9,6 +9,9 @@ import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { Award, Plus, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
+import { BadgePatch } from '@/components/badges/BadgePatch';
+import { AUTO_BADGE_ICON, BadgeSymbolPicker } from '@/components/badges/BadgeSymbolPicker';
+import { BADGE_GLYPHS, glyphIconValue, yearFromTripName } from '@/lib/badges/badgeArt';
 import { isTweener } from '@/lib/trip-type';
 
 type BadgeRecord = {
@@ -132,6 +135,24 @@ export default function BadgeManagementPage() {
     } catch {
       setMessage({ type: 'error', text: 'Creation failed' });
     }
+  };
+
+  // Badges are stored once per trip, so a symbol change applies to every copy with the same name and type.
+  const handleSetSymbol = async (badge: BadgeRecord, icon: string) => {
+    const { error } = await supabase
+      .from('badges')
+      .update({ icon })
+      .eq('name', badge.name)
+      .eq('badge_type', badge.badge_type);
+
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      return;
+    }
+
+    setMessage({ type: 'success', text: `Symbol updated for every "${badge.name}" badge` });
+    loadData();
+    setTimeout(() => setMessage(null), 3000);
   };
 
   const handleDeleteBadge = async (badgeId: string) => {
@@ -339,6 +360,28 @@ export default function BadgeManagementPage() {
             </div>
 
             <div>
+              <p className="block text-brand-cream/70 text-sm font-medium mb-2">Symbol</p>
+              <div className="flex items-start gap-3">
+                <BadgePatch
+                  name={newBadge.name || 'New badge'}
+                  badgeType={newBadge.badge_type}
+                  icon={newBadge.icon}
+                  year={yearFromTripName(trips.find((trip) => trip.id === newBadge.trip_id)?.name)}
+                  size={88}
+                  className="drop-shadow-[0_4px_8px_rgba(0,0,0,0.45)]"
+                />
+                <div className="min-w-0 flex-1">
+                  <BadgeSymbolPicker
+                    value={newBadge.icon}
+                    onChange={(icon) => setNewBadge({ ...newBadge, icon })}
+                    name={newBadge.name}
+                    badgeType={newBadge.badge_type}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
               <label className="block text-brand-cream/70 text-sm font-medium mb-1">Trip</label>
               <select
                 value={newBadge.trip_id}
@@ -449,8 +492,15 @@ export default function BadgeManagementPage() {
                   const memberCount = userBadges.filter((ub) => ub.badge_id === badge.id).length;
                   return (
                     <div key={badge.id} className="p-3 bg-brand-black/30 rounded border border-brand-brown/10">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <BadgePatch
+                          name={badge.name}
+                          badgeType={badge.badge_type}
+                          icon={badge.icon}
+                          year={yearFromTripName(badge.trip_id ? getTripName(badge.trip_id) : null)}
+                          size={60}
+                        />
+                        <div className="flex-1 min-w-0">
                           <p className="font-medium text-brand-cream">{badge.name}</p>
                           <p className="text-brand-cream/50 text-sm">{badge.description}</p>
                           <div className="flex gap-2 mt-2">
@@ -465,6 +515,22 @@ export default function BadgeManagementPage() {
                             </span>
                           </div>
                         </div>
+                        <label className="sr-only" htmlFor={`badge-symbol-${badge.id}`}>
+                          Symbol for {badge.name}
+                        </label>
+                        <select
+                          id={`badge-symbol-${badge.id}`}
+                          value={badge.icon?.startsWith('glyph:') ? badge.icon : AUTO_BADGE_ICON}
+                          onChange={(e) => void handleSetSymbol(badge, e.target.value)}
+                          className="hidden sm:block bg-brand-black/50 border border-brand-brown/20 rounded px-2 py-1.5 text-brand-cream text-xs"
+                        >
+                          <option value={AUTO_BADGE_ICON}>Auto symbol</option>
+                          {BADGE_GLYPHS.map((glyph) => (
+                            <option key={glyph.key} value={glyphIconValue(glyph.key)}>
+                              {glyph.label}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           onClick={() => handleDeleteBadge(badge.id)}
                           className="p-2 hover:bg-red-900/20 rounded transition-colors"
