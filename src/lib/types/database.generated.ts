@@ -1381,6 +1381,7 @@ export type Database = {
           avatar_framing: Json | null
           dashboard_background_framing: Json | null
           dashboard_background_url: string | null
+          notification_preferences: Json
           bio: string | null
           created_at: string | null
           date_of_birth: string | null
@@ -1418,6 +1419,7 @@ export type Database = {
           avatar_framing?: Json | null
           dashboard_background_framing?: Json | null
           dashboard_background_url?: string | null
+          notification_preferences?: Json
           bio?: string | null
           created_at?: string | null
           date_of_birth?: string | null
@@ -1455,6 +1457,7 @@ export type Database = {
           avatar_framing?: Json | null
           dashboard_background_framing?: Json | null
           dashboard_background_url?: string | null
+          notification_preferences?: Json
           bio?: string | null
           created_at?: string | null
           date_of_birth?: string | null

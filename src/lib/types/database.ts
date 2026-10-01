@@ -133,6 +133,8 @@ export interface Profile {
   avatar_framing?: unknown;
   /** Focal point + zoom for the dashboard background. Null = centred. */
   dashboard_background_framing?: unknown;
+  /** In-app notification switches per category; see lib/notifications/types. */
+  notification_preferences?: unknown;
   status: string;
   created_at: string | null;
   updated_at: string | null;
