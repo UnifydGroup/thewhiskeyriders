@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import { Trash2 } from 'lucide-react';
+import { Crop, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { createClient } from '@/lib/supabase/client';
-import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { buildFramedPhotoUrl, buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { framingStyle, isDefaultFraming, parseFraming, type ImageFraming } from '@/lib/images/framing';
+import { ImageFramingEditor } from '@/components/ui/ImageFramingEditor';
 import PhotoTagEditor from './PhotoTagEditor';
 import PhotoLikeButton from './PhotoLikeButton';
 import PhotoCommentsSection from './PhotoCommentsSection';
@@ -34,6 +36,7 @@ interface Photo {
   url: string;
   thumbnail_url?: string;
   detail_url?: string;
+  thumbnail_framing?: unknown;
 }
 
 interface PhotoGridProps {
@@ -105,6 +108,8 @@ export default function PhotoGrid({
     person: [],
   });
   const [thumbnailFallbackIds, setThumbnailFallbackIds] = useState<string[]>([]);
+  const [framingOverrides, setFramingOverrides] = useState<Record<string, ImageFraming>>({});
+  const [framingPhoto, setFramingPhoto] = useState<Photo | null>(null);
 
   const supabase = useMemo(() => createClient(), []);
   const editablePhotoIds = useMemo(
@@ -248,11 +253,28 @@ export default function PhotoGrid({
     );
   }, [photos]);
 
+  const getFraming = (photo: Photo) => framingOverrides[photo.id] ?? parseFraming(photo.thumbnail_framing);
+
   const getThumbnailUrl = (photo: Photo) => {
-    if (photo.thumbnail_url?.trim()) {
+    const hasCustomFraming = !isDefaultFraming(getFraming(photo));
+    if (photo.thumbnail_url?.trim() && !hasCustomFraming) {
       return photo.thumbnail_url;
     }
-    return buildOptimizedPhotoUrl(photo.url, 'thumbnail') || photo.url;
+    return buildFramedPhotoUrl(photo.url, 'thumbnail', hasCustomFraming) || photo.url;
+  };
+
+  const saveThumbnailFraming = async (photo: Photo, framing: ImageFraming) => {
+    const response = await fetch(`/api/trips/${photo.trip_id}/photos?photoId=${photo.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thumbnail_framing: isDefaultFraming(framing) ? null : framing }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.error || 'Could not save the thumbnail adjustment.');
+    }
+    setFramingOverrides((previous) => ({ ...previous, [photo.id]: framing }));
+    setFramingPhoto(null);
   };
 
   const getDetailUrl = (photo: Photo) => {
@@ -740,15 +762,18 @@ export default function PhotoGrid({
                     preload="metadata"
                   />
                 ) : (
-                  <Image
-                    src={thumbnailUrl}
-                    alt={photo.caption || 'Trip photo'}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform"
-                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                    unoptimized
-                    onError={() => markThumbnailFallback(photo.id)}
-                  />
+                  <div className="absolute inset-0 overflow-hidden transition-transform group-hover:scale-105">
+                    <Image
+                      src={thumbnailUrl}
+                      alt={photo.caption || 'Trip photo'}
+                      fill
+                      className="object-cover"
+                      style={framingStyle(getFraming(photo))}
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                      unoptimized
+                      onError={() => markThumbnailFallback(photo.id)}
+                    />
+                  </div>
                 )}
 
                 {isVideoPhoto(photo) && (
@@ -784,6 +809,23 @@ export default function PhotoGrid({
                       <p className="text-xs text-brand-cream/90 line-clamp-2 mb-2">{photo.caption}</p>
                     )}
                     <p className="text-xs text-brand-cream/70">by {photo.uploader_name}</p>
+                    {!publicView && !isVideoPhoto(photo) && editablePhotoIds.has(photo.id) && (
+                      <div className="mt-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-xs"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setFramingPhoto(photo);
+                          }}
+                        >
+                          <Crop className="mr-1.5 h-3.5 w-3.5" />
+                          Adjust thumbnail
+                        </Button>
+                      </div>
+                    )}
                     {onSetAlbumThumbnail && (
                       <div className="mt-2">
                         <Button
@@ -834,6 +876,17 @@ export default function PhotoGrid({
           })}
         </div>
       )}
+
+      <ImageFramingEditor
+        isOpen={Boolean(framingPhoto)}
+        imageSrc={framingPhoto ? buildOptimizedPhotoUrl(framingPhoto.url, 'detail') || framingPhoto.url : null}
+        initialFraming={framingPhoto ? getFraming(framingPhoto) : null}
+        aspect={1}
+        title="Adjust thumbnail"
+        description="Choose what shows in the square gallery thumbnail. The full photo isn't changed."
+        onClose={() => setFramingPhoto(null)}
+        onSave={(framing) => (framingPhoto ? saveThumbnailFraming(framingPhoto, framing) : undefined)}
+      />
 
       {selectedPhotoIdx !== null && filteredPhotos[selectedPhotoIdx] && (
         <PhotoDetailModal

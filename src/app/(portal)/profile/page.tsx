@@ -131,7 +131,7 @@ export default function ProfilePage() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row gap-6">
-              <Avatar src={profile.avatar_url} alt={displayName} size="xl" />
+              <Avatar src={profile.avatar_url} framing={profile.avatar_framing} alt={displayName} size="xl" />
               <div className="flex-1">
                 <h2 className="text-2xl font-bold text-brand-cream mb-1">{displayName}</h2>
                 {profile.nickname && (

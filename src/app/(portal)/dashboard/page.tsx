@@ -13,9 +13,10 @@ import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { cn, formatDate } from '@/lib/utils';
 import { isTweener } from '@/lib/trip-type';
 import { getCountdownTargetDate } from '@/lib/trip-countdown';
+import { framingStyle, isDefaultFraming, parseFraming } from '@/lib/images/framing';
 import { calculateAdventureScore } from '@/lib/adventure-score';
 import { getMemberDisplayName } from '@/lib/member-display';
-import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { buildFramedPhotoUrl } from '@/lib/photos/imageTransforms';
 import { loadTaggedPhotos, type TaggedPhoto } from '@/lib/photos/taggedPhotos';
 import {
   loadBadgeCatalog,
@@ -300,6 +301,7 @@ export default function DashboardPage() {
 
   const countdownTarget = nextTrip ? getCountdownTargetDate(nextTrip) : null;
   const heroBackground = profile.dashboard_background_url || nextTrip?.cover_image_url || null;
+  const heroFraming = profile.dashboard_background_url ? profile.dashboard_background_framing : nextTrip?.cover_image_framing;
   const paidPercent = payment && payment.target > 0 ? Math.min(100, Math.round((payment.paid / payment.target) * 100)) : 0;
 
   const earnedIds = new Set(badges.map((b) => b.id));
@@ -370,6 +372,7 @@ export default function DashboardPage() {
             unoptimized
             priority
             className="object-cover opacity-60"
+            style={framingStyle(heroFraming)}
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-brand-black via-brand-black/75 to-brand-black/30" />
@@ -377,8 +380,9 @@ export default function DashboardPage() {
         <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
           <HeroBackgroundPicker
             profileId={profile.id}
-            hasCustomBackground={Boolean(profile.dashboard_background_url)}
-            onChange={(url) => setProfile((previous) => (previous ? { ...previous, dashboard_background_url: url } : previous))}
+            backgroundUrl={profile.dashboard_background_url ?? null}
+            framing={profile.dashboard_background_framing}
+            onChange={(update) => setProfile((previous) => (previous ? { ...previous, ...update } : previous))}
           />
         </div>
 
@@ -387,6 +391,7 @@ export default function DashboardPage() {
             <div className="relative flex-shrink-0">
               <Avatar
                 src={profile.avatar_url}
+                framing={profile.avatar_framing}
                 alt={displayName}
                 size="xl"
                 className="h-28 w-28 border-4 border-brand-tan bg-brand-dark-grey text-3xl sm:h-36 sm:w-36"
@@ -685,7 +690,7 @@ export default function DashboardPage() {
                 href={`/gallery/${photo.trip_slug}`}
                 className="group overflow-hidden rounded-lg border border-brand-brown/20 bg-brand-black/40"
               >
-                <div className="relative aspect-square">
+                <div className="relative aspect-square transition-transform group-hover:scale-105">
                   {photo.media_type === 'video' ? (
                     <video src={photo.url} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                   ) : (
@@ -693,13 +698,14 @@ export default function DashboardPage() {
                       src={
                         thumbnailFallbackIds.includes(photo.id)
                           ? photo.url
-                          : buildOptimizedPhotoUrl(photo.url, 'thumbnail') || photo.url
+                          : buildFramedPhotoUrl(photo.url, 'thumbnail', !isDefaultFraming(parseFraming(photo.thumbnail_framing))) || photo.url
                       }
                       alt={photo.caption || `Photo from ${photo.trip_name}`}
                       fill
                       unoptimized
                       sizes="(max-width: 768px) 33vw, 16vw"
-                      className="object-cover transition-transform group-hover:scale-105"
+                      className="object-cover"
+                      style={framingStyle(photo.thumbnail_framing)}
                       onError={() =>
                         setThumbnailFallbackIds((previous) =>
                           previous.includes(photo.id) ? previous : [...previous, photo.id]

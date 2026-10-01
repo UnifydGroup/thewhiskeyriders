@@ -6,7 +6,8 @@ import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { createClient } from '@/lib/supabase/client';
-import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { buildFramedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { framingStyle, isDefaultFraming, parseFraming } from '@/lib/images/framing';
 import { loadTaggedPhotos, type TaggedPhoto } from '@/lib/photos/taggedPhotos';
 import type { Profile } from '@/lib/types/database';
 
@@ -83,7 +84,7 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
               href={`/gallery/${photo.trip_slug}`}
               className="group rounded-lg overflow-hidden border border-brand-brown/20 bg-brand-brown/10"
             >
-              <div className="relative aspect-square">
+              <div className="relative aspect-square overflow-hidden">
                 {photo.media_type === 'video' ? (
                   <video
                     src={photo.url}
@@ -97,11 +98,12 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
                     src={
                       thumbnailFallbackIds.includes(photo.id)
                         ? photo.url
-                        : buildOptimizedPhotoUrl(photo.url, 'thumbnail') || photo.url
+                        : buildFramedPhotoUrl(photo.url, 'thumbnail', !isDefaultFraming(parseFraming(photo.thumbnail_framing))) || photo.url
                     }
                     alt={photo.caption || `Tagged photo from ${photo.trip_name}`}
                     fill
-                    className="object-cover group-hover:scale-105 transition-transform"
+                    className="object-cover"
+                    style={framingStyle(photo.thumbnail_framing)}
                     sizes="(max-width: 768px) 50vw, 25vw"
                     unoptimized
                     onError={() =>

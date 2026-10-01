@@ -26,6 +26,7 @@ interface Photo {
   uploaded_by: string;
   uploader_name?: string;
   url: string;
+  thumbnail_framing?: unknown;
 }
 
 interface ProfileLite {
@@ -42,6 +43,7 @@ interface PhotoQueryRow {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  thumbnail_framing?: unknown;
   created_at: string;
   uploaded_by: string;
   profiles: ProfileLite | ProfileLite[] | null;
@@ -116,6 +118,7 @@ export default function TripGalleryPage() {
           mime_type,
           width,
           height,
+          thumbnail_framing,
           created_at,
           uploaded_by,
           profiles:uploaded_by(full_name, nickname)
@@ -142,6 +145,7 @@ export default function TripGalleryPage() {
           mime_type: photo.mime_type || null,
           width: photo.width,
           height: photo.height,
+          thumbnail_framing: photo.thumbnail_framing ?? null,
           created_at: photo.created_at,
           uploaded_by: photo.uploaded_by,
           uploader_name: getUploaderName(photo.profiles),

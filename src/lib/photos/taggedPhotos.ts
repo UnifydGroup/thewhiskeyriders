@@ -12,6 +12,7 @@ export interface TaggedPhoto {
   trip_name: string;
   trip_slug: string;
   matched_tag: string;
+  thumbnail_framing: unknown;
 }
 
 interface PhotoTagRow {
@@ -26,6 +27,7 @@ interface PhotoRow {
   caption: string | null;
   media_type: 'image' | 'video';
   mime_type: string | null;
+  thumbnail_framing?: unknown;
   created_at: string;
 }
 
@@ -125,7 +127,7 @@ export async function loadTaggedPhotos(
 
   const { data: photosData, error: photosError } = await supabase
     .from('photos')
-    .select('id, trip_id, storage_path, caption, media_type, mime_type, created_at')
+    .select('id, trip_id, storage_path, caption, media_type, mime_type, thumbnail_framing, created_at')
     .in('id', uniquePhotoIds)
     .order('created_at', { ascending: false });
 
@@ -158,7 +160,7 @@ export async function loadTaggedPhotos(
   });
 
   return typedPhotos
-    .map((photo) => {
+    .map((photo): TaggedPhoto | null => {
       const trip = tripsById.get(photo.trip_id);
       if (!trip) {
         return null;
@@ -177,7 +179,8 @@ export async function loadTaggedPhotos(
         trip_name: trip.name,
         trip_slug: trip.slug,
         matched_tag: firstTagByPhotoId.get(photo.id) || '',
-      } satisfies TaggedPhoto;
+        thumbnail_framing: photo.thumbnail_framing ?? null,
+      };
     })
     .filter((photo): photo is TaggedPhoto => Boolean(photo));
 }

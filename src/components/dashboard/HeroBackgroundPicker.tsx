@@ -1,51 +1,37 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, RotateCcw } from 'lucide-react';
+import { Crop, ImagePlus, RotateCcw } from 'lucide-react';
 import { ImageCropModal } from '@/components/ui/ImageCropModal';
+import { ImageFramingEditor } from '@/components/ui/ImageFramingEditor';
+import { isDefaultFraming, type ImageFraming } from '@/lib/images/framing';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import { downscaleImage, IMAGE_MAX_DIMENSIONS } from '@/lib/images/resize';
 
-const MAX_WIDTH = 2400;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+export interface HeroBackgroundUpdate {
+  dashboard_background_url?: string | null;
+  dashboard_background_framing?: ImageFraming | null;
+}
 
 interface HeroBackgroundPickerProps {
   profileId: string;
-  hasCustomBackground: boolean;
-  onChange: (url: string | null) => void;
+  /** The member's own background, or null when the trip photo is showing. */
+  backgroundUrl: string | null;
+  framing: unknown;
+  onChange: (update: HeroBackgroundUpdate) => void;
 }
 
-/** Scale a cropped image down so uploads stay a sensible size. */
-async function downscale(blob: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
-  if (bitmap.width <= MAX_WIDTH) {
-    bitmap.close();
-    return blob;
-  }
-
-  const scale = MAX_WIDTH / bitmap.width;
-  const canvas = document.createElement('canvas');
-  canvas.width = MAX_WIDTH;
-  canvas.height = Math.round(bitmap.height * scale);
-  const context = canvas.getContext('2d');
-  if (!context) {
-    bitmap.close();
-    return blob;
-  }
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-
-  return new Promise((resolve) => {
-    canvas.toBlob((result) => resolve(result ?? blob), 'image/jpeg', 0.88);
-  });
-}
-
-export default function HeroBackgroundPicker({ profileId, hasCustomBackground, onChange }: HeroBackgroundPickerProps) {
+export default function HeroBackgroundPicker({ profileId, backgroundUrl, framing, onChange }: HeroBackgroundPickerProps) {
+  const hasCustomBackground = Boolean(backgroundUrl);
   const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [framingOpen, setFramingOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -53,7 +39,7 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
     };
   }, [imageToCrop]);
 
-  const saveBackground = async (url: string | null) => {
+  const saveBackground = async (update: HeroBackgroundUpdate) => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -64,7 +50,7 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
         'Content-Type': 'application/json',
         ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
       },
-      body: JSON.stringify({ dashboard_background_url: url }),
+      body: JSON.stringify(update),
     });
 
     if (!response.ok) {
@@ -72,7 +58,7 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
       throw new Error(payload?.error || payload?.message || 'Could not save your background.');
     }
 
-    onChange(url);
+    onChange(update);
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,7 +87,7 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
       throw new Error('Your session has expired. Log in again to change your background.');
     }
 
-    const upload = await downscale(croppedBlob);
+    const upload = await downscaleImage(croppedBlob, IMAGE_MAX_DIMENSIONS.background);
     const path = `backgrounds/${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
     const { error: uploadError } = await supabase.storage
       .from('photos')
@@ -115,7 +101,8 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
       data: { publicUrl },
     } = supabase.storage.from('photos').getPublicUrl(path);
 
-    await saveBackground(publicUrl);
+    // A new image starts centred; it can be fine-tuned with Adjust.
+    await saveBackground({ dashboard_background_url: publicUrl, dashboard_background_framing: null });
     setImageToCrop(null);
   };
 
@@ -123,7 +110,7 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
     setSaving(true);
     setError(null);
     try {
-      await saveBackground(null);
+      await saveBackground({ dashboard_background_url: null, dashboard_background_framing: null });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reset your background.');
     } finally {
@@ -138,6 +125,12 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
     <>
       <div className="flex flex-col items-end gap-1.5">
         <div className="flex flex-wrap justify-end gap-2">
+          {hasCustomBackground && (
+            <button type="button" onClick={() => setFramingOpen(true)} disabled={saving} className={buttonClass}>
+              <Crop className="h-3.5 w-3.5" />
+              Adjust
+            </button>
+          )}
           {hasCustomBackground && (
             <button type="button" onClick={handleReset} disabled={saving} className={buttonClass}>
               <RotateCcw className="h-3.5 w-3.5" />
@@ -180,6 +173,25 @@ export default function HeroBackgroundPicker({ profileId, hasCustomBackground, o
         cropShape="rect"
         confirmLabel="Save background"
         processingLabel="Saving..."
+      />
+
+      <ImageFramingEditor
+        isOpen={framingOpen}
+        imageSrc={backgroundUrl}
+        initialFraming={framing}
+        aspect={16 / 7}
+        title="Adjust your background"
+        description="Drag to choose what stays in view, and zoom to fill the banner."
+        previews={[
+          { label: 'Desktop', aspect: 16 / 7 },
+          { label: 'Tablet', aspect: 4 / 3 },
+          { label: 'Phone', aspect: 3 / 4 },
+        ]}
+        onClose={() => setFramingOpen(false)}
+        onSave={async (next) => {
+          await saveBackground({ dashboard_background_framing: isDefaultFraming(next) ? null : next });
+          setFramingOpen(false);
+        }}
       />
     </>
   );

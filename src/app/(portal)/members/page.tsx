@@ -15,7 +15,7 @@ import { Compass, MapPin, Route, Search, Sparkles, Trophy, Users } from 'lucide-
 
 type MemberProfile = Pick<
   Profile,
-  'id' | 'full_name' | 'first_name' | 'middle_name' | 'surname' | 'nickname' | 'avatar_url' | 'bio' | 'role'
+  'id' | 'full_name' | 'first_name' | 'middle_name' | 'surname' | 'nickname' | 'avatar_url' | 'avatar_framing' | 'bio' | 'role'
 >;
 
 type MemberTrip = {
@@ -143,7 +143,7 @@ export default function MembersPage() {
         const [{ data: profilesData }, { data: tripsData }, { data: badgesData }] = await Promise.all([
           supabase
             .from('profiles')
-            .select('id, full_name, first_name, middle_name, surname, nickname, avatar_url, bio, role')
+            .select('id, full_name, first_name, middle_name, surname, nickname, avatar_url, avatar_framing, bio, role')
             .eq('status', 'active')
             .order('nickname', { ascending: true }),
           supabase
@@ -429,7 +429,7 @@ export default function MembersPage() {
               <Card hoverable className="h-full border-brand-brown/25 bg-gradient-to-b from-brand-dark-grey to-brand-black/70">
                 <CardContent className="p-0">
                   <div className="flex items-start gap-4 p-6 pb-4">
-                    <Avatar src={member.profile.avatar_url} alt={member.displayName} size="lg" />
+                    <Avatar src={member.profile.avatar_url} framing={member.profile.avatar_framing} alt={member.displayName} size="lg" />
                     <div className="min-w-0 flex-1">
                       <p className="text-lg font-semibold text-brand-cream">{member.displayName}</p>
                       <p className="mt-1 inline-flex rounded-full bg-brand-brown/20 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-brand-tan">

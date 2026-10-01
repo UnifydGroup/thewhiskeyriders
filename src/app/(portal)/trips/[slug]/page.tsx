@@ -38,7 +38,7 @@ import type { NewsItem } from '@/lib/news/types';
 import { getCountdownParts, getCountdownTargetDate } from '@/lib/trip-countdown';
 
 type TripMemberWithProfile = TripMember & {
-  profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url'> | null;
+  profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url' | 'avatar_framing'> | null;
 };
 
 type TripDocument = {
@@ -214,7 +214,7 @@ export default function TripDetailPage() {
         // Get members
         const { data: membersData } = await supabase
           .from('trip_members')
-          .select('*, profiles!user_id(id, full_name, nickname, avatar_url)')
+          .select('*, profiles!user_id(id, full_name, nickname, avatar_url, avatar_framing)')
           .eq('trip_id', tripData.id);
 
         if (membersData) {
@@ -621,6 +621,7 @@ export default function TripDetailPage() {
                         <div className="flex items-center gap-3 min-w-0">
                           <Avatar
                             src={member.profiles?.avatar_url || null}
+                            framing={member.profiles?.avatar_framing}
                             alt={getMemberDisplayName(member.profiles) || 'Rider'}
                             size="md"
                           />

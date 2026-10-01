@@ -129,6 +129,10 @@ export interface Profile {
   nickname: string | null;
   /** Member-chosen dashboard hero background. Null = use the next trip's cover image. */
   dashboard_background_url?: string | null;
+  /** Focal point + zoom ({x, y, zoom}) for avatar_url; read with parseFraming. Null = centred. */
+  avatar_framing?: unknown;
+  /** Focal point + zoom for the dashboard background. Null = centred. */
+  dashboard_background_framing?: unknown;
   status: string;
   created_at: string | null;
   updated_at: string | null;
@@ -155,6 +159,8 @@ export interface Trip {
   description: string | null;
   itinerary: string | null;
   cover_image_url: string | null;
+  /** Focal point + zoom for cover_image_url. Null = centred. */
+  cover_image_framing?: unknown;
   status: TripStatus;
   /** Official trip or a tweener. Defaults to 'trip'. */
   trip_type?: TripType | null;

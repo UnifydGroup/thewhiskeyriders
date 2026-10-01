@@ -11,6 +11,7 @@ import {
   getUserProfile,
   isValidEmail,
 } from '@/lib/api/helpers';
+import { framingFromRequest } from '@/lib/images/framing';
 
 type Params = Promise<{ id: string }>;
 
@@ -113,6 +114,7 @@ export async function GET(request: NextRequest, props: { params: Params }) {
         email: member.email,
         full_name: member.full_name,
         avatar_url: member.avatar_url,
+        avatar_framing: member.avatar_framing ?? null,
         bio: member.bio,
         trip_count: trips?.length || 0,
       });
@@ -205,6 +207,14 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.full_name !== undefined) updateData.full_name = normalizeTextValue(body.full_name);
 
     if (body.avatar_url !== undefined) updateData.avatar_url = normalizeTextValue(body.avatar_url);
+    for (const field of ['avatar_framing', 'dashboard_background_framing'] as const) {
+      if (body[field] === undefined) continue;
+      const framing = framingFromRequest(body[field]);
+      if (framing === undefined) {
+        return errorResponse(ApiErrors.BAD_REQUEST, `Invalid ${field}`);
+      }
+      updateData[field] = framing;
+    }
     if (body.dashboard_background_url !== undefined) {
       updateData.dashboard_background_url = normalizeTextValue(body.dashboard_background_url);
     }

@@ -220,7 +220,7 @@ export default function MemberProfilePage() {
 
         <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div className="flex items-start gap-4">
-            <Avatar src={profile.avatar_url} alt={displayName} size="xl" />
+            <Avatar src={profile.avatar_url} framing={profile.avatar_framing} alt={displayName} size="xl" />
             <div>
               <h1 className="text-3xl font-bold text-brand-cream sm:text-4xl">{displayName}</h1>
               <p className="mt-1 text-brand-tan">&quot;{nickname}&quot;</p>
