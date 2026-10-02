@@ -1311,6 +1311,7 @@ export type Database = {
           media_type: string
           mime_type: string | null
           storage_path: string
+          thumbnail_framing: Json | null
           trip_id: string
           uploaded_by: string
           width: number | null
@@ -1324,6 +1325,7 @@ export type Database = {
           media_type?: string
           mime_type?: string | null
           storage_path: string
+          thumbnail_framing?: Json | null
           trip_id: string
           uploaded_by: string
           width?: number | null
@@ -1337,6 +1339,7 @@ export type Database = {
           media_type?: string
           mime_type?: string | null
           storage_path?: string
+          thumbnail_framing?: Json | null
           trip_id?: string
           uploaded_by?: string
           width?: number | null
@@ -1375,6 +1378,10 @@ export type Database = {
           address_postcode: string | null
           address_state: string | null
           avatar_url: string | null
+          avatar_framing: Json | null
+          dashboard_background_framing: Json | null
+          dashboard_background_url: string | null
+          notification_preferences: Json
           bio: string | null
           created_at: string | null
           date_of_birth: string | null
@@ -1409,6 +1416,10 @@ export type Database = {
           address_postcode?: string | null
           address_state?: string | null
           avatar_url?: string | null
+          avatar_framing?: Json | null
+          dashboard_background_framing?: Json | null
+          dashboard_background_url?: string | null
+          notification_preferences?: Json
           bio?: string | null
           created_at?: string | null
           date_of_birth?: string | null
@@ -1443,6 +1454,10 @@ export type Database = {
           address_postcode?: string | null
           address_state?: string | null
           avatar_url?: string | null
+          avatar_framing?: Json | null
+          dashboard_background_framing?: Json | null
+          dashboard_background_url?: string | null
+          notification_preferences?: Json
           bio?: string | null
           created_at?: string | null
           date_of_birth?: string | null
@@ -2222,6 +2237,7 @@ export type Database = {
           country: string
           country_code: string | null
           cover_image_url: string | null
+          cover_image_framing: Json | null
           created_at: string | null
           created_by: string | null
           description: string | null
@@ -2246,6 +2262,7 @@ export type Database = {
           country: string
           country_code?: string | null
           cover_image_url?: string | null
+          cover_image_framing?: Json | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null
@@ -2270,6 +2287,7 @@ export type Database = {
           country?: string
           country_code?: string | null
           cover_image_url?: string | null
+          cover_image_framing?: Json | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null

@@ -12,6 +12,7 @@ import {
   getCurrentUser,
 } from '@/lib/api/helpers';
 import { parseTripType } from '@/lib/trip-type';
+import { framingFromRequest } from '@/lib/images/framing';
 
 type Params = Promise<{ id: string }>;
 
@@ -127,7 +128,18 @@ export async function PUT(request: NextRequest, props: { params: Params }) {
     if (body.end_date !== undefined) updateData.end_date = body.end_date;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.itinerary !== undefined) updateData.itinerary = body.itinerary || null;
-    if (body.cover_image_url !== undefined) updateData.cover_image_url = body.cover_image_url;
+    if (body.cover_image_url !== undefined) {
+      updateData.cover_image_url = body.cover_image_url;
+      // A new cover image starts centred unless framing is sent with it.
+      if (body.cover_image_url !== existingTrip.cover_image_url) updateData.cover_image_framing = null;
+    }
+    if (body.cover_image_framing !== undefined) {
+      const framing = framingFromRequest(body.cover_image_framing);
+      if (framing === undefined) {
+        return errorResponse(ApiErrors.BAD_REQUEST, 'Invalid cover_image_framing');
+      }
+      updateData.cover_image_framing = framing;
+    }
     if (body.status !== undefined) updateData.status = body.status;
     if (body.trip_type !== undefined) {
       const tripType = parseTripType(body.trip_type);

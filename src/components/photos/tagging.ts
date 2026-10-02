@@ -6,6 +6,8 @@ export interface PhotoTag {
   tag_type: TagType;
   tag_value: string;
   created_by?: string;
+  /** For person tags: the member's profile id (tag_value then holds their display name). */
+  person_id?: string;
 }
 
 export const TAG_TYPES: { value: TagType; label: string }[] = [

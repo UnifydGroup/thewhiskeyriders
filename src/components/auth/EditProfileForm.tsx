@@ -11,7 +11,10 @@ import { Notification } from '@/components/ui/Notification';
 import { Spinner } from '@/components/ui/Spinner';
 import { Avatar } from '@/components/ui/Avatar';
 import { ImageCropModal } from '@/components/ui/ImageCropModal';
-import { AlertCircle, Upload, Trash2 } from 'lucide-react';
+import { ImageFramingEditor } from '@/components/ui/ImageFramingEditor';
+import { AlertCircle, Upload, Trash2, Crop } from 'lucide-react';
+import { downscaleImage, IMAGE_MAX_DIMENSIONS } from '@/lib/images/resize';
+import { isDefaultFraming, type ImageFraming } from '@/lib/images/framing';
 import { APPAREL_SIZES } from '@/lib/profile-options';
 
 interface EditProfileFormProps {
@@ -68,6 +71,7 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
   const [success, setSuccess] = useState(false);
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [framingEditorOpen, setFramingEditorOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     first_name: profile.first_name || parsedName.first_name || '',
@@ -90,6 +94,7 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
     emergency_contact: profile.emergency_contact || '',
     emergency_contact_number: profile.emergency_contact_number || '',
     avatar_url: profile.avatar_url || '',
+    avatar_framing: (profile.avatar_framing ?? null) as ImageFraming | null,
   });
 
   const handleChange = (
@@ -113,8 +118,8 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Profile image must be 5MB or smaller.');
+    if (file.size > 20 * 1024 * 1024) {
+      setError('Profile image must be 20MB or smaller.');
       return;
     }
 
@@ -147,7 +152,7 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
 
       const { error: uploadError } = await supabase.storage
         .from('photos')
-        .upload(path, croppedImageBlob, {
+        .upload(path, await downscaleImage(croppedImageBlob, IMAGE_MAX_DIMENSIONS.avatar), {
           cacheControl: '3600',
           upsert: true,
           contentType: 'image/jpeg'
@@ -161,7 +166,8 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
         data: { publicUrl },
       } = supabase.storage.from('photos').getPublicUrl(path);
 
-      setFormData((prev) => ({ ...prev, avatar_url: publicUrl }));
+      // A new photo starts centred; it can be fine-tuned with Adjust photo.
+      setFormData((prev) => ({ ...prev, avatar_url: publicUrl, avatar_framing: null }));
       setCropModalOpen(false);
       setImageToCrop(null);
     } catch (err) {
@@ -172,7 +178,7 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
   };
 
   const handleRemoveAvatar = () => {
-    setFormData((prev) => ({ ...prev, avatar_url: '' }));
+    setFormData((prev) => ({ ...prev, avatar_url: '', avatar_framing: null }));
     setCropModalOpen(false);
     setImageToCrop(null);
   };
@@ -283,6 +289,7 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
             <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
               <Avatar
                 src={formData.avatar_url || null}
+                framing={formData.avatar_framing}
                 alt={buildFullName(formData.first_name, formData.middle_name, formData.surname) || 'User'}
                 size="xl"
               />
@@ -298,6 +305,16 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
                     disabled={uploadingImage || loading}
                   />
                 </label>
+                {formData.avatar_url && (
+                  <button
+                    type="button"
+                    onClick={() => setFramingEditorOpen(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-dark border border-brand-gold/30 text-brand-cream hover:border-brand-gold/60 transition-colors"
+                  >
+                    <Crop className="w-4 h-4" />
+                    Adjust Photo
+                  </button>
+                )}
                 {formData.avatar_url && (
                   <button
                     type="button"
@@ -637,6 +654,26 @@ export default function EditProfileForm({ profile, onSave }: EditProfileFormProp
           confirmLabel="Upload Photo"
           processingLabel="Uploading..."
           cropShape="round"
+        />
+
+        <ImageFramingEditor
+          isOpen={framingEditorOpen}
+          imageSrc={formData.avatar_url || null}
+          initialFraming={formData.avatar_framing}
+          aspect={1}
+          round
+          title="Adjust profile photo"
+          description="Drag to reposition and zoom to fit. Click Save Changes below to keep it."
+          previews={[
+            { label: 'Profile page', aspect: 1, round: true, height: 6 },
+            { label: 'Member list', aspect: 1, round: true, height: 4 },
+            { label: 'Comments', aspect: 1, round: true, height: 2.5 },
+          ]}
+          onClose={() => setFramingEditorOpen(false)}
+          onSave={(framing) => {
+            setFormData((prev) => ({ ...prev, avatar_framing: isDefaultFraming(framing) ? null : framing }));
+            setFramingEditorOpen(false);
+          }}
         />
       </CardContent>
     </Card>

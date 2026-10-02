@@ -35,9 +35,10 @@ import { NewsCard } from '@/components/news/NewsCard';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { isTweener } from '@/lib/trip-type';
 import type { NewsItem } from '@/lib/news/types';
+import { getCountdownParts, getCountdownTargetDate } from '@/lib/trip-countdown';
 
 type TripMemberWithProfile = TripMember & {
-  profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url'> | null;
+  profiles: Pick<Profile, 'id' | 'full_name' | 'nickname' | 'avatar_url' | 'avatar_framing'> | null;
 };
 
 type TripDocument = {
@@ -88,27 +89,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
-}
-
-function getCountdownTargetDate(trip: Pick<Trip, 'start_date' | 'countdown_target_at'>): Date | null {
-  if (trip.countdown_target_at) {
-    const explicitDate = new Date(trip.countdown_target_at);
-    if (!Number.isNaN(explicitDate.getTime())) {
-      return explicitDate;
-    }
-  }
-
-  const fallbackDate = new Date(`${trip.start_date}T00:00:00`);
-  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
-}
-
-function getCountdownParts(milliseconds: number) {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return { days, hours, minutes, seconds };
 }
 
 export default function TripDetailPage() {
@@ -234,7 +214,7 @@ export default function TripDetailPage() {
         // Get members
         const { data: membersData } = await supabase
           .from('trip_members')
-          .select('*, profiles!user_id(id, full_name, nickname, avatar_url)')
+          .select('*, profiles!user_id(id, full_name, nickname, avatar_url, avatar_framing)')
           .eq('trip_id', tripData.id);
 
         if (membersData) {
@@ -641,6 +621,7 @@ export default function TripDetailPage() {
                         <div className="flex items-center gap-3 min-w-0">
                           <Avatar
                             src={member.profiles?.avatar_url || null}
+                            framing={member.profiles?.avatar_framing}
                             alt={getMemberDisplayName(member.profiles) || 'Rider'}
                             size="md"
                           />

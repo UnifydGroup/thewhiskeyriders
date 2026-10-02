@@ -1,21 +1,24 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import Link from 'next/link';
-import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { buildFramedPhotoUrl, buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { framingStyle, isDefaultFraming, parseFraming } from '@/lib/images/framing';
 import type { Trip } from '@/lib/types/database';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
 import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
 import { cn } from '@/lib/utils';
+import { RiderPhotoFinder } from '@/components/photos/RiderPhotoFinder';
 
 interface TripWithCover extends Trip {
   coverPhotoUrl?: string | null;
   coverMediaType?: 'image' | 'video' | null;
+  coverFraming?: unknown;
 }
 
 interface PhotoCoverRow {
@@ -50,8 +53,13 @@ export default function GalleryPage() {
             if (trip.cover_image_url) {
               return {
                 ...trip,
-                coverPhotoUrl: buildOptimizedPhotoUrl(trip.cover_image_url, 'cover'),
+                coverPhotoUrl: buildFramedPhotoUrl(
+                  trip.cover_image_url,
+                  'cover',
+                  !isDefaultFraming(parseFraming(trip.cover_image_framing))
+                ),
                 coverMediaType: 'image' as const,
+                coverFraming: trip.cover_image_framing ?? null,
               };
             }
 
@@ -146,6 +154,10 @@ export default function GalleryPage() {
         </Card>
       )}
 
+      <Suspense fallback={null}>
+        <RiderPhotoFinder trips={trips} />
+      </Suspense>
+
       <div className="space-y-3">
         {typeCounts.tweener > 0 && (
           <TripTypeFilter value={typeFilter} onChange={setTypeFilter} counts={typeCounts} />
@@ -215,7 +227,7 @@ export default function GalleryPage() {
                         preload="metadata"
                       />
                     ) : (
-                      <img src={trip.coverPhotoUrl} alt={trip.name} className="w-full h-full object-cover" />
+                      <img src={trip.coverPhotoUrl} alt={trip.name} className="w-full h-full object-cover" style={framingStyle(trip.coverFraming)} />
                     ))}
                   <div className="absolute inset-0 bg-brand-black/40" />
                   <div className="absolute top-3 left-3">

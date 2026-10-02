@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { framingFromRequest } from '@/lib/images/framing';
+import type { Json } from '@/lib/types/database.generated';
 
 type Role = 'super_admin' | 'admin' | 'trip_admin' | 'member';
 const ADMIN_ROLES: Role[] = ['super_admin', 'admin'];
@@ -21,6 +23,7 @@ interface PhotoRow {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  thumbnail_framing?: unknown;
   created_at: string;
   profiles?: ProfileDisplay | ProfileDisplay[] | null;
 }
@@ -150,6 +153,7 @@ export async function GET(
         mime_type,
         width,
         height,
+        thumbnail_framing,
         created_at,
         profiles:uploaded_by(full_name, nickname)
         `
@@ -253,6 +257,71 @@ export async function DELETE(
     return NextResponse.json({ success: true, deleted_photo_id: photoId });
   } catch (error) {
     console.error('DELETE /api/trips/[id]/photos error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/trips/[id]/photos?photoId=... - Adjust how a photo's thumbnail is framed.
+ * Body: { thumbnail_framing: { x, y, zoom } | null }. Admins or the uploader only.
+ */
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: tripId } = await context.params;
+    const photoId = request.nextUrl.searchParams.get('photoId');
+
+    if (!photoId) {
+      return NextResponse.json({ error: 'photoId is required' }, { status: 400 });
+    }
+
+    const body = (await request.json().catch(() => null)) as { thumbnail_framing?: unknown } | null;
+    const framing = framingFromRequest(body?.thumbnail_framing);
+    if (!body || body.thumbnail_framing === undefined || framing === undefined) {
+      return NextResponse.json({ error: 'A valid thumbnail_framing is required' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { user, role } = await getUserAndRole(supabase);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data: photo, error: photoError } = await supabase
+      .from('photos')
+      .select('id, trip_id, uploaded_by')
+      .eq('id', photoId)
+      .single();
+
+    if (photoError || !photo || photo.trip_id !== tripId) {
+      return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
+    }
+
+    const canEdit = (role && ADMIN_ROLES.includes(role)) || photo.uploaded_by === user.id;
+    if (!canEdit) {
+      return NextResponse.json({ error: 'Only admins or the uploader can adjust this photo' }, { status: 403 });
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const adminSupabase =
+      supabaseUrl && serviceRoleKey ? createSupabaseClient(supabaseUrl, serviceRoleKey) : null;
+
+    const { error: updateError } = await (adminSupabase ?? supabase)
+      .from('photos')
+      .update({ thumbnail_framing: framing as Json | null })
+      .eq('id', photoId)
+      .eq('trip_id', tripId);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, thumbnail_framing: framing });
+  } catch (error) {
+    console.error('PATCH /api/trips/[id]/photos error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -7,7 +7,7 @@ type TransformPreset = {
   resize: ResizeMode;
 };
 
-export type ImageTransformVariant = 'thumbnail' | 'detail' | 'cover';
+export type ImageTransformVariant = 'thumbnail' | 'detail' | 'cover' | 'thumbnail-uncropped' | 'cover-uncropped';
 
 const OBJECT_PUBLIC_SEGMENT = '/storage/v1/object/public/';
 const RENDER_PUBLIC_SEGMENT = '/storage/v1/render/image/public/';
@@ -30,6 +30,19 @@ const PRESETS: Record<ImageTransformVariant, TransformPreset> = {
     height: 675,
     quality: 70,
     resize: 'cover',
+  },
+  // Uncropped variants keep the whole image so a custom focal point/zoom can frame it in CSS.
+  'thumbnail-uncropped': {
+    width: 900,
+    height: 900,
+    quality: 65,
+    resize: 'contain',
+  },
+  'cover-uncropped': {
+    width: 1600,
+    height: 1600,
+    quality: 72,
+    resize: 'contain',
   },
 };
 
@@ -78,4 +91,19 @@ export function buildOptimizedPhotoUrl(
   } catch {
     return rawUrl;
   }
+}
+
+/**
+ * Pick the right rendition for a framed image. Default framing can use the server-side
+ * centre crop; custom framing needs the uncropped image so CSS can position it.
+ */
+export function buildFramedPhotoUrl(
+  rawUrl: string | null | undefined,
+  variant: 'thumbnail' | 'cover',
+  hasCustomFraming: boolean
+) {
+  if (!hasCustomFraming) {
+    return buildOptimizedPhotoUrl(rawUrl, variant);
+  }
+  return buildOptimizedPhotoUrl(rawUrl, variant === 'thumbnail' ? 'thumbnail-uncropped' : 'cover-uncropped');
 }

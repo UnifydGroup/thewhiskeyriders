@@ -2,6 +2,7 @@ import { Menu, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -26,7 +27,8 @@ export function TopBar({ onMenuClick, userEmail, onLogout }: TopBarProps) {
           </Link>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <NotificationBell />
           {userEmail && (
             <span className="text-sm text-brand-cream/70 hidden sm:inline truncate">
               {userEmail}

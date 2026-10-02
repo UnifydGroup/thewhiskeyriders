@@ -15,6 +15,7 @@ import {
   normalizeIdArray,
   type RawNewsPostRow,
 } from '@/lib/news/server';
+import { notifyNewsPublished } from '@/lib/notifications/server';
 import { dispatchNewsPublicationEmails } from '@/lib/news/email';
 
 const NEWS_ADMIN_ROLES = ['trip_admin', 'admin', 'super_admin'] as const;
@@ -346,6 +347,15 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
         console.error('[news-email] publish transition dispatch failed', {
           news_post_id: newsId,
           error: emailError instanceof Error ? emailError.message : emailError,
+        });
+      }
+
+      try {
+        await notifyNewsPublished(newsItem, newsItem.author_id);
+      } catch (notifyError: unknown) {
+        console.error('[news-notify] publish transition notifications failed', {
+          news_post_id: newsId,
+          error: notifyError instanceof Error ? notifyError.message : notifyError,
         });
       }
     }
