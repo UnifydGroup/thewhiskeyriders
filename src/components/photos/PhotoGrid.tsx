@@ -8,6 +8,9 @@ import { createClient } from '@/lib/supabase/client';
 import { buildFramedPhotoUrl, buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 import { framingStyle, isDefaultFraming, parseFraming, type ImageFraming } from '@/lib/images/framing';
 import { ImageFramingEditor } from '@/components/ui/ImageFramingEditor';
+import { Avatar } from '@/components/ui/Avatar';
+import { cn } from '@/lib/utils';
+import type { TaggedPerson } from '@/lib/photos/people';
 import PhotoTagEditor from './PhotoTagEditor';
 import PhotoLikeButton from './PhotoLikeButton';
 import PhotoCommentsSection from './PhotoCommentsSection';
@@ -49,6 +52,10 @@ interface PhotoGridProps {
   albumThumbnailPhotoUrl?: string | null;
   settingAlbumThumbnailPhotoId?: string | null;
   onSetAlbumThumbnail?: (photo: Photo) => Promise<void> | void;
+  /** People to filter by on first load (profile ids), e.g. from a ?person= link. */
+  initialPersonIds?: string[];
+  /** Called when the people filter changes, so the page can keep the URL in sync. */
+  onPersonFilterChange?: (personIds: string[]) => void;
 }
 
 interface TripMemberProfile {
@@ -72,6 +79,11 @@ function isPhotoTag(value: unknown): value is PhotoTag {
   );
 }
 
+/** Stable key for a person tag: their profile id, or the name for old name-only tags. */
+function personKeyOf(tag: PhotoTag) {
+  return tag.person_id || `name:${tag.tag_value.trim().toLowerCase()}`;
+}
+
 function isVideoPhoto(photo: Pick<Photo, 'media_type'>) {
   return photo.media_type === 'video';
 }
@@ -86,12 +98,15 @@ export default function PhotoGrid({
   albumThumbnailPhotoUrl = null,
   settingAlbumThumbnailPhotoId = null,
   onSetAlbumThumbnail,
+  initialPersonIds = [],
+  onPersonFilterChange,
 }: PhotoGridProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedPhotoIdx, setSelectedPhotoIdx] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploaderFilter, setUploaderFilter] = useState<string>('all');
-  const [personFilter, setPersonFilter] = useState<string>('all');
+  const [selectedPeople, setSelectedPeople] = useState<string[]>(initialPersonIds);
+  const [peopleAvatars, setPeopleAvatars] = useState<Record<string, { avatar_url: string | null; avatar_framing: unknown }>>({});
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [bulkTagType, setBulkTagType] = useState<TagType>('person');
   const [bulkTagValue, setBulkTagValue] = useState('');
@@ -196,32 +211,31 @@ export default function PhotoGrid({
       setTagDataLoading(true);
 
       try {
-        const tagEntries = await Promise.all(
-          photos.map(async (photo) => {
-            const response = await fetch(`/api/trips/${tripId}/photos/${photo.id}/tags`, {
-              credentials: 'include',
-            });
+        // One request for every tag in the trip (was one request per photo).
+        const response = await fetch(`/api/trips/${tripId}/photos/tags`, { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error(`Tags request failed (${response.status})`);
+        }
 
-            if (!response.ok) {
-              return [photo.id, [] as PhotoTag[]] as const;
-            }
-
-            const data: unknown = await response.json();
-            const tags = Array.isArray(data) ? data.filter(isPhotoTag) : [];
-
-            return [photo.id, tags] as const;
-          })
-        );
+        const payload: { tags?: unknown[]; people?: TaggedPerson[] } = await response.json();
 
         if (cancelled) {
           return;
         }
 
         const nextTagsByPhotoId: Record<string, PhotoTag[]> = {};
-        tagEntries.forEach(([photoId, tags]) => {
-          nextTagsByPhotoId[photoId] = tags;
+        (payload.tags ?? []).forEach((raw) => {
+          if (!isPhotoTag(raw)) return;
+          const photoId = (raw as PhotoTag & { photo_id?: string }).photo_id;
+          if (!photoId) return;
+          (nextTagsByPhotoId[photoId] ??= []).push(raw);
         });
 
+        setPeopleAvatars(
+          Object.fromEntries(
+            (payload.people ?? []).map((person) => [person.id, { avatar_url: person.avatar_url, avatar_framing: person.avatar_framing }])
+          )
+        );
         setTagsByPhotoId(nextTagsByPhotoId);
       } catch (err) {
         if (!cancelled) {
@@ -298,19 +312,40 @@ export default function PhotoGrid({
     return uploaderNames.sort((a, b) => a.localeCompare(b));
   }, [photos]);
 
-  const personTagOptions = useMemo(() => {
-    const names = new Set<string>();
+  // Everyone tagged in this gallery, most-photographed first. Built from the loaded tags so
+  // tags added or removed in the photo viewer show up straight away.
+  const peopleOptions = useMemo(() => {
+    const people = new Map<string, { id: string; name: string; photoIds: Set<string> }>();
+    const visiblePhotoIds = new Set(photos.map((photo) => photo.id));
 
-    Object.values(tagsByPhotoId).forEach((tags) => {
+    Object.entries(tagsByPhotoId).forEach(([photoId, tags]) => {
+      if (!visiblePhotoIds.has(photoId)) return;
       tags.forEach((tag) => {
-        if (tag.tag_type === 'person' && tag.tag_value.trim()) {
-          names.add(tag.tag_value.trim());
-        }
+        if (tag.tag_type !== 'person' || !tag.tag_value.trim()) return;
+        const id = personKeyOf(tag);
+        const entry = people.get(id) ?? { id, name: tag.tag_value.trim(), photoIds: new Set<string>() };
+        entry.photoIds.add(photoId);
+        people.set(id, entry);
       });
     });
 
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [tagsByPhotoId]);
+    return Array.from(people.values())
+      .map((person) => ({ id: person.id, name: person.name, count: person.photoIds.size, ...peopleAvatars[person.id] }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [peopleAvatars, photos, tagsByPhotoId]);
+
+  const togglePerson = (personId: string) => {
+    setSelectedPeople((previous) => {
+      const next = previous.includes(personId) ? previous.filter((id) => id !== personId) : [...previous, personId];
+      onPersonFilterChange?.(next);
+      return next;
+    });
+  };
+
+  const clearPeople = () => {
+    setSelectedPeople([]);
+    onPersonFilterChange?.([]);
+  };
 
   const filteredPhotos = useMemo(() => {
     const loweredQuery = searchQuery.trim().toLowerCase();
@@ -330,14 +365,14 @@ export default function PhotoGrid({
       const matchesQuery = !loweredQuery || searchableContent.includes(loweredQuery);
       const matchesUploader =
         uploaderFilter === 'all' || (photo.uploader_name || 'Unknown') === uploaderFilter;
+      // With several people selected, only photos that include all of them.
+      const photoPeople = new Set(photoTags.filter((tag) => tag.tag_type === 'person').map(personKeyOf));
       const matchesPerson =
-        !allowTagging ||
-        personFilter === 'all' ||
-        photoTags.some((tag) => tag.tag_type === 'person' && tag.tag_value === personFilter);
+        !allowTagging || selectedPeople.length === 0 || selectedPeople.every((id) => photoPeople.has(id));
 
       return matchesQuery && matchesUploader && matchesPerson;
     });
-  }, [allowTagging, photos, personFilter, searchQuery, tagsByPhotoId, uploaderFilter]);
+  }, [allowTagging, photos, selectedPeople, searchQuery, tagsByPhotoId, uploaderFilter]);
 
   useEffect(() => {
     if (selectedPhotoIdx !== null && selectedPhotoIdx >= filteredPhotos.length) {
@@ -586,34 +621,58 @@ export default function PhotoGrid({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          {allowTagging && (
-            <div>
-              <label className="text-xs uppercase tracking-wider text-brand-cream/60 mb-1 block">
-                Tagged Person
-              </label>
-              <select
-                value={personFilter}
-                onChange={(event) => setPersonFilter(event.target.value)}
-                className="w-full px-3 py-2 bg-brand-black border border-brand-brown/20 rounded text-base sm:text-sm text-brand-cream focus:outline-none focus:border-brand-brown"
-              >
-                <option value="all">All people</option>
-                {personTagOptions.map((personName) => (
-                  <option key={personName} value={personName}>
-                    {personName}
-                  </option>
-                ))}
-              </select>
+        {allowTagging && peopleOptions.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <p id="people-filter-label" className="text-xs uppercase tracking-wider text-brand-cream/60">
+                People in this gallery
+              </p>
+              {selectedPeople.length > 0 && (
+                <button type="button" onClick={clearPeople} className="text-xs font-semibold text-brand-brown hover:text-brand-tan">
+                  Clear people
+                </button>
+              )}
             </div>
-          )}
+            <div role="group" aria-labelledby="people-filter-label" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
+              {peopleOptions.map((person) => {
+                const selected = selectedPeople.includes(person.id);
+                return (
+                  <button
+                    key={person.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => togglePerson(person.id)}
+                    className={cn(
+                      'flex flex-shrink-0 items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-sm transition-colors',
+                      selected
+                        ? 'border-brand-brown bg-brand-brown text-brand-cream'
+                        : 'border-brand-brown/30 bg-brand-black/40 text-brand-cream/85 hover:border-brand-brown/70'
+                    )}
+                  >
+                    <Avatar src={person.avatar_url ?? null} framing={person.avatar_framing} alt={person.name} size="sm" />
+                    <span className="whitespace-nowrap font-medium">{person.name}</span>
+                    <span className={cn('text-xs tabular-nums', selected ? 'text-brand-cream/80' : 'text-brand-cream/50')}>
+                      {person.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedPeople.length > 1 && (
+              <p className="text-xs text-brand-cream/60">Showing photos with all {selectedPeople.length} people together.</p>
+            )}
+          </div>
+        )}
 
-          <p className={`text-sm text-brand-cream/70 ${allowTagging ? 'md:col-span-2' : 'md:col-span-3'}`}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+
+          <p className="text-sm text-brand-cream/70 md:col-span-3">
             Showing {filteredPhotos.length} of {photos.length} item{photos.length !== 1 ? 's' : ''}
             {allowTagging && tagDataLoading ? ' (loading tags...)' : ''}
           </p>
         </div>
 
-        {(searchQuery || uploaderFilter !== 'all' || (allowTagging && personFilter !== 'all')) && (
+        {(searchQuery || uploaderFilter !== 'all' || (allowTagging && selectedPeople.length > 0)) && (
           <div>
             <Button
               variant="outline"
@@ -622,7 +681,7 @@ export default function PhotoGrid({
                 setSearchQuery('');
                 setUploaderFilter('all');
                 if (allowTagging) {
-                  setPersonFilter('all');
+                  clearPeople();
                 }
               }}
             >

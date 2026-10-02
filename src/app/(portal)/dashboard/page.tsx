@@ -339,7 +339,7 @@ export default function DashboardPage() {
       label: "Photos you're in",
       value: photos.length,
       sub: photos[0] ? `Latest from ${photos[0].trip_name}` : 'Get tagged in the gallery',
-      href: '/profile#tagged-photos',
+      href: `/gallery?person=${profile.id}`,
     },
     {
       label: 'Badges',
@@ -677,7 +677,7 @@ export default function DashboardPage() {
         <div className="flex items-baseline justify-between">
           <h2 id="photos-heading" className={SECTION_HEADING}>Photos you&apos;re in</h2>
           {photos.length > 0 && (
-            <Link href="/profile#tagged-photos" className="text-sm font-semibold text-brand-brown hover:text-brand-tan">
+            <Link href={`/gallery?person=${profile.id}`} className="text-sm font-semibold text-brand-brown hover:text-brand-tan">
               See all {photos.length} →
             </Link>
           )}
@@ -694,7 +694,7 @@ export default function DashboardPage() {
             {photos.slice(0, 6).map((photo) => (
               <Link
                 key={photo.id}
-                href={`/gallery/${photo.trip_slug}`}
+                href={`/gallery/${photo.trip_slug}?person=${profile.id}`}
                 className="group overflow-hidden rounded-lg border border-brand-brown/20 bg-brand-black/40"
               >
                 <div className="relative aspect-square transition-transform group-hover:scale-105">

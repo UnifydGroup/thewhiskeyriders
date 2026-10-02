@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -13,6 +13,7 @@ import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
 import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
 import { cn } from '@/lib/utils';
+import { RiderPhotoFinder } from '@/components/photos/RiderPhotoFinder';
 
 interface TripWithCover extends Trip {
   coverPhotoUrl?: string | null;
@@ -152,6 +153,10 @@ export default function GalleryPage() {
           <CardContent className="pt-4 text-sm text-red-300">{errorMessage}</CardContent>
         </Card>
       )}
+
+      <Suspense fallback={null}>
+        <RiderPhotoFinder trips={trips} />
+      </Suspense>
 
       <div className="space-y-3">
         {typeCounts.tweener > 0 && (

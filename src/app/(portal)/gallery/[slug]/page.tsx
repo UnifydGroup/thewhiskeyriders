@@ -2,7 +2,8 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { parsePersonParam } from '@/lib/photos/people';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -55,6 +56,11 @@ function getUploaderName(profile: ProfileLite | ProfileLite[] | null | undefined
 }
 
 export default function TripGalleryPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // ?person=<id> (or several, comma separated) opens the gallery filtered to those people.
+  const [initialPersonIds] = useState(() => parsePersonParam(searchParams.get('person')));
   const params = useParams();
   const slug = params.slug as string;
   const supabase = useMemo(() => createClient(), []);
@@ -244,6 +250,14 @@ export default function TripGalleryPage() {
           tripId={trip.id}
           isAdmin={isAdmin}
           currentUserId={currentUserId}
+          initialPersonIds={initialPersonIds}
+          onPersonFilterChange={(personIds) => {
+            const params = new URLSearchParams(searchParams.toString());
+            if (personIds.length > 0) params.set('person', personIds.join(','));
+            else params.delete('person');
+            const query = params.toString();
+            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+          }}
           onPhotoDelete={(photoId) => {
             setPhotos((previous) => previous.filter((photo) => photo.id !== photoId));
           }}

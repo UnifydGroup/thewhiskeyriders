@@ -81,7 +81,7 @@ export default function TaggedPhotosSection({ profile }: { profile: Profile }) {
           {photos.map((photo) => (
             <Link
               key={photo.id}
-              href={`/gallery/${photo.trip_slug}`}
+              href={`/gallery/${photo.trip_slug}?person=${profile.id}`}
               className="group rounded-lg overflow-hidden border border-brand-brown/20 bg-brand-brown/10"
             >
               <div className="relative aspect-square overflow-hidden">
