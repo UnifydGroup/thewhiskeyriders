@@ -188,7 +188,14 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }
     }
-    const totalBudgetAud = toNumber(budgetSettings.total_budget_aud);
+    // Group budget = per-person budget × actual member count. The stored total_budget_aud
+    // is only a snapshot from when settings were last saved, so it goes stale as members
+    // join or leave (e.g. $5,000 × 16 saved, then a 17th member added). Fall back to the
+    // stored total only when no per-person budget is set.
+    const perPersonBudgetAud = toNumber(budgetSettings.per_person_budget_aud);
+    const totalBudgetAud = perPersonBudgetAud > 0 && memberCount > 0
+      ? Math.round(perPersonBudgetAud * memberCount * 100) / 100
+      : toNumber(budgetSettings.total_budget_aud);
 
     // Kitty requirement = billable group budget only. Interest earned on pooled funds is
     // NOT subtracted here — it tops up the kitty for on-trip discretionary spend (food,
@@ -253,9 +260,11 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // ── Category breakdown with actuals ──────────────────────────────────────
     const categoriesWithActuals = categories.map((cat: any) => {
-      const plannedAud = toNumber(cat.planned_aud);
+      let plannedAud = toNumber(cat.planned_aud);
       const spentAud = expensesByCategory[cat.id] ?? 0;
-      // Parse parts for group/personal split
+      // Parse parts for group/personal split. Per-person parts use the live memberCount
+      // (same as the overview totals above) — part.member_count and the stored planned_aud
+      // are snapshots that go stale when the member count changes.
       let groupPlanned = plannedAud;
       let personalPlanned = 0;
       if (cat.notes) {
@@ -266,13 +275,15 @@ export async function GET(request: NextRequest, { params }: Params) {
             for (const part of parsed.parts) {
               const partTotal = part.basis === 'group'
                 ? toNumber(part.amount_aud)
-                : toNumber(part.amount_aud) * Math.max(1, toNumber(part.member_count));
+                : toNumber(part.amount_aud) * Math.max(1, memberCount || toNumber(part.member_count));
               if (part.payment_type === 'personal') {
                 personalPlanned += partTotal;
               } else {
                 groupPlanned += partTotal;
               }
             }
+            // planned_aud = group spend drawn from the kitty (matches BudgetBuilder's save)
+            plannedAud = Math.round(groupPlanned * 100) / 100;
           }
         } catch { /* ignore */ }
       }
@@ -402,7 +413,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
       overview: showGroup ? {
         total_budget_aud: totalBudgetAud,
-        total_planned_aud: categories.reduce((s: number, c: any) => s + toNumber(c.planned_aud), 0),
+        total_planned_aud: categoriesWithActuals.reduce((s: number, c: any) => s + toNumber(c.planned_aud), 0),
         total_group_planned_aud: totalGroupPlannedAud,
         total_group_billable_aud: totalGroupBillableAud,
         total_personal_planned_aud: totalPersonalPlannedAud,
