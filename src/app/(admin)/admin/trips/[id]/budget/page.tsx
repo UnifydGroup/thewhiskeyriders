@@ -356,6 +356,8 @@ function normaliseBudgetParts(parts: BudgetPart[], defaultMemberCount: number): 
   const safeDefault = Math.max(1, defaultMemberCount);
   return parts
     .map((part) => ({
+      // Keep fields this legacy editor doesn't manage (member_ids, include_in_member_budget)
+      ...part,
       id: part.id || `part-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: (part.name || '').trim(),
       basis: (part.basis === 'group' ? 'group' : 'per_person') as BudgetPartBasis,
@@ -5328,6 +5330,7 @@ export default function AdminBudgetPage() {
           onRefresh={fetchData}
           onSettingsUpdate={handleBudgetSettingsPartialUpdate}
           getAuthHeader={getAuthHeader}
+          members={tripMembers}
         />
       )}
 
