@@ -40,8 +40,12 @@ export function getPartHeadcount(part: BudgetPartLike, currentMemberIds: string[
 /** Full cost of the item across everyone it applies to. */
 export function getPartTotalAud(part: BudgetPartLike, currentMemberIds: string[], everyoneCount: number): number {
   const amount = num(part.amount_aud);
+  const headcount = getPartHeadcount(part, currentMemberIds, everyoneCount);
+  // An item attributed only to members who have since left applies to nobody — don't
+  // let it inflate totals / the kitty collection target that no remaining member owes.
+  if (isPartAssigned(part) && headcount === 0) return 0;
   if (part.basis === 'group') return amount;
-  return amount * getPartHeadcount(part, currentMemberIds, everyoneCount);
+  return amount * headcount;
 }
 
 /** What a single member is responsible for from this item (0 if it doesn't apply to them). */
