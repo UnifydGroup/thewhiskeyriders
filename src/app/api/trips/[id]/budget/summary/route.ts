@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { verifyRole, errorResponse, successResponse, ApiErrors, supabase } from '@/lib/api/helpers';
+import { getPartTotalAud, getPartShareForMember } from '@/lib/budget/parts';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -146,6 +147,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       .eq('trip_id', tripId);
 
     const memberCount = (tripMembers ?? []).length;
+    const memberIds: string[] = (tripMembers ?? []).map((tm: any) => tm.user_id);
+    const everyoneCount = Math.max(1, memberCount);
 
     // ── Group vs personal planned split ─────────────────────────────────────
     // Parse each category's notes JSON to get parts with payment_type.
@@ -172,9 +175,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         totalGroupBillableAud += plannedAud;
       } else {
         for (const part of parts) {
-          const partTotal = part.basis === 'group'
-            ? toNumber(part.amount_aud)
-            : toNumber(part.amount_aud) * Math.max(1, memberCount || toNumber(part.member_count));
+          // Items can be attributed to a subset of members (e.g. one-way vs return flights).
+          const partTotal = getPartTotalAud(part, memberIds, everyoneCount);
           if (part.payment_type === 'personal') {
             totalPersonalPlannedAud += partTotal;
           } else {
@@ -206,26 +208,41 @@ export async function GET(request: NextRequest, { params }: Params) {
     const kittyPerMemberAud = memberCount > 0 ? Math.round((kittyRequirementAud / memberCount) * 100) / 100 : 0;
     const costSharePerMember = memberCount > 0 ? Math.round((totalBudgetAud / memberCount) * 100) / 100 : 0;
 
-    // Personal budget per member: sum of per_person personal parts' amount_aud
-    // (group-basis personal parts split by memberCount)
-    if (memberCount > 0) {
-      for (const cat of categories) {
-        let parts: any[] = [];
-        if (cat.notes) {
-          try {
-            const parsed = JSON.parse(cat.notes);
-            if (parsed && Array.isArray(parsed.parts)) parts = parsed.parts;
-          } catch { /* ignore */ }
-        }
-        for (const part of parts) {
-          if (part.payment_type === 'personal') {
-            personalBudgetPerMemberAud += part.basis === 'group'
-              ? toNumber(part.amount_aud) / memberCount
-              : toNumber(part.amount_aud);
-          }
+    // Per-member shares. Line items attributed to specific members (member_ids) only
+    // count toward those members, so shares can differ between members.
+    const kittyShareByMember: Record<string, number> = {};
+    const personalShareByMember: Record<string, number> = {};
+    for (const id of memberIds) { kittyShareByMember[id] = 0; personalShareByMember[id] = 0; }
+    for (const cat of categories) {
+      let parts: any[] = [];
+      if (cat.notes) {
+        try {
+          const parsed = JSON.parse(cat.notes);
+          if (parsed && Array.isArray(parsed.parts)) parts = parsed.parts;
+        } catch { /* ignore */ }
+      }
+      if (parts.length === 0) {
+        // Legacy category with no parts: whole planned amount is a shared kitty cost
+        const each = memberCount > 0 ? toNumber(cat.planned_aud) / memberCount : 0;
+        for (const id of memberIds) kittyShareByMember[id] += each;
+        continue;
+      }
+      for (const part of parts) {
+        const isPersonal = part.payment_type === 'personal';
+        if (!isPersonal && part.include_in_member_budget === false) continue;
+        for (const id of memberIds) {
+          const share = getPartShareForMember(part, id, memberIds, everyoneCount);
+          if (isPersonal) personalShareByMember[id] += share;
+          else kittyShareByMember[id] += share;
         }
       }
     }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    // Overview figure = average across members (identical to every member's share when
+    // nothing is attributed to a subset).
+    personalBudgetPerMemberAud = memberCount > 0
+      ? round2(memberIds.reduce((s, id) => s + personalShareByMember[id], 0) / memberCount)
+      : 0;
 
     // Per-member payment totals
     const memberTotalsMap: Record<string, number> = {};
@@ -238,7 +255,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (showIndividual && tripMembers) {
       memberBreakdown = tripMembers.map((tm: any) => {
         const paid = memberTotalsMap[tm.user_id] ?? 0;
-        const remaining = Math.max(0, kittyPerMemberAud - paid);
+        const kittyShare = round2(kittyShareByMember[tm.user_id] ?? kittyPerMemberAud);
+        const personalShare = round2(personalShareByMember[tm.user_id] ?? personalBudgetPerMemberAud);
+        const remaining = Math.max(0, kittyShare - paid);
         return {
           user_id: tm.user_id,
           full_name: tm.profiles?.full_name ?? null,
@@ -246,10 +265,10 @@ export async function GET(request: NextRequest, { params }: Params) {
           avatar_url: tm.profiles?.avatar_url ?? null,
           total_paid_aud: paid,
           cost_share_aud: costSharePerMember,
-          kitty_share_aud: kittyPerMemberAud,
+          kitty_share_aud: kittyShare,
           remaining_aud: remaining,
-          personal_budget_aud: personalBudgetPerMemberAud,
-          total_trip_cost_aud: kittyPerMemberAud + personalBudgetPerMemberAud,
+          personal_budget_aud: personalShare,
+          total_trip_cost_aud: round2(kittyShare + personalShare),
           is_current_user: tm.user_id === profile?.id,
         };
       });
@@ -273,9 +292,7 @@ export async function GET(request: NextRequest, { params }: Params) {
           if (parsed && Array.isArray(parsed.parts) && parsed.parts.length > 0) {
             groupPlanned = 0;
             for (const part of parsed.parts) {
-              const partTotal = part.basis === 'group'
-                ? toNumber(part.amount_aud)
-                : toNumber(part.amount_aud) * Math.max(1, memberCount || toNumber(part.member_count));
+              const partTotal = getPartTotalAud(part, memberIds, everyoneCount);
               if (part.payment_type === 'personal') {
                 personalPlanned += partTotal;
               } else {
