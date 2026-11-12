@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { verifyRole, errorResponse, successResponse, ApiErrors, supabase } from '@/lib/api/helpers';
 import { getPartTotalAud, getPartShareForMember } from '@/lib/budget/parts';
-import { parseMemberBudgets } from '@/lib/budget/memberBudgets';
+import { parseMemberBudgets, stripMemberBudgets } from '@/lib/budget/memberBudgets';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -442,7 +442,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         enabled_currencies: Array.isArray(budgetSettings.enabled_currencies) && budgetSettings.enabled_currencies.length > 0
           ? budgetSettings.enabled_currencies
           : ['AUD'],
-        notes: exposeBudgetFigures ? budgetSettings.notes : null,
+        // Individual member budgets are admin-only (members see their own target via member_breakdown)
+        notes: exposeBudgetFigures ? (hasAdminBudgetAccess ? budgetSettings.notes : stripMemberBudgets(budgetSettings.notes)) : null,
       },
       visibility: {
         show_group: showGroup,

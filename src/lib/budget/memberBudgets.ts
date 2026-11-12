@@ -62,3 +62,20 @@ export function splitTotal(totalAud: number, memberIds: string[], weights?: Reco
   memberIds.forEach((id, i) => { result[id] = floors[i] / 100; });
   return result;
 }
+
+/**
+ * Remove individual member budgets from a settings.notes blob before it is sent to
+ * non-admin viewers, so one member can't see what others have been asked to pay.
+ */
+export function stripMemberBudgets(notes: unknown): unknown {
+  if (typeof notes !== 'string' || !notes) return notes;
+  try {
+    const parsed = JSON.parse(notes) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || !('member_budgets' in parsed)) return notes;
+    const { member_budgets: _omit, ...rest } = parsed;
+    void _omit;
+    return JSON.stringify(rest);
+  } catch {
+    return notes;
+  }
+}

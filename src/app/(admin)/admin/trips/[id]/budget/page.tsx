@@ -2182,8 +2182,9 @@ export default function AdminBudgetPage() {
       await handleBudgetSettingsPartialUpdate(partial);
       showToast('success', config ? 'Member budgets saved' : 'Member budgets cleared');
       fetchData();
-    } catch {
+    } catch (err) {
       showToast('error', 'Failed to save member budgets');
+      throw err; // keep the panel's unsaved state so the save can be retried
     }
   };
 

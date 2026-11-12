@@ -140,6 +140,8 @@ export default function MemberBudgetsPanel({ members, saved, builderShares, onSa
         updated_at: new Date().toISOString(),
       });
       setDirty(false);
+    } catch {
+      // Error already shown by the parent; leave the form dirty so Save can be retried
     } finally {
       setSaving(false);
     }
@@ -154,7 +156,7 @@ export default function MemberBudgetsPanel({ members, saved, builderShares, onSa
     });
     if (!ok) return;
     setSaving(true);
-    try { await onSave(null); } finally { setSaving(false); }
+    try { await onSave(null); } catch { /* error shown by parent */ } finally { setSaving(false); }
   };
 
   if (members.length === 0) return null;

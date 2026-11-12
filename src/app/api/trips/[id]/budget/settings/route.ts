@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { verifyRole, errorResponse, successResponse, ApiErrors, getJsonBody, supabase } from '@/lib/api/helpers';
+import { stripMemberBudgets } from '@/lib/budget/memberBudgets';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,6 +61,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     return successResponse({
       ...settings,
+      // Individual member budgets are admin-only
+      notes: isAdmin ? settings.notes : stripMemberBudgets(settings.notes),
       show_group_budget_to_members: showGroup,
       show_individual_breakdown_to_members: showIndividual,
     });

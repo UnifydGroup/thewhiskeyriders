@@ -465,6 +465,9 @@ export default function BudgetBuilder({
     let hasAssigned = false;
     const kittyByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
     const personalByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
+    // Kitty shares using the ACTUAL member count — used to compare against member budgets,
+    // which belong to live members (planning mode's projected count would understate this).
+    const liveKittyByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
 
     for (const cat of categories) {
       const { parts } = parseCategoryNotes(cat.notes, cat.planned_aud, workingMemberCount);
@@ -485,6 +488,9 @@ export default function BudgetBuilder({
             const share = getPartShareForMember(part, id, memberIds, workingMemberCount);
             const map = isPersonal ? personalByMember : kittyByMember;
             map.set(id, (map.get(id) ?? 0) + share);
+            if (!isPersonal) {
+              liveKittyByMember.set(id, (liveKittyByMember.get(id) ?? 0) + getPartShareForMember(part, id, memberIds, actualMemberCount));
+            }
           }
         }
       }
@@ -500,18 +506,19 @@ export default function BudgetBuilder({
     const perMember = members.map((m) => {
       const kitty = kittyByMember.get(m.id) ?? 0;
       const personal = personalByMember.get(m.id) ?? 0;
+      const liveKitty = liveKittyByMember.get(m.id) ?? 0;
       const budget = memberBudgets?.[m.id];
       return {
-        member: m, kitty, personal, total: kitty + personal,
+        member: m, kitty, liveKitty, personal, total: kitty + personal,
         budget: budget ?? null,
         // + = budget not yet allocated to line items; − = line items exceed the member's budget
-        gap: budget === undefined ? null : budget - kitty,
+        gap: budget === undefined ? null : budget - liveKitty,
       };
     });
     // Member budgets vs what the line items draw from the kitty (live members)
     const budgetsActive = Boolean(memberBudgets) && perMember.some((r) => r.budget !== null);
-    const livePlannedKitty = perMember.reduce((s, r) => s + r.kitty, 0);
-    const budgetsTotal = perMember.reduce((s, r) => s + (r.budget ?? r.kitty), 0);
+    const livePlannedKitty = perMember.reduce((s, r) => s + r.liveKitty, 0);
+    const budgetsTotal = perMember.reduce((s, r) => s + (r.budget ?? r.liveKitty), 0);
     const unallocated = budgetsTotal - livePlannedKitty;
     const totals = perMember.map((r) => r.total);
     const minTotal = totals.length ? Math.min(...totals) : totalPerPerson;
@@ -523,7 +530,7 @@ export default function BudgetBuilder({
       hasAssigned, perMember, minTotal, maxTotal, varies,
       budgetsActive, budgetsTotal, livePlannedKitty, unallocated,
     };
-  }, [categories, workingMemberCount, memberIds, members, partTotal, memberBudgets]);
+  }, [categories, workingMemberCount, actualMemberCount, memberIds, members, partTotal, memberBudgets]);
 
   const [showPerMember, setShowPerMember] = useState(false);
 
