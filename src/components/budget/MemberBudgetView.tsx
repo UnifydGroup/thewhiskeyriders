@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   DollarSign, CheckCircle2, EyeOff, TrendingUp,
-  Users, User, Check, Circle, Wallet, RefreshCw,
+  Users, User, Wallet, RefreshCw,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -43,21 +43,12 @@ interface MyPayment {
   is_current_user: boolean;
 }
 
-interface CostItem {
-  id: string;
-  name: string;
-  description: string | null;
-  is_self_funded: boolean;
-  notes: string | null;
-}
-
 interface BudgetData {
   visibility: { show_group: boolean; show_individual: boolean; is_admin: boolean; acting_as_member?: boolean };
   overview: BudgetOverview | null;
   categories: BudgetCategory[];
   member_payments: MyPayment[];
   member_breakdown: MyPayment[];
-  member_cost_items: CostItem[];
   settings: { exchange_rate_mad_aud: number; notes: string | null };
 }
 
@@ -128,7 +119,7 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
     );
   }
 
-  const { overview, categories, member_breakdown, member_payments, member_cost_items, visibility, settings } = data;
+  const { overview, categories, member_breakdown, member_payments, visibility, settings } = data;
 
   // Find this member's row
   const allRows = [...(member_breakdown ?? []), ...(member_payments ?? [])];
@@ -143,10 +134,6 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
 
   // Personal-category breakdown: categories with personal_planned_aud > 0
   const personalCategories = categories.filter((c) => (c.personal_planned_aud ?? 0) > 0);
-
-  // Cost tracker
-  const hasCostItems   = member_cost_items.length > 0;
-  const selfFundedCount = member_cost_items.filter((i) => i.is_self_funded).length;
 
   return (
     <div className="space-y-5">
@@ -251,53 +238,6 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
         </div>
       )}
 
-      {/* ── Cost tracker checklist ─────────────────────────────────────────── */}
-      {hasCostItems && (
-        <div className="rounded-xl border border-brand-tan/20 bg-brand-dark-grey overflow-hidden">
-          <div className="px-5 py-4 border-b border-brand-tan/10 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-brand-tan/60" />
-              <p className="font-semibold text-brand-cream text-sm">Your Checklist</p>
-            </div>
-            <span className="text-xs text-brand-cream/40">
-              {selfFundedCount} of {member_cost_items.length} confirmed
-            </span>
-          </div>
-
-          <div className="divide-y divide-brand-tan/5">
-            {member_cost_items.map((item) => (
-              <div key={item.id} className={`flex items-start gap-3 px-5 py-3.5 ${item.is_self_funded ? '' : 'opacity-60'}`}>
-                <div className="flex-shrink-0 mt-0.5">
-                  {item.is_self_funded
-                    ? <Check className="w-4 h-4 text-green-400" />
-                    : <Circle className="w-4 h-4 text-brand-cream/25" />
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${item.is_self_funded ? 'text-brand-cream' : 'text-brand-cream/50'}`}>
-                    {item.name}
-                  </p>
-                  {item.description && (
-                    <p className="text-xs text-brand-cream/35 mt-0.5">{item.description}</p>
-                  )}
-                  {item.notes && (
-                    <p className="text-xs text-brand-tan/60 mt-0.5 italic">{item.notes}</p>
-                  )}
-                </div>
-                <span className={`flex-shrink-0 text-xs font-medium mt-0.5 ${item.is_self_funded ? 'text-green-400' : 'text-brand-cream/25'}`}>
-                  {item.is_self_funded ? 'Sorted' : 'Pending'}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="px-5 py-3 bg-brand-black/20 border-t border-brand-tan/10">
-            <p className="text-xs text-brand-cream/35">
-              Your organiser manages this list. Items marked Sorted mean you&apos;ve confirmed you&apos;re handling them.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* ── Group budget overview (only if admin has made it visible) ──────── */}
       {visibility.show_group && overview && (
@@ -409,7 +349,7 @@ export default function MemberBudgetView({ tripId, viewAsMember = false }: Props
       })()}
 
       {/* Nothing meaningful to show for this member */}
-      {!hasCostItems && !visibility.show_group && (!visibility.show_individual || (!kittyShare && !personalShare)) && (
+      {!visibility.show_group && (!visibility.show_individual || (!kittyShare && !personalShare)) && (
         <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
           <DollarSign className="w-10 h-10 text-brand-tan/20" />
           <p className="text-brand-cream/50 font-medium">Budget details coming soon</p>
