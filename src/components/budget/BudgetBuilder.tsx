@@ -185,12 +185,14 @@ interface Props {
   getAuthHeader: () => Promise<Record<string, string>>;
   /** Current trip members — used to attribute line items to a subset of members. */
   members?: BudgetMember[];
+  /** Per-member budgets set in the financial manager (user_id → AUD paid into the kitty). */
+  memberBudgets?: Record<string, number> | null;
 }
 
 // ── BudgetBuilder ─────────────────────────────────────────────────────────────
 
 export default function BudgetBuilder({
-  tripId, categories, overview, settings, onRefresh, onSettingsUpdate, getAuthHeader, members = [],
+  tripId, categories, overview, settings, onRefresh, onSettingsUpdate, getAuthHeader, members = [], memberBudgets = null,
 }: Props) {
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
@@ -463,6 +465,9 @@ export default function BudgetBuilder({
     let hasAssigned = false;
     const kittyByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
     const personalByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
+    // Kitty shares using the ACTUAL member count — used to compare against member budgets,
+    // which belong to live members (planning mode's projected count would understate this).
+    const liveKittyByMember = new Map<string, number>(memberIds.map((id) => [id, 0]));
 
     for (const cat of categories) {
       const { parts } = parseCategoryNotes(cat.notes, cat.planned_aud, workingMemberCount);
@@ -483,6 +488,9 @@ export default function BudgetBuilder({
             const share = getPartShareForMember(part, id, memberIds, workingMemberCount);
             const map = isPersonal ? personalByMember : kittyByMember;
             map.set(id, (map.get(id) ?? 0) + share);
+            if (!isPersonal) {
+              liveKittyByMember.set(id, (liveKittyByMember.get(id) ?? 0) + getPartShareForMember(part, id, memberIds, actualMemberCount));
+            }
           }
         }
       }
@@ -498,8 +506,20 @@ export default function BudgetBuilder({
     const perMember = members.map((m) => {
       const kitty = kittyByMember.get(m.id) ?? 0;
       const personal = personalByMember.get(m.id) ?? 0;
-      return { member: m, kitty, personal, total: kitty + personal };
+      const liveKitty = liveKittyByMember.get(m.id) ?? 0;
+      const budget = memberBudgets?.[m.id];
+      return {
+        member: m, kitty, liveKitty, personal, total: kitty + personal,
+        budget: budget ?? null,
+        // + = budget not yet allocated to line items; − = line items exceed the member's budget
+        gap: budget === undefined ? null : budget - liveKitty,
+      };
     });
+    // Member budgets vs what the line items draw from the kitty (live members)
+    const budgetsActive = Boolean(memberBudgets) && perMember.some((r) => r.budget !== null);
+    const livePlannedKitty = perMember.reduce((s, r) => s + r.liveKitty, 0);
+    const budgetsTotal = perMember.reduce((s, r) => s + (r.budget ?? r.liveKitty), 0);
+    const unallocated = budgetsTotal - livePlannedKitty;
     const totals = perMember.map((r) => r.total);
     const minTotal = totals.length ? Math.min(...totals) : totalPerPerson;
     const maxTotal = totals.length ? Math.max(...totals) : totalPerPerson;
@@ -508,8 +528,9 @@ export default function BudgetBuilder({
     return {
       groupKittyTotal, excludedFromBillingTotal, kittyPerPerson, personalPerPerson, totalPerPerson, totalTripCost,
       hasAssigned, perMember, minTotal, maxTotal, varies,
+      budgetsActive, budgetsTotal, livePlannedKitty, unallocated,
     };
-  }, [categories, workingMemberCount, memberIds, members, partTotal]);
+  }, [categories, workingMemberCount, actualMemberCount, memberIds, members, partTotal, memberBudgets]);
 
   const [showPerMember, setShowPerMember] = useState(false);
 
@@ -704,7 +725,26 @@ export default function BudgetBuilder({
             </div>
           </div>
 
-          {summary.hasAssigned && summary.perMember.length > 0 && (
+          {summary.budgetsActive && (
+            <div className={`border-t px-5 py-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs ${
+              Math.abs(summary.unallocated) < 0.5
+                ? 'border-green-600/20 bg-green-900/10'
+                : summary.unallocated > 0 ? 'border-sky-500/20 bg-sky-900/10' : 'border-red-500/20 bg-red-900/10'
+            }`}>
+              <span className="text-brand-cream/60">Member budgets <span className="font-semibold text-brand-cream">{fmt(summary.budgetsTotal)}</span></span>
+              <span className="text-brand-cream/60">Allocated to line items <span className="font-semibold text-brand-tan">{fmt(summary.livePlannedKitty)}</span></span>
+              {Math.abs(summary.unallocated) < 0.5 ? (
+                <span className="font-semibold text-green-400 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Balanced</span>
+              ) : summary.unallocated > 0 ? (
+                <span className="font-semibold text-sky-300">{fmt(summary.unallocated)} unallocated — add or raise line items</span>
+              ) : (
+                <span className="font-semibold text-red-400 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />{fmt(-summary.unallocated)} over member budgets — trim line items or raise budgets</span>
+              )}
+              {isPlanning && <span className="text-amber-400/70">(compared using {actualMemberCount} live members)</span>}
+            </div>
+          )}
+
+          {(summary.hasAssigned || summary.budgetsActive) && summary.perMember.length > 0 && (
             <div className="border-t border-brand-tan/10">
               <button
                 onClick={() => setShowPerMember((v) => !v)}
@@ -713,6 +753,7 @@ export default function BudgetBuilder({
                 <span className="flex items-center gap-1.5">
                   <Users className="w-3.5 h-3.5" />
                   Per-member totals ({summary.perMember.length} live members)
+                  {summary.budgetsActive && ' · vs member budgets'}
                 </span>
                 {showPerMember ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
@@ -727,6 +768,14 @@ export default function BudgetBuilder({
                           <span className="text-brand-tan">{fmt(r.kitty)}</span>
                           {r.personal > 0 && <span className="text-purple-300"> + {fmt(r.personal)}</span>}
                           <span className="text-brand-cream font-semibold ml-2">{fmt(r.total)}</span>
+                          {r.gap !== null && Math.abs(r.gap) >= 0.5 && (
+                            <span
+                              className={`ml-2 ${r.gap > 0 ? 'text-sky-300' : 'text-red-400'}`}
+                              title={`Member budget ${fmt(r.budget ?? 0)}`}
+                            >
+                              {r.gap > 0 ? `+${fmt(r.gap)} unalloc.` : `−${fmt(-r.gap)} over`}
+                            </span>
+                          )}
                         </span>
                       </div>
                     ))}

@@ -15,6 +15,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } fro
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
 import ExpenseReceiptManager from '@/components/budget/ExpenseReceiptManager';
 import BudgetBuilder from '@/components/budget/BudgetBuilder';
+import MemberBudgetsTab from '@/components/budget/MemberBudgetsTab';
+import { parseMemberBudgets, type MemberBudgetsConfig } from '@/lib/budget/memberBudgets';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -39,7 +41,7 @@ interface MemberPayment { id: string; member_id: string; payment_date: string; a
 interface PaymentMilestone { id: string; trip_id: string; milestone_date: string; accumulated_amount: number; description: string | null; }
 interface MemberPaymentSummary { member_id: string; full_name: string; nickname?: string | null; total_paid: number; payment_count: number; last_payment_date: string | null; }
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
-interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
+interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; builder_kitty_share_aud?: number; member_budget_aud?: number | null; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
 interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_interest_income_aud?: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; kitty_per_member_aud?: number; personal_budget_per_member_aud?: number; total_group_planned_aud?: number; total_personal_planned_aud?: number; kitty_requirement_aud?: number; unreconciled_count: number; }
 interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; projected_member_count?: number | null; }
 interface AccountBalances { westpac_choice: number; westpac_life: number; paypal: number; balance_date: string; }
@@ -664,145 +666,6 @@ export default function AdminBudgetPage() {
     } finally {
       setSendingReminder(false);
     }
-  };
-
-  // ── Member cost tracking ───────────────────────────────────────────────────
-  type CostItem = { id: string; name: string; description: string | null; sort_order: number };
-  type CostAssignment = { id: string; member_id: string; cost_item_id: string; is_self_funded: boolean; notes: string | null };
-  const [costItems, setCostItems] = useState<CostItem[]>([]);
-  const [costAssignments, setCostAssignments] = useState<CostAssignment[]>([]);
-  const [costItemsLoaded, setCostItemsLoaded] = useState(false);
-  const [addingCostItem, setAddingCostItem] = useState(false);
-  const [newCostItemName, setNewCostItemName] = useState('');
-  const [newCostItemDesc, setNewCostItemDesc] = useState('');
-  const [savingCostItem, setSavingCostItem] = useState(false);
-  const [togglingCell, setTogglingCell] = useState<string | null>(null); // `${memberId}:${itemId}`
-  const [editingNoteCell, setEditingNoteCell] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
-  const newCostItemRef = useRef<HTMLInputElement>(null);
-
-  const loadCostData = useCallback(async () => {
-    const h = await getAuthHeader();
-    const [itemsRes, assignRes] = await Promise.all([
-      fetch(`/api/trips/${tripId}/cost-items`, { headers: h }),
-      fetch(`/api/trips/${tripId}/member-costs`, { headers: h }),
-    ]);
-    if (itemsRes.ok) {
-      const d = await itemsRes.json();
-      setCostItems(d.items ?? []);
-    }
-    if (assignRes.ok) {
-      const d = await assignRes.json();
-      setCostAssignments(d.assignments ?? []);
-    }
-    setCostItemsLoaded(true);
-  }, [tripId, getAuthHeader]);
-
-  // Load cost data when the Members tab is first opened
-  useEffect(() => {
-    if (tab === 'members' && !costItemsLoaded) {
-      loadCostData();
-    }
-  }, [tab, costItemsLoaded, loadCostData]);
-
-  const handleAddCostItem = async () => {
-    if (!newCostItemName.trim()) return;
-    setSavingCostItem(true);
-    try {
-      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/trips/${tripId}/cost-items`, {
-        method: 'POST',
-        headers: h,
-        body: JSON.stringify({ name: newCostItemName.trim(), description: newCostItemDesc.trim() || null, sort_order: costItems.length }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || 'Failed to add cost item');
-      setCostItems((prev) => [...prev, d.item]);
-      setNewCostItemName('');
-      setNewCostItemDesc('');
-      setAddingCostItem(false);
-      showToast('success', 'Cost item added');
-    } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Failed to add cost item');
-    } finally {
-      setSavingCostItem(false);
-    }
-  };
-
-  const handleDeleteCostItem = async (itemId: string) => {
-    if (!await promptConfirm({ title: 'Delete Cost Item', message: 'Delete this cost item? All member assignments for it will also be removed.', confirmLabel: 'Delete', variant: 'danger' })) return;
-    const h = await getAuthHeader();
-    const res = await fetch(`/api/trips/${tripId}/cost-items?item_id=${itemId}`, { method: 'DELETE', headers: h });
-    if (res.ok) {
-      setCostItems((prev) => prev.filter((i) => i.id !== itemId));
-      setCostAssignments((prev) => prev.filter((a) => a.cost_item_id !== itemId));
-      showToast('success', 'Cost item removed');
-    } else {
-      showToast('error', 'Failed to delete cost item');
-    }
-  };
-
-  const handleToggleAssignment = async (memberId: string, itemId: string) => {
-    const key = `${memberId}:${itemId}`;
-    setTogglingCell(key);
-    const existing = costAssignments.find((a) => a.member_id === memberId && a.cost_item_id === itemId);
-    const newVal = !(existing?.is_self_funded ?? false);
-    try {
-      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/trips/${tripId}/member-costs`, {
-        method: 'POST',
-        headers: h,
-        body: JSON.stringify({ member_id: memberId, cost_item_id: itemId, is_self_funded: newVal, notes: existing?.notes ?? null }),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        setCostAssignments((prev) => {
-          const without = prev.filter((a) => !(a.member_id === memberId && a.cost_item_id === itemId));
-          return [...without, d.assignment];
-        });
-      } else {
-        showToast('error', 'Failed to update assignment');
-      }
-    } finally {
-      setTogglingCell(null);
-    }
-  };
-
-  const handleSaveNote = async (memberId: string, itemId: string) => {
-    setSavingNote(true);
-    const existing = costAssignments.find((a) => a.member_id === memberId && a.cost_item_id === itemId);
-    try {
-      const h = { ...(await getAuthHeader()), 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/trips/${tripId}/member-costs`, {
-        method: 'POST',
-        headers: h,
-        body: JSON.stringify({ member_id: memberId, cost_item_id: itemId, is_self_funded: existing?.is_self_funded ?? false, notes: noteDraft.trim() || null }),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        setCostAssignments((prev) => {
-          const without = prev.filter((a) => !(a.member_id === memberId && a.cost_item_id === itemId));
-          return [...without, d.assignment];
-        });
-        setEditingNoteCell(null);
-        showToast('success', 'Note saved');
-      } else {
-        showToast('error', 'Failed to save note');
-      }
-    } finally {
-      setSavingNote(false);
-    }
-  };
-
-  const COST_ITEM_ICONS: Record<string, React.ReactNode> = {
-    'international flights': <Plane className="w-3.5 h-3.5" />,
-    'travel insurance': <Shield className="w-3.5 h-3.5" />,
-    'visa fees': <FileText className="w-3.5 h-3.5" />,
-  };
-
-  const getCostItemIcon = (name: string) => {
-    return COST_ITEM_ICONS[name.toLowerCase()] ?? <DollarSign className="w-3.5 h-3.5" />;
   };
 
   // Master ledger add form
@@ -2156,6 +2019,40 @@ export default function AdminBudgetPage() {
       showToast('success', 'Settings saved'); fetchData();
     } catch { showToast('error', 'Failed to save settings'); }
     finally { setSaving(false); }
+  };
+
+  // ── Member budgets (stored in settings.notes → member_budgets) ─────────────
+  const memberBudgets = useMemo(() => parseMemberBudgets(settings.notes), [settings.notes]);
+  const builderSharesByMember = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const b of memberBreakdown) out[b.user_id] = b.builder_kitty_share_aud ?? b.kitty_share_aud ?? b.cost_share_aud ?? 0;
+    return out;
+  }, [memberBreakdown]);
+
+  const paidByMember = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const b of memberBreakdown) out[b.user_id] = b.total_paid_aud ?? 0;
+    return out;
+  }, [memberBreakdown]);
+
+  const handleSaveMemberBudgets = async (config: MemberBudgetsConfig | null) => {
+    try {
+      const notes = buildNotesBlob({ member_budgets: config });
+      const partial: Partial<BudgetSettings> = { notes };
+      if (config) {
+        // Keep the headline budget figures in step with the member budgets
+        const ids = tripMembers.map((m) => m.id);
+        const total = ids.reduce((s, id) => s + (config.amounts[id] ?? builderSharesByMember[id] ?? 0), 0);
+        partial.total_budget_aud = Math.round(total * 100) / 100;
+        partial.per_person_budget_aud = ids.length > 0 ? Math.round((total / ids.length) * 100) / 100 : 0;
+      }
+      await handleBudgetSettingsPartialUpdate(partial);
+      showToast('success', config ? 'Member budgets saved' : 'Member budgets cleared');
+      fetchData();
+    } catch (err) {
+      showToast('error', 'Failed to save member budgets');
+      throw err; // keep the panel's unsaved state so the save can be retried
+    }
   };
 
   // Partial settings update used by BudgetBuilder (doesn't touch the notes JSON blob)
@@ -5331,270 +5228,24 @@ export default function AdminBudgetPage() {
           onSettingsUpdate={handleBudgetSettingsPartialUpdate}
           getAuthHeader={getAuthHeader}
           members={tripMembers}
+          memberBudgets={memberBudgets?.amounts ?? null}
         />
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          MEMBERS TAB — per-member cost responsibility tracker
+          MEMBERS TAB — per-member budgets with category breakdown
       ══════════════════════════════════════════════════════════════════════ */}
       {tab === 'members' && (
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-brand-cream">Member Cost Tracker</h2>
-              <p className="mt-0.5 text-sm text-brand-cream/55">
-                Track which costs each member is handling themselves vs. covered by group deposits.
-                A <span className="font-semibold text-brand-tan">✓ Self-funded</span> tick means the member is sorting that item independently.
-              </p>
-            </div>
-            <button
-              onClick={() => { setAddingCostItem(true); setTimeout(() => newCostItemRef.current?.focus(), 50); }}
-              className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-tan text-brand-black font-semibold text-sm hover:bg-brand-tan/90 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Cost Item
-            </button>
-          </div>
-
-          {/* Add cost item form */}
-          {addingCostItem && (
-            <div className="rounded-xl border border-brand-tan/30 bg-brand-dark-grey p-4 space-y-3">
-              <p className="text-sm font-semibold text-brand-cream">New Cost Item</p>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="flex-1 space-y-1">
-                  <label className="text-xs text-brand-cream/60 uppercase tracking-wide">Name *</label>
-                  <input
-                    ref={newCostItemRef}
-                    value={newCostItemName}
-                    onChange={(e) => setNewCostItemName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddCostItem(); if (e.key === 'Escape') setAddingCostItem(false); }}
-                    placeholder="e.g. International Flights"
-                    className="w-full rounded-lg border border-brand-tan/30 bg-brand-black px-3 py-2 text-sm text-brand-cream placeholder:text-brand-cream/30 focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <label className="text-xs text-brand-cream/60 uppercase tracking-wide">Description (optional)</label>
-                  <input
-                    value={newCostItemDesc}
-                    onChange={(e) => setNewCostItemDesc(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddCostItem(); if (e.key === 'Escape') setAddingCostItem(false); }}
-                    placeholder="Short note for admins"
-                    className="w-full rounded-lg border border-brand-tan/30 bg-brand-black px-3 py-2 text-sm text-brand-cream placeholder:text-brand-cream/30 focus:outline-none focus:ring-2 focus:ring-brand-tan"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddCostItem}
-                    disabled={savingCostItem || !newCostItemName.trim()}
-                    className="px-4 py-2 rounded-lg bg-brand-tan text-brand-black font-semibold text-sm hover:bg-brand-tan/90 transition-colors disabled:opacity-50"
-                  >
-                    {savingCostItem ? 'Saving…' : 'Save'}
-                  </button>
-                  <button
-                    onClick={() => { setAddingCostItem(false); setNewCostItemName(''); setNewCostItemDesc(''); }}
-                    className="px-3 py-2 rounded-lg border border-brand-tan/20 text-brand-cream/60 text-sm hover:text-brand-cream hover:border-brand-tan/40 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Loading state */}
-          {!costItemsLoaded && (
-            <div className="flex items-center gap-3 py-12 justify-center text-brand-cream/40">
-              <RefreshCw className="w-5 h-5 animate-spin" />
-              <span className="text-sm">Loading…</span>
-            </div>
-          )}
-
-          {/* Empty state — no cost items yet */}
-          {costItemsLoaded && costItems.length === 0 && !addingCostItem && (
-            <div className="rounded-xl border border-dashed border-brand-tan/20 p-12 text-center">
-              <Users className="w-10 h-10 text-brand-tan/30 mx-auto mb-3" />
-              <p className="text-brand-cream/60 font-medium">No cost items defined yet</p>
-              <p className="text-sm text-brand-cream/40 mt-1">
-                Add items like &ldquo;International Flights&rdquo;, &ldquo;Travel Insurance&rdquo;, or &ldquo;Visa Fees&rdquo; to start tracking.
-              </p>
-              <button
-                onClick={() => { setAddingCostItem(true); setTimeout(() => newCostItemRef.current?.focus(), 50); }}
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-tan/20 text-brand-tan font-semibold text-sm hover:bg-brand-tan/30 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add First Cost Item
-              </button>
-            </div>
-          )}
-
-          {/* Matrix grid */}
-          {costItemsLoaded && costItems.length > 0 && tripMembers.length > 0 && (
-            <div className="space-y-3">
-              {/* Cost item chips / legend */}
-              <div className="flex flex-wrap gap-2">
-                {costItems.map((item) => (
-                  <div key={item.id} className="flex items-center gap-1.5 rounded-full border border-brand-tan/25 bg-brand-black/40 px-3 py-1 text-xs text-brand-cream/70">
-                    {getCostItemIcon(item.name)}
-                    <span>{item.name}</span>
-                    <button
-                      onClick={() => handleDeleteCostItem(item.id)}
-                      className="ml-1 text-brand-cream/30 hover:text-red-400 transition-colors"
-                      title="Remove this cost item"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Scrollable table */}
-              <div className="overflow-x-auto rounded-xl border border-brand-tan/20">
-                <table className="w-full min-w-[640px] text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-brand-tan/15 bg-brand-black/50">
-                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brand-cream/50 w-44">
-                        Member
-                      </th>
-                      {costItems.map((item) => (
-                        <th key={item.id} className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-brand-cream/50 min-w-[140px]">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {getCostItemIcon(item.name)}
-                            <span>{item.name}</span>
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tripMembers.map((member, rowIdx) => {
-                      const displayName = getMemberListName(member);
-                      return (
-                        <Fragment key={member.id}>
-                          <tr className={`border-b border-brand-tan/10 transition-colors ${rowIdx % 2 === 0 ? 'bg-brand-dark-grey' : 'bg-brand-black/20'} hover:bg-brand-black/40`}>
-                            {/* Member name */}
-                            <td className="px-4 py-3 font-medium text-brand-cream whitespace-nowrap">
-                              {displayName}
-                            </td>
-                            {/* One cell per cost item */}
-                            {costItems.map((item) => {
-                              const cellKey = `${member.id}:${item.id}`;
-                              const assignment = costAssignments.find(
-                                (a) => a.member_id === member.id && a.cost_item_id === item.id
-                              );
-                              const isSelfFunded = assignment?.is_self_funded ?? false;
-                              const hasNote = !!assignment?.notes;
-                              const isToggling = togglingCell === cellKey;
-                              const isEditingNote = editingNoteCell === cellKey;
-
-                              return (
-                                <td key={item.id} className="px-4 py-3 text-center align-top">
-                                  <div className="flex flex-col items-center gap-1.5">
-                                    {/* Toggle button */}
-                                    <button
-                                      onClick={() => handleToggleAssignment(member.id, item.id)}
-                                      disabled={isToggling}
-                                      title={isSelfFunded ? 'Self-funded — click to unmark' : 'Not self-funded — click to mark'}
-                                      className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all ${
-                                        isSelfFunded
-                                          ? 'bg-green-900/40 border border-green-600/50 text-green-400 hover:bg-green-900/60'
-                                          : 'bg-brand-black/40 border border-brand-tan/15 text-brand-cream/35 hover:border-brand-tan/35 hover:text-brand-cream/60'
-                                      } disabled:opacity-50`}
-                                    >
-                                      {isToggling ? (
-                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                      ) : isSelfFunded ? (
-                                        <CheckSquare className="w-3.5 h-3.5" />
-                                      ) : (
-                                        <Square className="w-3.5 h-3.5" />
-                                      )}
-                                      {isSelfFunded ? 'Self-funded' : 'Group covers'}
-                                    </button>
-
-                                    {/* Note area */}
-                                    {isEditingNote ? (
-                                      <div className="w-full space-y-1">
-                                        <textarea
-                                          autoFocus
-                                          rows={2}
-                                          value={noteDraft}
-                                          onChange={(e) => setNoteDraft(e.target.value)}
-                                          placeholder="Add a note…"
-                                          className="w-full rounded border border-brand-tan/30 bg-brand-black px-2 py-1 text-xs text-brand-cream placeholder:text-brand-cream/30 focus:outline-none focus:ring-1 focus:ring-brand-tan resize-none"
-                                        />
-                                        <div className="flex gap-1 justify-end">
-                                          <button
-                                            onClick={() => handleSaveNote(member.id, item.id)}
-                                            disabled={savingNote}
-                                            className="px-2 py-0.5 rounded text-xs bg-brand-tan text-brand-black font-semibold disabled:opacity-50"
-                                          >
-                                            {savingNote ? '…' : 'Save'}
-                                          </button>
-                                          <button
-                                            onClick={() => setEditingNoteCell(null)}
-                                            className="px-2 py-0.5 rounded text-xs border border-brand-tan/20 text-brand-cream/50 hover:text-brand-cream"
-                                          >
-                                            Cancel
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() => { setEditingNoteCell(cellKey); setNoteDraft(assignment?.notes ?? ''); }}
-                                        className={`text-xs transition-colors max-w-[130px] truncate ${hasNote ? 'text-brand-tan/80 hover:text-brand-tan' : 'text-brand-cream/20 hover:text-brand-cream/50'}`}
-                                        title={hasNote ? assignment!.notes! : 'Add a note'}
-                                      >
-                                        {hasNote ? assignment!.notes! : '+ note'}
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Summary cards */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 pt-2">
-                {costItems.map((item) => {
-                  const selfFundedCount = costAssignments.filter(
-                    (a) => a.cost_item_id === item.id && a.is_self_funded
-                  ).length;
-                  const total = tripMembers.length;
-                  return (
-                    <div key={item.id} className="rounded-lg border border-brand-tan/15 bg-brand-black/30 px-4 py-3">
-                      <div className="flex items-center gap-1.5 mb-1.5 text-brand-cream/60">
-                        {getCostItemIcon(item.name)}
-                        <span className="text-xs font-semibold truncate">{item.name}</span>
-                      </div>
-                      <p className="text-xl font-bold text-brand-cream">{selfFundedCount}<span className="text-sm font-normal text-brand-cream/40">/{total}</span></p>
-                      <p className="text-xs text-brand-cream/40 mt-0.5">self-funded</p>
-                      {/* Mini progress bar */}
-                      <div className="mt-2 h-1 rounded-full bg-brand-black/60 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-green-500/70 transition-all"
-                          style={{ width: total > 0 ? `${(selfFundedCount / total) * 100}%` : '0%' }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* No members on trip */}
-          {costItemsLoaded && costItems.length > 0 && tripMembers.length === 0 && (
-            <div className="rounded-xl border border-brand-tan/15 bg-brand-dark-grey p-8 text-center text-brand-cream/50 text-sm">
-              No members found for this trip. Add members in the trip settings first.
-            </div>
-          )}
-        </div>
+        <MemberBudgetsTab
+          members={tripMembers}
+          categories={categories}
+          saved={memberBudgets}
+          builderShares={builderSharesByMember}
+          paidByMember={paidByMember}
+          onSave={handleSaveMemberBudgets}
+          confirm={promptConfirm}
+          onOpenBuilder={() => setTab('categories')}
+        />
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -5990,6 +5641,13 @@ export default function AdminBudgetPage() {
             {settingsOpen.budget && <div className="px-6 pb-6 space-y-5 border-t border-brand-tan/10 pt-5">
 
             {/* Budget fields — both independent, with auto-sync helpers */}
+            {memberBudgets && (
+              <p className="text-xs text-sky-300/80 rounded-lg border border-sky-500/20 bg-sky-900/10 px-3 py-2">
+                Member budgets are active — payment targets and the group total come from the{' '}
+                <button type="button" onClick={() => setTab('members')} className="underline font-semibold">Members tab</button>.
+                These two fields are kept in step when you save member budgets.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="flex items-center gap-1 text-xs font-medium text-brand-cream/60 mb-1">Per-Person Budget (AUD) <InfoTooltip content="The total amount each member is expected to contribute to the trip kitty. Changing this auto-updates the group total if sync mode is active." /></label>
