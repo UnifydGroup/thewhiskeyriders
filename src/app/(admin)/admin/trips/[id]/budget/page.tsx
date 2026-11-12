@@ -90,6 +90,7 @@ type TransactionNoteMeta = {
   linked_transaction_id?: string | null;
   counterparty_account_id?: string | null;
   payment_category?: string | null;  // member payment type label
+  budget_category_id?: string | null; // refunds: budget category the money goes back into
 };
 type ParsedCategoryNotes = {
   notes_text?: unknown;
@@ -277,6 +278,7 @@ function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
       linked_transaction_id?: unknown;
       counterparty_account_id?: unknown;
       payment_category?: unknown;
+      budget_category_id?: unknown;
     };
     if (parsed && typeof parsed === 'object' && ('text' in parsed || 'account_source_id' in parsed)) {
       return {
@@ -287,6 +289,7 @@ function parseTransactionNote(rawNotes: string | null): TransactionNoteMeta {
         linked_transaction_id: typeof parsed.linked_transaction_id === 'string' ? parsed.linked_transaction_id : null,
         counterparty_account_id: typeof parsed.counterparty_account_id === 'string' ? parsed.counterparty_account_id : null,
         payment_category: typeof parsed.payment_category === 'string' ? parsed.payment_category : null,
+        budget_category_id: typeof parsed.budget_category_id === 'string' ? parsed.budget_category_id : null,
       };
     }
   } catch {
@@ -300,6 +303,7 @@ function encodeTransactionNote(
   accountSourceId: string | null,
   transferMeta?: Partial<Pick<TransactionNoteMeta, 'transfer_link_id' | 'transfer_direction' | 'linked_transaction_id' | 'counterparty_account_id'>>,
   paymentCategory?: string | null,
+  budgetCategoryId?: string | null,
 ): string | null {
   const noteText = text.trim();
   const hasTransferMeta = Boolean(
@@ -308,7 +312,7 @@ function encodeTransactionNote(
     transferMeta?.linked_transaction_id ||
     transferMeta?.counterparty_account_id
   );
-  if (!noteText && !accountSourceId && !hasTransferMeta && !paymentCategory) return null;
+  if (!noteText && !accountSourceId && !hasTransferMeta && !paymentCategory && !budgetCategoryId) return null;
   return JSON.stringify({
     text: noteText || '',
     account_source_id: accountSourceId || null,
@@ -317,6 +321,7 @@ function encodeTransactionNote(
     linked_transaction_id: transferMeta?.linked_transaction_id || null,
     counterparty_account_id: transferMeta?.counterparty_account_id || null,
     ...(paymentCategory ? { payment_category: paymentCategory } : {}),
+    ...(budgetCategoryId ? { budget_category_id: budgetCategoryId } : {}),
   });
 }
 
@@ -684,6 +689,7 @@ export default function AdminBudgetPage() {
     paid_by_type: 'group_kitty',
     paid_by_member: '',
     income_category: 'other',
+    refund_category_id: '',
     notes: '',
   });
   const [ledgerAddForm, setLedgerAddForm] = useState(emptyLedgerAddForm());
@@ -708,7 +714,7 @@ export default function AdminBudgetPage() {
   const [expandedMemberPayments, setExpandedMemberPayments] = useState<Record<string, boolean>>({});
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: 'westpac_choice', notes: '' });
+  const [incomeForm, setIncomeForm] = useState({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: 'westpac_choice', notes: '', budget_category_id: '' });
   const [paymentForm, setPaymentForm] = useState({
     member_id: '',
     amount: '',
@@ -738,6 +744,7 @@ export default function AdminBudgetPage() {
     account_source_id: '',
     payment_method: 'bank_transfer',
     notes: '',
+    budget_category_id: '',
   });
   const [ledgerActionMode, setLedgerActionMode] = useState<'none' | 'transfer' | 'interest' | 'fx'>('none');
   const [transferForm, setTransferForm] = useState({
@@ -1021,15 +1028,21 @@ export default function AdminBudgetPage() {
         method: 'POST',
         headers: h,
         body: JSON.stringify({
-          ...incomeForm,
+          description: incomeForm.description,
+          income_date: incomeForm.income_date,
+          category: incomeForm.category,
+          account_source_id: incomeForm.account_source_id,
           amount_aud: parsedAmount,
-          notes: encodeTransactionNote(incomeForm.notes, incomeForm.account_source_id || null),
+          notes: encodeTransactionNote(
+            incomeForm.notes, incomeForm.account_source_id || null, undefined, null,
+            incomeForm.category === 'refund' ? incomeForm.budget_category_id || null : null,
+          ),
         }),
       });
       if (!res.ok) throw new Error();
       showToast('success', 'Income entry added');
       setShowIncomeForm(false);
-      setIncomeForm({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: getDefaultInternalAccountId(), notes: '' });
+      setIncomeForm({ description: '', amount_aud: '', income_date: new Date().toISOString().split('T')[0], category: 'other', account_source_id: getDefaultInternalAccountId(), notes: '', budget_category_id: '' });
       fetchData();
     } catch { showToast('error', 'Failed to save income entry'); }
     finally { setSaving(false); }
@@ -1416,6 +1429,7 @@ export default function AdminBudgetPage() {
       account_source_id: parsed.account_source_id || defaultAccountId,
       payment_method: payment?.payment_method || 'bank_transfer',
       notes: parsed.text,
+      budget_category_id: existingIncome?.category === 'refund' ? parsed.budget_category_id || '' : '',
     });
     setShowLedgerEditForm(true);
     setLedgerActionMode('none');
@@ -1431,6 +1445,7 @@ export default function AdminBudgetPage() {
       account_source_id: '',
       payment_method: 'bank_transfer',
       notes: '',
+      budget_category_id: '',
     });
   };
 
@@ -1461,6 +1476,8 @@ export default function AdminBudgetPage() {
         if (!res.ok) throw new Error();
       } else if (editingLedgerRow.type === 'income') {
         const existingIncome = incomeEntries.find((entry) => entry.id === editingLedgerRow.id);
+        // Picking a budget category makes this a refund that nets off that category's spend
+        const refundCategoryId = ledgerEditForm.budget_category_id || null;
         const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${editingLedgerRow.id}`, {
           method: 'PUT',
           headers: h,
@@ -1468,8 +1485,8 @@ export default function AdminBudgetPage() {
             description: ledgerEditForm.description.trim(),
             amount_aud: parsedAmount,
             income_date: ledgerEditForm.date,
-            category: existingIncome?.category || 'other',
-            notes: encodeTransactionNote(ledgerEditForm.notes, ledgerEditForm.account_source_id || null),
+            category: refundCategoryId ? 'refund' : (existingIncome?.category || 'other'),
+            notes: encodeTransactionNote(ledgerEditForm.notes, ledgerEditForm.account_source_id || null, undefined, null, refundCategoryId),
           }),
         });
         if (!res.ok) throw new Error();
@@ -1954,7 +1971,7 @@ export default function AdminBudgetPage() {
             transfer_direction: existing.transfer_direction || null,
             linked_transaction_id: existing.linked_transaction_id || null,
             counterparty_account_id: existing.counterparty_account_id || null,
-          });
+          }, existing.payment_category || null, existing.budget_category_id || null);
           const res = await fetch(`/api/trips/${tripId}/budget/income?entryId=${change.id}`, {
             method: 'PUT',
             headers: h,
@@ -2086,7 +2103,7 @@ export default function AdminBudgetPage() {
   };
 
   const handleSaveLedgerAdd = async () => {
-    const { txType, description, date, amount, currency, exchange_rate, amount_aud, amount_aud_overridden, category_id, account_source_id, paid_by_type, paid_by_member, income_category, notes } = ledgerAddForm;
+    const { txType, description, date, amount, currency, exchange_rate, amount_aud, amount_aud_overridden, category_id, account_source_id, paid_by_type, paid_by_member, income_category, refund_category_id, notes } = ledgerAddForm;
     if (!description || !date) return showToast('error', 'Description and date are required');
     const parsedAmount = parseFloat(amount);
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return showToast('error', 'Amount must be greater than zero');
@@ -2110,7 +2127,10 @@ export default function AdminBudgetPage() {
         const body = JSON.stringify({
           description, amount_aud: parsedAmount, income_date: date,
           category: income_category, source: 'manual', reconciled: false,
-          notes: encodeTransactionNote(notes, account_source_id || null),
+          notes: encodeTransactionNote(
+            notes, account_source_id || null, undefined, null,
+            income_category === 'refund' ? refund_category_id || null : null,
+          ),
         });
         const res = await fetch(`/api/trips/${tripId}/budget/income`, { method: 'POST', headers: h, body });
         if (!res.ok) throw new Error();
@@ -3268,6 +3288,21 @@ export default function AdminBudgetPage() {
                   )}
                 </div>
 
+                {/* Refund → budget category */}
+                {ledgerAddForm.txType === 'income' && ledgerAddForm.income_category === 'refund' && (
+                  <div>
+                    <label className="block text-xs font-medium text-purple-300/80 mb-1">Refund against budget category</label>
+                    <select
+                      value={ledgerAddForm.refund_category_id}
+                      onChange={(e) => setLedgerAddForm((prev) => ({ ...prev, refund_category_id: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-purple-600/40 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">— None (count as income) —</option>
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 {/* Account */}
                 <div>
                   <label className="block text-xs font-medium text-brand-cream/60 mb-1">Account</label>
@@ -3436,6 +3471,20 @@ export default function AdminBudgetPage() {
                       <option value="credit_card">Credit Card</option>
                       <option value="other">Other</option>
                     </select>
+                  </div>
+                )}
+                {editingLedgerRow.type === 'income' && editingLedgerRow.sub_type !== 'member_payment' && (
+                  <div>
+                    <label className="block text-xs font-medium text-purple-300/80 mb-1">Refund against budget category</label>
+                    <select
+                      value={ledgerEditForm.budget_category_id}
+                      onChange={(e) => setLedgerEditForm((prev) => ({ ...prev, budget_category_id: e.target.value }))}
+                      className="w-full px-3 py-2 bg-brand-black border border-purple-600/40 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">— None (count as income) —</option>
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <p className="text-[11px] text-brand-cream/35 mt-1">Marks this as a refund and reduces that category&apos;s spend.</p>
                   </div>
                 )}
                 <div>
@@ -4639,6 +4688,16 @@ export default function AdminBudgetPage() {
                         </select></div>
                       <div><label className="block text-xs font-medium text-brand-cream/60 mb-1">Notes (optional)</label>
                         <input value={incomeForm.notes} onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-brand-tan/30 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-tan" /></div>
+                      {incomeForm.category === 'refund' && (
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-medium text-purple-300/80 mb-1">Refund against budget category</label>
+                          <select value={incomeForm.budget_category_id} onChange={(e) => setIncomeForm({ ...incomeForm, budget_category_id: e.target.value })} className="w-full px-3 py-2 bg-brand-black border border-purple-600/40 rounded-lg text-brand-cream focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            <option value="">— None (count as income) —</option>
+                            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <p className="text-[11px] text-brand-cream/35 mt-1">Choosing a category reduces that category&apos;s spend by this amount instead of counting it as income.</p>
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-end gap-3 mt-4">
                       <button onClick={() => setShowIncomeForm(false)} className="px-4 py-2 border border-brand-tan/30 rounded-lg text-brand-cream text-sm font-semibold hover:bg-brand-tan/10">Cancel</button>
@@ -4748,6 +4807,13 @@ export default function AdminBudgetPage() {
                                 <td className="px-4 py-3 text-brand-cream">{e.description}</td>
                                 <td className="px-4 py-3">
                                   <span className={`text-xs px-2 py-0.5 rounded-full border capitalize ${catDisplay.className}`}>{catDisplay.label}</span>
+                                  {e.category === 'refund' && (() => {
+                                    const refundCatId = parseTransactionNote(e.notes).budget_category_id;
+                                    const refundCat = refundCatId ? categories.find((c) => c.id === refundCatId) : null;
+                                    return refundCat
+                                      ? <span className="block text-[11px] text-purple-300/80 mt-0.5">↩ {refundCat.name}</span>
+                                      : <span className="block text-[11px] text-brand-cream/30 mt-0.5">no category</span>;
+                                  })()}
                                 </td>
                                 <td className="px-4 py-3 text-brand-cream/50">
                                   {(() => {

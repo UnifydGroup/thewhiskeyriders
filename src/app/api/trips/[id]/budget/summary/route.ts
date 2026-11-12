@@ -120,22 +120,34 @@ export async function GET(request: NextRequest, { params }: Params) {
     let manualIncomeEntries: any[] = [];
     let totalManualIncome = 0;
     let totalInterestIncome = 0;
-    if (hasAdminBudgetAccess) {
+    let totalRefundsToCategoriesAud = 0;
+    // Refunds recorded against a budget category are treated as negative spend in that
+    // category (not income), so category actuals reflect the real net cost.
+    // Read for everyone who sees the group budget; the entries themselves stay admin-only.
+    if (showGroup) {
       const { data: incomeData } = await supabase
         .from('trip_income_entries')
         .select('*')
         .eq('trip_id', tripId)
         .order('income_date', { ascending: false });
-      manualIncomeEntries = incomeData ?? [];
-      for (const e of manualIncomeEntries) {
-        const isTransfer = e.category === 'transfer' || (() => {
-          if (!e.notes) return false;
-          try { return Boolean((JSON.parse(e.notes) as { transfer_link_id?: unknown }).transfer_link_id); } catch { return false; }
-        })();
-        if (!isTransfer) {
-          totalManualIncome += toNumber(e.amount_aud);
-          if (e.category === 'interest' || e.category === 'interest_income') totalInterestIncome += toNumber(e.amount_aud);
+      const allIncome = incomeData ?? [];
+      manualIncomeEntries = hasAdminBudgetAccess ? allIncome : [];
+      for (const e of allIncome) {
+        let note: { transfer_link_id?: unknown; budget_category_id?: unknown } = {};
+        if (e.notes) { try { note = JSON.parse(e.notes) ?? {}; } catch { /* plain text */ } }
+        const isTransfer = e.category === 'transfer' || Boolean(note.transfer_link_id);
+        if (isTransfer) continue;
+        const amountAud = toNumber(e.amount_aud);
+        const refundCategoryId = e.category === 'refund' && typeof note.budget_category_id === 'string' ? note.budget_category_id : null;
+        if (refundCategoryId) {
+          totalRefundsToCategoriesAud += amountAud;
+          totalSpentAud -= amountAud;
+          expensesByCategory[refundCategoryId] = (expensesByCategory[refundCategoryId] ?? 0) - amountAud;
+          continue;
         }
+        if (!hasAdminBudgetAccess) continue; // income totals are admin-only (unchanged behaviour)
+        totalManualIncome += amountAud;
+        if (e.category === 'interest' || e.category === 'interest_income') totalInterestIncome += amountAud;
       }
     }
 
@@ -431,6 +443,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         total_manual_income_aud: totalManualIncome,
         total_interest_income_aud: totalInterestIncome,
         total_spent_aud: totalSpentAud,
+        total_refunds_to_categories_aud: totalRefundsToCategoriesAud,
         net_position_aud: totalIncomeAud - totalSpentAud,
         budget_remaining_aud: totalBudgetAud - totalSpentAud,
         collection_gap_aud: totalBudgetAud - totalCollectedFromMembers,
