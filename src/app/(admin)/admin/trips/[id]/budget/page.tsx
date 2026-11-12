@@ -15,6 +15,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } fro
 import ExpenseImportPanel from '@/components/budget/ExpenseImportPanel';
 import ExpenseReceiptManager from '@/components/budget/ExpenseReceiptManager';
 import BudgetBuilder from '@/components/budget/BudgetBuilder';
+import MemberBudgetsPanel from '@/components/budget/MemberBudgetsPanel';
+import { parseMemberBudgets, type MemberBudgetsConfig } from '@/lib/budget/memberBudgets';
 import PaymentImportPanel from '@/components/payments/PaymentImportPanel';
 import { getMemberDisplayName, getMemberListName } from '@/lib/member-display';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -39,7 +41,7 @@ interface MemberPayment { id: string; member_id: string; payment_date: string; a
 interface PaymentMilestone { id: string; trip_id: string; milestone_date: string; accumulated_amount: number; description: string | null; }
 interface MemberPaymentSummary { member_id: string; full_name: string; nickname?: string | null; total_paid: number; payment_count: number; last_payment_date: string | null; }
 interface IncomeEntry { id: string; description: string; amount_aud: number; income_date: string; category: string | null; notes: string | null; source: string; reconciled: boolean; }
-interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
+interface MemberBreakdown { user_id: string; full_name: string | null; nickname: string | null; total_paid_aud: number; cost_share_aud: number; kitty_share_aud?: number; builder_kitty_share_aud?: number; member_budget_aud?: number | null; personal_budget_aud?: number; total_trip_cost_aud?: number; remaining_aud: number; }
 interface Overview { total_budget_aud: number; total_income_aud: number; total_collected_from_members_aud: number; total_manual_income_aud: number; total_interest_income_aud?: number; total_spent_aud: number; net_position_aud: number; budget_remaining_aud: number; collection_gap_aud: number; member_count: number; cost_share_per_member_aud: number; kitty_per_member_aud?: number; personal_budget_per_member_aud?: number; total_group_planned_aud?: number; total_personal_planned_aud?: number; kitty_requirement_aud?: number; unreconciled_count: number; }
 interface BudgetSettings { total_budget_aud: number; per_person_budget_aud: number; exchange_rate_mad_aud: number; show_group_budget_to_members: boolean; show_individual_breakdown_to_members: boolean; enabled_currencies: string[]; notes: string | null; projected_member_count?: number | null; }
 interface AccountBalances { westpac_choice: number; westpac_life: number; paypal: number; balance_date: string; }
@@ -2156,6 +2158,33 @@ export default function AdminBudgetPage() {
       showToast('success', 'Settings saved'); fetchData();
     } catch { showToast('error', 'Failed to save settings'); }
     finally { setSaving(false); }
+  };
+
+  // ── Member budgets (stored in settings.notes → member_budgets) ─────────────
+  const memberBudgets = useMemo(() => parseMemberBudgets(settings.notes), [settings.notes]);
+  const builderSharesByMember = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const b of memberBreakdown) out[b.user_id] = b.builder_kitty_share_aud ?? b.kitty_share_aud ?? b.cost_share_aud ?? 0;
+    return out;
+  }, [memberBreakdown]);
+
+  const handleSaveMemberBudgets = async (config: MemberBudgetsConfig | null) => {
+    try {
+      const notes = buildNotesBlob({ member_budgets: config });
+      const partial: Partial<BudgetSettings> = { notes };
+      if (config) {
+        // Keep the headline budget figures in step with the member budgets
+        const ids = tripMembers.map((m) => m.id);
+        const total = ids.reduce((s, id) => s + (config.amounts[id] ?? builderSharesByMember[id] ?? 0), 0);
+        partial.total_budget_aud = Math.round(total * 100) / 100;
+        partial.per_person_budget_aud = ids.length > 0 ? Math.round((total / ids.length) * 100) / 100 : 0;
+      }
+      await handleBudgetSettingsPartialUpdate(partial);
+      showToast('success', config ? 'Member budgets saved' : 'Member budgets cleared');
+      fetchData();
+    } catch {
+      showToast('error', 'Failed to save member budgets');
+    }
   };
 
   // Partial settings update used by BudgetBuilder (doesn't touch the notes JSON blob)
@@ -5331,6 +5360,7 @@ export default function AdminBudgetPage() {
           onSettingsUpdate={handleBudgetSettingsPartialUpdate}
           getAuthHeader={getAuthHeader}
           members={tripMembers}
+          memberBudgets={memberBudgets?.amounts ?? null}
         />
       )}
 
@@ -5990,6 +6020,12 @@ export default function AdminBudgetPage() {
             {settingsOpen.budget && <div className="px-6 pb-6 space-y-5 border-t border-brand-tan/10 pt-5">
 
             {/* Budget fields — both independent, with auto-sync helpers */}
+            {memberBudgets && (
+              <p className="text-xs text-sky-300/80 rounded-lg border border-sky-500/20 bg-sky-900/10 px-3 py-2">
+                Member budgets are active — payment targets and the group total come from the Member Budgets table below.
+                These two fields are kept in step when you save member budgets.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="flex items-center gap-1 text-xs font-medium text-brand-cream/60 mb-1">Per-Person Budget (AUD) <InfoTooltip content="The total amount each member is expected to contribute to the trip kitty. Changing this auto-updates the group total if sync mode is active." /></label>
@@ -6087,6 +6123,16 @@ export default function AdminBudgetPage() {
                 </div>
               </div>
             )}
+
+            {/* Per-member budgets: enter each member's amount, or split a total */}
+            <MemberBudgetsPanel
+              members={tripMembers}
+              saved={memberBudgets}
+              builderShares={builderSharesByMember}
+              onSave={handleSaveMemberBudgets}
+              confirm={promptConfirm}
+              onOpenBuilder={() => setTab('categories')}
+            />
 
             {/* Enabled currencies */}
             <div>

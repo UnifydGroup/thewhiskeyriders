@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { verifyRole, errorResponse, successResponse, ApiErrors, supabase } from '@/lib/api/helpers';
 import { getPartTotalAud, getPartShareForMember } from '@/lib/budget/parts';
+import { parseMemberBudgets } from '@/lib/budget/memberBudgets';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -195,7 +196,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     // join or leave (e.g. $5,000 × 16 saved, then a 17th member added). Fall back to the
     // stored total only when no per-person budget is set.
     const perPersonBudgetAud = toNumber(budgetSettings.per_person_budget_aud);
-    const totalBudgetAud = perPersonBudgetAud > 0 && memberCount > 0
+    let totalBudgetAud = perPersonBudgetAud > 0 && memberCount > 0
       ? Math.round(perPersonBudgetAud * memberCount * 100) / 100
       : toNumber(budgetSettings.total_budget_aud);
 
@@ -205,8 +206,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     // Round to cents — an unrounded per-member share (e.g. $5,000.0018) can make a member
     // who has paid the intended full amount fail a `>=` comparison by a fraction of a cent.
     const kittyRequirementAud = totalGroupBillableAud;
-    const kittyPerMemberAud = memberCount > 0 ? Math.round((kittyRequirementAud / memberCount) * 100) / 100 : 0;
-    const costSharePerMember = memberCount > 0 ? Math.round((totalBudgetAud / memberCount) * 100) / 100 : 0;
+    let kittyPerMemberAud = memberCount > 0 ? Math.round((kittyRequirementAud / memberCount) * 100) / 100 : 0;
+    let costSharePerMember = memberCount > 0 ? Math.round((totalBudgetAud / memberCount) * 100) / 100 : 0;
 
     // Per-member shares. Line items attributed to specific members (member_ids) only
     // count toward those members, so shares can differ between members.
@@ -244,6 +245,23 @@ export async function GET(request: NextRequest, { params }: Params) {
       ? round2(memberIds.reduce((s, id) => s + personalShareByMember[id], 0) / memberCount)
       : 0;
 
+    // Per-member budgets entered in the financial manager override the builder-computed
+    // kitty share as each member's payment target. Members without one keep the builder share.
+    const memberBudgets = parseMemberBudgets(budgetSettings.notes);
+    const targetByMember: Record<string, number> = {};
+    for (const id of memberIds) {
+      const set = memberBudgets?.amounts[id];
+      targetByMember[id] = round2(set !== undefined ? set : (kittyShareByMember[id] ?? 0));
+    }
+    const memberBudgetsActive = memberBudgets !== null && memberIds.some((id) => memberBudgets.amounts[id] !== undefined);
+    const memberBudgetsTotalAud = round2(memberIds.reduce((s, id) => s + targetByMember[id], 0));
+    const builderKittyTotalAud = round2(memberIds.reduce((s, id) => s + (kittyShareByMember[id] ?? 0), 0));
+    if (memberBudgetsActive) {
+      totalBudgetAud = memberBudgetsTotalAud;
+      kittyPerMemberAud = memberCount > 0 ? round2(memberBudgetsTotalAud / memberCount) : 0;
+      costSharePerMember = kittyPerMemberAud;
+    }
+
     // Per-member payment totals
     const memberTotalsMap: Record<string, number> = {};
     memberPaymentsAll.forEach((p: any) => {
@@ -255,7 +273,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (showIndividual && tripMembers) {
       memberBreakdown = tripMembers.map((tm: any) => {
         const paid = memberTotalsMap[tm.user_id] ?? 0;
-        const kittyShare = round2(kittyShareByMember[tm.user_id] ?? kittyPerMemberAud);
+        const builderShare = round2(kittyShareByMember[tm.user_id] ?? 0);
+        const kittyShare = targetByMember[tm.user_id] ?? builderShare;
+        const memberBudget = memberBudgets?.amounts[tm.user_id];
         const personalShare = round2(personalShareByMember[tm.user_id] ?? personalBudgetPerMemberAud);
         const remaining = Math.max(0, kittyShare - paid);
         return {
@@ -266,6 +286,8 @@ export async function GET(request: NextRequest, { params }: Params) {
           total_paid_aud: paid,
           cost_share_aud: costSharePerMember,
           kitty_share_aud: kittyShare,
+          builder_kitty_share_aud: builderShare,
+          member_budget_aud: memberBudget ?? null,
           remaining_aud: remaining,
           personal_budget_aud: personalShare,
           total_trip_cost_aud: round2(kittyShare + personalShare),
@@ -444,6 +466,9 @@ export async function GET(request: NextRequest, { params }: Params) {
         collection_gap_aud: totalBudgetAud - totalCollectedFromMembers,
         kitty_requirement_aud: kittyRequirementAud,
         kitty_per_member_aud: kittyPerMemberAud,
+        member_budgets_active: memberBudgetsActive,
+        member_budgets_total_aud: memberBudgetsActive ? memberBudgetsTotalAud : null,
+        builder_kitty_total_aud: builderKittyTotalAud,
         personal_budget_per_member_aud: personalBudgetPerMemberAud,
         member_count: memberCount,
         cost_share_per_member_aud: costSharePerMember,
