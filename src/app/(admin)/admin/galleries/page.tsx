@@ -12,12 +12,16 @@ import PhotoGrid from '@/components/photos/PhotoGrid';
 import type { Gallery, Trip } from '@/lib/types/database';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { isTweener } from '@/lib/trip-type';
+import { ImageFramingEditor } from '@/components/ui/ImageFramingEditor';
+import { framingStyle, isDefaultFraming, type ImageFraming } from '@/lib/images/framing';
+import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
 
 interface GalleryWithTrip extends Gallery {
   trip?: Trip;
   photoCount: number;
   lastUpdatedAt: string | null;
   albumThumbnailUrl: string | null;
+  albumThumbnailFraming: unknown;
   source: 'trip_all' | 'gallery';
 }
 
@@ -93,6 +97,7 @@ export default function GalleriesPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingGalleryId, setUploadingGalleryId] = useState<string | null>(null);
+  const [coverFramingOpen, setCoverFramingOpen] = useState(false);
   const [settingThumbnailPhotoId, setSettingThumbnailPhotoId] = useState<string | null>(null);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [uploadStatusText, setUploadStatusText] = useState('');
@@ -444,6 +449,7 @@ export default function GalleriesPage() {
           photoCount: tripMetric?.count || 0,
           lastUpdatedAt: tripMetric?.lastPhotoAt || trip.updated_at || trip.created_at,
           albumThumbnailUrl: trip.cover_image_url || null,
+          albumThumbnailFraming: trip.cover_image_framing ?? null,
           source: 'trip_all',
         };
       });
@@ -457,6 +463,7 @@ export default function GalleriesPage() {
           photoCount: galleryMetric?.count || 0,
           lastUpdatedAt: galleryMetric?.lastPhotoAt || gallery.updated_at || gallery.created_at,
           albumThumbnailUrl: linkedTrip?.cover_image_url || null,
+          albumThumbnailFraming: linkedTrip?.cover_image_framing ?? null,
           source: 'gallery',
         };
       });
@@ -1202,6 +1209,38 @@ export default function GalleriesPage() {
     }
   };
 
+  const handleSaveCoverFraming = async (framing: ImageFraming) => {
+    if (!selectedGallery) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('You must be signed in to adjust the album cover.');
+    }
+
+    const response = await fetch(`/api/trips/${selectedGallery.trip_id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ cover_image_framing: isDefaultFraming(framing) ? null : framing }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || 'Failed to save the cover adjustment');
+    }
+
+    setCoverFramingOpen(false);
+    resetMessages();
+    setSuccess('Album cover adjusted.');
+    await loadData(selectedGallery.id);
+  };
+
   const handleClearAlbumThumbnail = async () => {
     if (!selectedGallery) {
       return;
@@ -1351,6 +1390,7 @@ export default function GalleriesPage() {
                         src={gallery.albumThumbnailUrl}
                         alt={`${gallery.trip?.name || 'Trip'} album thumbnail`}
                         className="h-full w-full object-cover"
+                        style={framingStyle(gallery.albumThumbnailFraming)}
                       />
                     </div>
                   ) : (
@@ -1529,15 +1569,29 @@ export default function GalleriesPage() {
                 <p className="text-xs uppercase tracking-wide text-brand-cream/60">Album Thumbnail</p>
                 {selectedGallery.albumThumbnailUrl ? (
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <img
-                      src={selectedGallery.albumThumbnailUrl}
-                      alt={`${selectedGallery.trip?.name || 'Trip'} album thumbnail`}
-                      className="h-20 w-32 rounded border border-brand-brown/30 object-cover"
-                    />
+                    <div className="h-20 w-32 overflow-hidden rounded border border-brand-brown/30">
+                      <img
+                        src={selectedGallery.albumThumbnailUrl}
+                        alt={`${selectedGallery.trip?.name || 'Trip'} album thumbnail`}
+                        className="h-full w-full object-cover"
+                        style={framingStyle(selectedGallery.albumThumbnailFraming)}
+                      />
+                    </div>
                     <div className="space-y-2">
                       <p className="text-xs text-brand-cream/60">
                         Current thumbnail shown on the public trip gallery list.
                       </p>
+                      {isAdmin && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="mr-2"
+                          onClick={() => setCoverFramingOpen(true)}
+                        >
+                          Adjust Cover
+                        </Button>
+                      )}
                       {isAdmin && (
                         <Button
                           type="button"
@@ -1659,6 +1713,27 @@ export default function GalleriesPage() {
           </Card>
         </div>
       )}
+
+      <ImageFramingEditor
+        isOpen={coverFramingOpen}
+        imageSrc={
+          selectedGallery?.albumThumbnailUrl
+            ? buildOptimizedPhotoUrl(selectedGallery.albumThumbnailUrl, 'detail') || selectedGallery.albumThumbnailUrl
+            : null
+        }
+        initialFraming={selectedGallery?.albumThumbnailFraming}
+        aspect={16 / 9}
+        title="Adjust album cover"
+        description="This framing is used wherever the trip cover appears. The photo itself isn't changed."
+        previews={[
+          { label: 'Gallery card', aspect: 16 / 9 },
+          { label: 'Dashboard banner', aspect: 16 / 7 },
+          { label: 'Trip list', aspect: 3 / 1 },
+          { label: 'Phone banner', aspect: 3 / 4 },
+        ]}
+        onClose={() => setCoverFramingOpen(false)}
+        onSave={handleSaveCoverFraming}
+      />
     </div>
   );
 }

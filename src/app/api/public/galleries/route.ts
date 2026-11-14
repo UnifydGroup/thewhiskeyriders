@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
-import { buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { buildFramedPhotoUrl, buildOptimizedPhotoUrl } from '@/lib/photos/imageTransforms';
+import { isDefaultFraming, parseFraming } from '@/lib/images/framing';
 import type { SupabaseDatabase } from '@/lib/types/database.generated';
 
 interface TripRow {
@@ -14,6 +15,7 @@ interface TripRow {
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
   trip_type: string;
   cover_image_url: string | null;
+  cover_image_framing: unknown;
 }
 
 interface PhotoCoverRow {
@@ -45,7 +47,7 @@ export async function GET() {
 
     const { data: tripsData, error: tripsError } = await supabase
       .from('trips')
-      .select('id, slug, name, destination, country, start_date, end_date, status, trip_type, cover_image_url')
+      .select('id, slug, name, destination, country, start_date, end_date, status, trip_type, cover_image_url, cover_image_framing')
       .neq('status', 'cancelled')
       .order('start_date', { ascending: false });
 
@@ -60,8 +62,13 @@ export async function GET() {
         if (trip.cover_image_url) {
           return {
             ...trip,
-            coverPhotoUrl: buildOptimizedPhotoUrl(trip.cover_image_url, 'cover'),
+            coverPhotoUrl: buildFramedPhotoUrl(
+              trip.cover_image_url,
+              'cover',
+              !isDefaultFraming(parseFraming(trip.cover_image_framing))
+            ),
             coverMediaType: 'image' as const,
+            coverFraming: trip.cover_image_framing ?? null,
           };
         }
 

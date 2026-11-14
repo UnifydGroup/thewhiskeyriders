@@ -28,6 +28,7 @@ interface PhotoRow {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  thumbnail_framing?: unknown;
   created_at: string;
   uploaded_by: string;
   profiles: ProfileLite | ProfileLite[] | null;
@@ -92,6 +93,7 @@ export async function GET(
         mime_type,
         width,
         height,
+        thumbnail_framing,
         created_at,
         uploaded_by,
         profiles:uploaded_by(full_name, nickname)
@@ -117,6 +119,7 @@ export async function GET(
         mime_type: photo.mime_type,
         width: photo.width,
         height: photo.height,
+        thumbnail_framing: photo.thumbnail_framing ?? null,
         created_at: photo.created_at,
         uploaded_by: photo.uploaded_by,
         uploader_name: getUploaderName(photo.profiles),

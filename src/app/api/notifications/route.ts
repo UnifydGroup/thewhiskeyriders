@@ -1,23 +1,26 @@
 import { NextRequest } from 'next/server';
 import {
-  verifyRole,
+  verifyAuth,
   errorResponse,
   successResponse,
   ApiErrors,
   supabase,
 } from '@/lib/api/helpers';
 
-// GET /api/notifications — returns notifications for the current admin user
+// GET /api/notifications — the current member's notifications, newest first.
+// Query: limit (max 100), unread=true, types=award,tag,... , before=<ISO timestamp> for paging.
 export async function GET(request: NextRequest) {
-  const { authenticated, authorized, profile } = await verifyRole(request, [
-    'super_admin', 'admin', 'trip_admin',
-  ]);
-  if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
-  if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
+  const { authenticated, profile } = await verifyAuth(request);
+  if (!authenticated || !profile) return errorResponse(ApiErrors.UNAUTHORIZED);
 
   const url = new URL(request.url);
-  const limit = Math.min(100, parseInt(url.searchParams.get('limit') || '50'));
+  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10) || 50));
   const unreadOnly = url.searchParams.get('unread') === 'true';
+  const types = (url.searchParams.get('types') || '')
+    .split(',')
+    .map((type) => type.trim())
+    .filter(Boolean);
+  const before = url.searchParams.get('before');
 
   let query = supabase
     .from('notifications')
@@ -26,25 +29,33 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (unreadOnly) {
-    query = query.eq('is_read', false);
-  }
+  if (unreadOnly) query = query.eq('is_read', false);
+  if (types.length > 0) query = query.in('type', types);
+  if (before) query = query.lt('created_at', before);
 
-  const { data, error } = await query;
+  const [{ data, error }, { count, error: countError }] = await Promise.all([
+    query,
+    supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.id)
+      .eq('is_read', false),
+  ]);
+
   if (error) return errorResponse(ApiErrors.INTERNAL_ERROR, error.message);
+  if (countError) return errorResponse(ApiErrors.INTERNAL_ERROR, countError.message);
 
-  const unreadCount = (data || []).filter((n: { is_read: boolean }) => !n.is_read).length;
-
-  return successResponse({ notifications: data || [], unread_count: unreadCount });
+  return successResponse({
+    notifications: data || [],
+    unread_count: count ?? 0,
+    has_more: (data || []).length === limit,
+  });
 }
 
-// PATCH /api/notifications — mark all as read for current user
+// PATCH /api/notifications — mark all as read for the current member
 export async function PATCH(request: NextRequest) {
-  const { authenticated, authorized, profile } = await verifyRole(request, [
-    'super_admin', 'admin', 'trip_admin',
-  ]);
-  if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
-  if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
+  const { authenticated, profile } = await verifyAuth(request);
+  if (!authenticated || !profile) return errorResponse(ApiErrors.UNAUTHORIZED);
 
   const { error } = await supabase
     .from('notifications')

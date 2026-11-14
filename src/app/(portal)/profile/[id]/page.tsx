@@ -18,6 +18,8 @@ import TaggedPhotosSection from '@/components/photos/TaggedPhotosSection';
 import MemberFormsSection from '@/components/forms/MemberFormsSection';
 import { ADVENTURE_SCORE_EXPLANATION, calculateAdventureScore } from '@/lib/adventure-score';
 import { WorldMap } from '@/components/map/WorldMap';
+import { BadgePatch } from '@/components/badges/BadgePatch';
+import { yearFromTripName } from '@/lib/badges/badgeArt';
 import { NewsCard } from '@/components/news/NewsCard';
 import type { NewsItem } from '@/lib/news/types';
 
@@ -220,7 +222,7 @@ export default function MemberProfilePage() {
 
         <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div className="flex items-start gap-4">
-            <Avatar src={profile.avatar_url} alt={displayName} size="xl" />
+            <Avatar src={profile.avatar_url} framing={profile.avatar_framing} alt={displayName} size="xl" />
             <div>
               <h1 className="text-3xl font-bold text-brand-cream sm:text-4xl">{displayName}</h1>
               <p className="mt-1 text-brand-tan">&quot;{nickname}&quot;</p>
@@ -327,24 +329,29 @@ export default function MemberProfilePage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {memberBadges.map((badge) => (
               <Card key={`${badge.id}-${badge.trip_name || 'global'}`} className="border-brand-brown/25">
-                <CardContent className="space-y-2 pt-6">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={getBadgeVariant(badge.badge_type)}>
-                      <span className="mr-1">{badge.icon}</span>
-                      {badge.name}
-                    </Badge>
-                    {badge.trip_name && (
-                      <span className="text-xs text-brand-cream/60">{badge.trip_name}</span>
-                    )}
-                  </div>
-                  {badge.description && <p className="text-sm text-brand-cream/70">{badge.description}</p>}
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-brand-cream/55">
-                    {badge.awarded_at && <span>Awarded {formatDate(badge.awarded_at, 'MMM d, yyyy')}</span>}
-                    {badge.trip_slug && (
-                      <Link href={`/trips/${badge.trip_slug}`} className="text-brand-brown hover:text-brand-tan">
-                        View trip
-                      </Link>
-                    )}
+                <CardContent className="flex items-center gap-4">
+                  <BadgePatch
+                    name={badge.name}
+                    badgeType={badge.badge_type}
+                    icon={badge.icon}
+                    year={yearFromTripName(badge.trip_name)}
+                    size={72}
+                    className="drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-brand-cream">{badge.name}</p>
+                      <Badge variant={getBadgeVariant(badge.badge_type)}>{badge.badge_type}</Badge>
+                    </div>
+                    {badge.description && <p className="text-sm text-brand-cream/70">{badge.description}</p>}
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-brand-cream/55">
+                      {badge.awarded_at && <span>Awarded {formatDate(badge.awarded_at, 'MMM d, yyyy')}</span>}
+                      {badge.trip_slug && (
+                        <Link href={`/trips/${badge.trip_slug}`} className="text-brand-brown hover:text-brand-tan">
+                          {badge.trip_name || 'View trip'}
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

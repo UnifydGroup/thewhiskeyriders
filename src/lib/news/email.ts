@@ -118,7 +118,8 @@ async function isNewsEmailEnabled(): Promise<boolean> {
   return data?.news_email_notifications_enabled !== false;
 }
 
-async function resolveRecipientIds(newsItem: NewsItem): Promise<string[]> {
+/** Members who can see a news post: everyone, its tagged riders, or members of its tagged trips. */
+export async function resolveRecipientIds(newsItem: NewsItem): Promise<string[]> {
   const ids = new Set<string>();
   const hasTripTags = newsItem.trip_tags.length > 0;
   const hasMemberTags = newsItem.member_tags.length > 0;

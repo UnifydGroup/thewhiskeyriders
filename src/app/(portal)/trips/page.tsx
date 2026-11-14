@@ -15,6 +15,7 @@ import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
 import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
 import { cn } from '@/lib/utils';
+import { framingStyle } from '@/lib/images/framing';
 
 type NextTripTicker = {
   trip: Trip;
@@ -308,6 +309,7 @@ function TripCard({ trip }: { trip: Trip }) {
               src={trip.cover_image_url}
               alt={trip.name}
               className="w-full h-full object-cover"
+              style={framingStyle(trip.cover_image_framing)}
             />
           )}
           <div className="absolute inset-0 bg-brand-black/40" />

@@ -11,6 +11,7 @@ import {
   X,
   LogOut,
   ShieldCheck,
+  Bell,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -30,6 +31,7 @@ const navItems = [
   { href: '/news', label: 'News', icon: Newspaper },
   { href: '/members', label: 'Members', icon: Users },
   { href: '/profile', label: 'Profile', icon: User },
+  { href: '/notifications', label: 'Notifications', icon: Bell },
   { href: '/gallery', label: 'Gallery', icon: Image },
 ];
 

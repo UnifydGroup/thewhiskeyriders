@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import {
-  verifyRole,
+  verifyAuth,
   errorResponse,
   successResponse,
   ApiErrors,
@@ -13,11 +13,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { authenticated, authorized, profile } = await verifyRole(request, [
-    'super_admin', 'admin', 'trip_admin',
-  ]);
-  if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
-  if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
+  const { authenticated, profile } = await verifyAuth(request);
+  if (!authenticated || !profile) return errorResponse(ApiErrors.UNAUTHORIZED);
 
   const { error } = await supabase
     .from('notifications')
@@ -35,11 +32,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { authenticated, authorized, profile } = await verifyRole(request, [
-    'super_admin', 'admin', 'trip_admin',
-  ]);
-  if (!authenticated) return errorResponse(ApiErrors.UNAUTHORIZED);
-  if (!authorized) return errorResponse(ApiErrors.FORBIDDEN);
+  const { authenticated, profile } = await verifyAuth(request);
+  if (!authenticated || !profile) return errorResponse(ApiErrors.UNAUTHORIZED);
 
   const { error } = await supabase
     .from('notifications')

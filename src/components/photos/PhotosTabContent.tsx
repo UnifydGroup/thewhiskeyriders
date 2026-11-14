@@ -19,6 +19,7 @@ interface Photo {
   uploaded_by: string;
   uploader_name?: string;
   url: string;
+  thumbnail_framing?: unknown;
 }
 
 interface PhotosTabContentProps {

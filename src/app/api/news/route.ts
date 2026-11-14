@@ -18,6 +18,7 @@ import {
   type RawNewsPostRow,
 } from '@/lib/news/server';
 import { dispatchNewsPublicationEmails } from '@/lib/news/email';
+import { notifyNewsPublished } from '@/lib/notifications/server';
 
 const NEWS_ADMIN_ROLES = ['trip_admin', 'admin', 'super_admin'] as const;
 const NEWS_STATUSES = ['draft', 'published', 'archived'] as const;
@@ -486,6 +487,15 @@ export async function POST(request: NextRequest) {
         console.error('[news-email] publish dispatch failed', {
           news_post_id: created.id,
           error: emailError instanceof Error ? emailError.message : emailError,
+        });
+      }
+
+      try {
+        await notifyNewsPublished(newsItem, newsItem.author_id);
+      } catch (notifyError: unknown) {
+        console.error('[news-notify] publish notifications failed', {
+          news_post_id: created.id,
+          error: notifyError instanceof Error ? notifyError.message : notifyError,
         });
       }
     }

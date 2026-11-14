@@ -1,15 +1,18 @@
 import { getInitials } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
+import { framingStyle } from '@/lib/images/framing';
 import React from 'react';
 
 interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   src?: string | null;
   alt: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Focal point + zoom saved with the photo (profiles.avatar_framing). */
+  framing?: unknown;
 }
 
-export function Avatar({ src, alt, size = 'md', className, ...props }: AvatarProps) {
+export function Avatar({ src, alt, size = 'md', framing, className, ...props }: AvatarProps) {
   const sizeStyles = {
     sm: 'w-8 h-8 text-xs',
     md: 'w-10 h-10 text-sm',
@@ -35,6 +38,7 @@ export function Avatar({ src, alt, size = 'md', className, ...props }: AvatarPro
           fill
           unoptimized
           className="object-cover"
+          style={framingStyle(framing)}
         />
       ) : (
         <span className="text-brand-brown">{initials}</span>

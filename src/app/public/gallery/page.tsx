@@ -10,10 +10,12 @@ import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
 import { TripTypeFilter } from '@/components/trip/TripTypeFilter';
 import { countByTripType, isTweener, matchesTripTypeFilter, type TripTypeFilterValue } from '@/lib/trip-type';
 import { cn } from '@/lib/utils';
+import { framingStyle } from '@/lib/images/framing';
 
 interface TripWithCover extends Trip {
   coverPhotoUrl?: string;
   coverMediaType?: 'image' | 'video';
+  coverFraming?: unknown;
 }
 
 export default function GalleryPage() {
@@ -175,6 +177,7 @@ export default function GalleryPage() {
                         src={trip.coverPhotoUrl}
                         alt={trip.name}
                         className="w-full h-full object-cover"
+                        style={framingStyle(trip.coverFraming)}
                       />
                     )
                   )}

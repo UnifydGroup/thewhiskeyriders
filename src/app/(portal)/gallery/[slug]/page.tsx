@@ -2,7 +2,8 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { parsePersonParam } from '@/lib/photos/people';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -26,6 +27,7 @@ interface Photo {
   uploaded_by: string;
   uploader_name?: string;
   url: string;
+  thumbnail_framing?: unknown;
 }
 
 interface ProfileLite {
@@ -42,6 +44,7 @@ interface PhotoQueryRow {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  thumbnail_framing?: unknown;
   created_at: string;
   uploaded_by: string;
   profiles: ProfileLite | ProfileLite[] | null;
@@ -53,6 +56,11 @@ function getUploaderName(profile: ProfileLite | ProfileLite[] | null | undefined
 }
 
 export default function TripGalleryPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // ?person=<id> (or several, comma separated) opens the gallery filtered to those people.
+  const [initialPersonIds] = useState(() => parsePersonParam(searchParams.get('person')));
   const params = useParams();
   const slug = params.slug as string;
   const supabase = useMemo(() => createClient(), []);
@@ -116,6 +124,7 @@ export default function TripGalleryPage() {
           mime_type,
           width,
           height,
+          thumbnail_framing,
           created_at,
           uploaded_by,
           profiles:uploaded_by(full_name, nickname)
@@ -142,6 +151,7 @@ export default function TripGalleryPage() {
           mime_type: photo.mime_type || null,
           width: photo.width,
           height: photo.height,
+          thumbnail_framing: photo.thumbnail_framing ?? null,
           created_at: photo.created_at,
           uploaded_by: photo.uploaded_by,
           uploader_name: getUploaderName(photo.profiles),
@@ -240,6 +250,14 @@ export default function TripGalleryPage() {
           tripId={trip.id}
           isAdmin={isAdmin}
           currentUserId={currentUserId}
+          initialPersonIds={initialPersonIds}
+          onPersonFilterChange={(personIds) => {
+            const params = new URLSearchParams(searchParams.toString());
+            if (personIds.length > 0) params.set('person', personIds.join(','));
+            else params.delete('person');
+            const query = params.toString();
+            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+          }}
           onPhotoDelete={(photoId) => {
             setPhotos((previous) => previous.filter((photo) => photo.id !== photoId));
           }}

@@ -24,6 +24,7 @@ interface Photo {
   uploaded_by: string;
   uploader_name?: string;
   url: string;
+  thumbnail_framing?: unknown;
 }
 
 export default function TripGalleryPage() {

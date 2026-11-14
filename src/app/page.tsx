@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { TripTypeBadge } from '@/components/trip/TripTypeBadge';
+import { framingStyle } from '@/lib/images/framing';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -46,7 +47,7 @@ async function getTrips() {
     
     const { data } = await supabase
       .from('trips')
-      .select('id, slug, name, destination, cover_image_url, trip_type')
+      .select('id, slug, name, destination, cover_image_url, cover_image_framing, trip_type')
       .order('start_date', { ascending: false })
       .limit(12);
     
@@ -211,11 +212,14 @@ export default async function Home() {
                   {/* Trip Image */}
                   <div className="relative h-64 bg-brand-black/50 overflow-hidden">
                     {trip.cover_image_url && (
-                      <img
-                        src={trip.cover_image_url}
-                        alt={trip.name}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
+                      <div className="h-full w-full transition-transform duration-300 group-hover:scale-110">
+                        <img
+                          src={trip.cover_image_url}
+                          alt={trip.name}
+                          className="w-full h-full object-cover"
+                          style={framingStyle(trip.cover_image_framing)}
+                        />
+                      </div>
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-brand-black via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity duration-300" />
                     <div className="absolute top-3 left-3">
