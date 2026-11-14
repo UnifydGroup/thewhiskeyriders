@@ -131,6 +131,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         .eq('trip_id', tripId)
         .order('income_date', { ascending: false });
       const allIncome = incomeData ?? [];
+      const liveCategoryIds = new Set<string>(categories.map((c: any) => c.id));
       manualIncomeEntries = hasAdminBudgetAccess ? allIncome : [];
       for (const e of allIncome) {
         let note: { transfer_link_id?: unknown; budget_category_id?: unknown } = {};
@@ -138,7 +139,11 @@ export async function GET(request: NextRequest, { params }: Params) {
         const isTransfer = e.category === 'transfer' || Boolean(note.transfer_link_id);
         if (isTransfer) continue;
         const amountAud = toNumber(e.amount_aud);
-        const refundCategoryId = e.category === 'refund' && typeof note.budget_category_id === 'string' ? note.budget_category_id : null;
+        // Only net against categories that still exist; a refund whose category was deleted
+        // falls back to counting as ordinary (uncategorised) income.
+        const refundCategoryId = e.category === 'refund' && typeof note.budget_category_id === 'string' && liveCategoryIds.has(note.budget_category_id)
+          ? note.budget_category_id
+          : null;
         if (refundCategoryId) {
           totalRefundsToCategoriesAud += amountAud;
           totalSpentAud -= amountAud;
